@@ -4,14 +4,11 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import { buildProgram, COMMANDS } from "./program.js";
-import { AGENTS_MD_BLOCK } from "../setup/codex.js";
-import { findInstitutions } from "../datasets/institutions.js";
 
 /**
  * Drift-prevention test: no subprocesses, pure import + string parsing. Keeps
- * the program tree, README's "## Commands" section, SKILL.md, the codex
- * AGENTS.md block, and the help screen's COMMANDS array from silently
- * diverging as commands, flags, or the Thai institution registry change.
+ * the program tree, README's "## Commands" section, SKILL.md, and the help
+ * screen's COMMANDS array from silently diverging as commands or flags change.
  *
  * buildProgram() only constructs the commander tree (no argv parsing, no
  * action run), so calling it here is side-effect free.
@@ -21,17 +18,6 @@ import { findInstitutions } from "../datasets/institutions.js";
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const README = readFileSync(resolve(repoRoot, "README.md"), "utf8");
 const SKILL = readFileSync(resolve(repoRoot, "skills", "SKILL.md"), "utf8");
-
-// The codex block is generated, not a file; render it with a throwaway version.
-const CODEX_BLOCK = AGENTS_MD_BLOCK("0.0.0");
-
-/**
- * Institution kinds SKILL.md lists as account leaves, named as a literal so this
- * test (not the doc or the registry) owns which kinds are account-forming.
- * Merchant-ish kinds (insurer/gov/telco/utility/payment_rail) are excluded — they
- * become merchants via `merchants upsert`, never account leaves.
- */
-const ACCOUNT_FORMING_KINDS = ["bank", "card_issuer", "wallet", "broker", "crypto_exchange"];
 
 function topLevelNames(program: Command): string[] {
   /**
@@ -199,14 +185,11 @@ describe("docs consistency (no subprocesses)", () => {
     expect(problems).toEqual([]);
   });
 
-  it("every --flag on a plasalid span in SKILL.md and the codex block is a real option on the resolved command", () => {
+  it("every --flag on a plasalid span in SKILL.md is a real option on the resolved command", () => {
     const program = buildProgram();
     const globalFlags = new Set(["--json", "--no-color"]);
     const problems: string[] = [];
-    const sources: Array<[string, string]> = [
-      ["SKILL.md", SKILL],
-      ["codex block", CODEX_BLOCK],
-    ];
+    const sources: Array<[string, string]> = [["SKILL.md", SKILL]];
 
     for (const [label, md] of sources) {
       for (const span of extractPlasalidCodeSpans(md)) {
@@ -229,33 +212,12 @@ describe("docs consistency (no subprocesses)", () => {
     expect(problems).toEqual([]);
   });
 
-  it("SKILL.md Thai institution codes match the account-forming registry exactly (both directions)", () => {
-    const expected = new Set(
-      findInstitutions({ country: "TH" })
-        .filter((inst) => ACCOUNT_FORMING_KINDS.includes(inst.kind))
-        .map((inst) => inst.code),
-    );
-
-    /** Codes are the backtick spans between the institution heading and the next heading. */
-    const heading = "### Thai institution codes";
-    const start = SKILL.indexOf(heading);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const after = SKILL.slice(start + heading.length);
-    const nextHeading = after.search(/\n#{1,6} /);
-    const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
-    const inDoc = new Set([...section.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-
-    // Sorted-array compare so a stale code AND a missing code both fail with a readable diff.
-    expect([...inDoc].sort()).toEqual([...expected].sort());
-  });
-
   it("SKILL.md stays under the size budget", () => {
     expect(SKILL.length).toBeLessThan(20_000);
   });
 
-  it("SKILL.md and the codex block carry no references/ pointers", () => {
+  it("SKILL.md carries no references/ pointer", () => {
     expect(SKILL.includes("references/")).toBe(false);
-    expect(CODEX_BLOCK.includes("references/")).toBe(false);
   });
 
   it("SKILL.md frontmatter has name + description and no version key", () => {

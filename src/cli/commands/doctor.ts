@@ -3,11 +3,11 @@ import type Database from "libsql";
 import chalk from "chalk";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { getConfigPath, getDataDir } from "../../config.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
+import { SKILL_HOSTS } from "../../setup/hosts.js";
 import { EXIT, currentMode, emit, emitList, runAction, type Column } from "../output.js";
 import { errorMessage } from "../../lib/result.js";
 
@@ -91,26 +91,38 @@ async function runChecks(): Promise<Check[]> {
   return checks;
 }
 
-/** Informational (never a HARD_CHECK): whether the skill pack is installed
- *  and its VERSION matches this CLI. Prefers cwd (./.claude) over global. */
+// Informational only; never a HARD_CHECK.
 function skillPackCheck(): Check {
-  const candidates = [
-    join(process.cwd(), ".claude", "skills", "plasalid", "VERSION"),
-    join(homedir(), ".claude", "skills", "plasalid", "VERSION"),
-  ];
-  const found = candidates.find((p) => existsSync(p));
+  const candidates: { host: string; scope: string; path: string }[] = [];
+  for (const host of SKILL_HOSTS) {
+    candidates.push({
+      host: host.id,
+      scope: "project",
+      path: join(resolve(process.cwd(), host.projectDir), "plasalid", "VERSION"),
+    });
+  }
+  for (const host of SKILL_HOSTS) {
+    candidates.push({
+      host: host.id,
+      scope: "global",
+      path: join(host.globalDir(), "plasalid", "VERSION"),
+    });
+  }
+
+  const found = candidates.find((c) => existsSync(c.path));
   if (!found) return { name: "skill_pack", ok: true, detail: "not installed" };
 
-  const installed = readFileSync(found, "utf8").trim();
+  const installed = readFileSync(found.path, "utf8").trim();
+  const where = `${found.host}, ${found.scope}`;
   const cli = getVersion();
   if (installed !== cli) {
     return {
       name: "skill_pack",
       ok: false,
-      detail: `installed ${installed}, cli ${cli} — refresh the skill (plasalid setup --force) or upgrade the CLI (npm install -g plasalid@latest)`,
+      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (plasalid setup --force) or upgrade the CLI (npm install -g plasalid@latest)`,
     };
   }
-  return { name: "skill_pack", ok: true, detail: `installed ${installed}` };
+  return { name: "skill_pack", ok: true, detail: `installed ${installed} (${where})` };
 }
 
 const CHECK_COLUMNS: Column<Check>[] = [

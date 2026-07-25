@@ -1,16 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  installSkillPack,
-  getVersion,
-  skillMd,
-  SkillPackVersionError,
-} from "./install.js";
-import { AGENTS_MD_BLOCK } from "./codex.js";
+import { installSkill, getVersion, skillMd, SkillPackVersionError } from "./install.js";
+import { SKILL_HOSTS } from "./hosts.js";
 import { createSandbox, type Sandbox } from "../lib/sandbox.js";
 
 function tmp(prefix: string): string {
@@ -68,41 +70,77 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
   });
 });
 
-describe("AGENTS_MD_BLOCK", () => {
-  it("is wrapped in versioned begin/end markers", () => {
-    const block = AGENTS_MD_BLOCK("9.9.9");
-    expect(block).toContain("<!-- BEGIN plasalid-skill v9.9.9 -->");
-    expect(block.trimEnd().endsWith("<!-- END plasalid-skill -->")).toBe(true);
+// Compare through realpath: macOS tmpdir is a symlink (/var -> /private/var),
+// which process.cwd() canonicalizes but the raw tmp string does not.
+const HOST_PROJECT_DIRS: { host: string; rel: string[] }[] = [
+  { host: "agents", rel: [".agents", "skills", "plasalid"] },
+  { host: "claude", rel: [".claude", "skills", "plasalid"] },
+  { host: "kimi", rel: [".skills", "plasalid"] },
+];
+
+describe("SKILL_HOSTS registry", () => {
+  it("resolves each host's global skills dir to its documented location (asymmetric globals included)", () => {
+    const home = homedir();
+    const byId = Object.fromEntries(SKILL_HOSTS.map((h) => [h.id, h]));
+    expect(Object.keys(byId).sort()).toEqual(["agents", "claude", "kimi"]);
+    expect(byId.agents.globalDir()).toBe(join(home, ".agents", "skills"));
+    expect(byId.claude.globalDir()).toBe(join(home, ".claude", "skills"));
+    // kimi's project dir is its own, but its global reads the shared dir.
+    expect(byId.kimi.globalDir()).toBe(join(home, ".agents", "skills"));
   });
 });
 
-describe("installSkillPack — claude", () => {
-  it("writes SKILL.md and VERSION; result points at the skill dir", () => {
-    const dir = tmp("plasalid-install-claude-");
+describe("installSkill — host project dirs (cwd)", () => {
+  for (const { host, rel } of HOST_PROJECT_DIRS) {
+    it(`${host} installs under ${rel.join("/")}`, () => {
+      const cwd = tmp(`plasalid-install-${host}-`);
+      const prevCwd = process.cwd();
+      try {
+        process.chdir(cwd);
+        const target = installSkill({ host });
+
+        expect(target.kind).toBe(host);
+        expect(target.version).toBe(getVersion());
+        expect(realpathSync(target.path)).toBe(realpathSync(join(cwd, ...rel)));
+
+        expect(existsSync(join(target.path, "SKILL.md"))).toBe(true);
+        expect(readFileSync(join(target.path, "VERSION"), "utf8").trim()).toBe(getVersion());
+        const fm = parseFrontmatter(readFileSync(join(target.path, "SKILL.md"), "utf8"));
+        expect(fm.name).toBe("plasalid");
+      } finally {
+        process.chdir(prevCwd);
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("defaults to the shared .agents/skills host when none is given", () => {
+    const cwd = tmp("plasalid-install-default-");
+    const prevCwd = process.cwd();
     try {
-      const result = installSkillPack({ claude: true, dir });
-      const skillDir = join(dir, "skills", "plasalid");
-
-      expect(result.installed).toHaveLength(1);
-      expect(result.installed[0]).toMatchObject({ kind: "claude", path: skillDir, version: getVersion() });
-
-      expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
-      expect(existsSync(join(skillDir, "VERSION"))).toBe(true);
-
-      expect(readFileSync(join(skillDir, "VERSION"), "utf8").trim()).toBe(getVersion());
-      const fm = parseFrontmatter(readFileSync(join(skillDir, "SKILL.md"), "utf8"));
-      expect(fm.name).toBe("plasalid");
+      process.chdir(cwd);
+      const target = installSkill({});
+      expect(target.kind).toBe("agents");
+      expect(realpathSync(target.path)).toBe(
+        realpathSync(join(cwd, ".agents", "skills", "plasalid")),
+      );
+      expect(existsSync(join(target.path, "SKILL.md"))).toBe(true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      process.chdir(prevCwd);
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
+});
 
-  it("defaults to claude when neither target flag is given", () => {
-    const dir = tmp("plasalid-install-default-");
+describe("installSkill — --dir base and version guard", () => {
+  it("--dir D lands the pack at D/skills/plasalid with kind 'dir'", () => {
+    const dir = tmp("plasalid-install-dir-");
     try {
-      const result = installSkillPack({ dir });
-      expect(result.installed.map((t) => t.kind)).toEqual(["claude"]);
-      expect(existsSync(join(dir, "skills", "plasalid", "SKILL.md"))).toBe(true);
+      const target = installSkill({ dir });
+      const skillDir = join(dir, "skills", "plasalid");
+      expect(target).toMatchObject({ kind: "dir", path: skillDir, version: getVersion() });
+      expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
+      expect(readFileSync(join(skillDir, "VERSION"), "utf8").trim()).toBe(getVersion());
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -111,9 +149,11 @@ describe("installSkillPack — claude", () => {
   it("is idempotent when re-installed at the same version", () => {
     const dir = tmp("plasalid-install-idem-");
     try {
-      installSkillPack({ claude: true, dir });
-      expect(() => installSkillPack({ claude: true, dir })).not.toThrow();
-      expect(readFileSync(join(dir, "skills", "plasalid", "VERSION"), "utf8").trim()).toBe(getVersion());
+      installSkill({ dir });
+      expect(() => installSkill({ dir })).not.toThrow();
+      expect(readFileSync(join(dir, "skills", "plasalid", "VERSION"), "utf8").trim()).toBe(
+        getVersion(),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -122,13 +162,13 @@ describe("installSkillPack — claude", () => {
   it("throws SkillPackVersionError on a version clash without --force, succeeds with it", () => {
     const dir = tmp("plasalid-install-clash-");
     try {
-      installSkillPack({ claude: true, dir });
+      installSkill({ dir });
       const versionPath = join(dir, "skills", "plasalid", "VERSION");
       writeFileSync(versionPath, "0.0.1\n"); // simulate an older install
 
       let err: unknown;
       try {
-        installSkillPack({ claude: true, dir });
+        installSkill({ dir });
       } catch (e) {
         err = e;
       }
@@ -136,53 +176,8 @@ describe("installSkillPack — claude", () => {
       expect((err as SkillPackVersionError).installedVersion).toBe("0.0.1");
       expect((err as SkillPackVersionError).cliVersion).toBe(getVersion());
 
-      expect(() => installSkillPack({ claude: true, dir, force: true })).not.toThrow();
+      expect(() => installSkill({ dir, force: true })).not.toThrow();
       expect(readFileSync(versionPath, "utf8").trim()).toBe(getVersion());
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("installSkillPack — codex", () => {
-  it("creates AGENTS.md with a single block when none exists", () => {
-    const dir = tmp("plasalid-codex-create-");
-    try {
-      const result = installSkillPack({ codex: true, dir });
-      const agentsPath = join(dir, "AGENTS.md");
-      expect(result.installed).toMatchObject([{ kind: "codex", path: agentsPath }]);
-
-      const content = readFileSync(agentsPath, "utf8");
-      expect((content.match(/BEGIN plasalid-skill/g) ?? []).length).toBe(1);
-      expect(content).toContain("END plasalid-skill");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("appends to an existing AGENTS.md without clobbering prior content", () => {
-    const dir = tmp("plasalid-codex-append-");
-    try {
-      const agentsPath = join(dir, "AGENTS.md");
-      writeFileSync(agentsPath, "# My project\n\nExisting guidance.\n");
-      installSkillPack({ codex: true, dir });
-
-      const content = readFileSync(agentsPath, "utf8");
-      expect(content).toContain("Existing guidance.");
-      expect((content.match(/BEGIN plasalid-skill/g) ?? []).length).toBe(1);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("replaces the block in place on re-install (no duplicate blocks)", () => {
-    const dir = tmp("plasalid-codex-replace-");
-    try {
-      installSkillPack({ codex: true, dir });
-      installSkillPack({ codex: true, dir });
-      const content = readFileSync(join(dir, "AGENTS.md"), "utf8");
-      expect((content.match(/BEGIN plasalid-skill/g) ?? []).length).toBe(1);
-      expect((content.match(/END plasalid-skill/g) ?? []).length).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -245,18 +240,45 @@ describe("setup CLI (subprocess)", () => {
   );
 
   it(
-    "--dir installs the pack and reports it as JSON",
+    "--dir installs the pack and reports it as JSON (kind 'dir')",
     async () => {
       const dir = tmp("plasalid-cli-install-");
       try {
         const res = await runCli(["setup", "--dir", dir, "--json"]);
         expect(res.code).toBe(0);
         const parsed = JSON.parse(res.stdout.trim());
-        expect(parsed.installed[0]).toMatchObject({ kind: "claude", path: join(dir, "skills", "plasalid") });
+        expect(parsed.installed[0]).toMatchObject({
+          kind: "dir",
+          path: join(dir, "skills", "plasalid"),
+        });
         expect(existsSync(join(dir, "skills", "plasalid", "SKILL.md"))).toBe(true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    },
+    30000,
+  );
+
+  it(
+    "--global installs under the shared home skills dir",
+    async () => {
+      const res = await runCli(["setup", "--global", "--json"]);
+      expect(res.code).toBe(0);
+      const parsed = JSON.parse(res.stdout.trim());
+      const expected = join(sandbox.home, ".agents", "skills", "plasalid");
+      expect(parsed.installed[0]).toMatchObject({ kind: "agents", path: expected });
+      expect(existsSync(join(expected, "SKILL.md"))).toBe(true);
+    },
+    30000,
+  );
+
+  it(
+    "an unknown --host fails with USAGE (exit 2) and writes nothing",
+    async () => {
+      const res = await runCli(["setup", "--host", "bogus", "--json"]);
+      expect(res.code).toBe(2);
+      const err = JSON.parse(res.stderr.trim());
+      expect(err.error.code).toBe("E_USAGE");
     },
     30000,
   );

@@ -1,34 +1,26 @@
 import { createRequire } from "module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { dirname, join, resolve } from "path";
-import { AGENTS_MD_BLOCK, CODEX_BLOCK_RE } from "./codex.js";
+import { join, resolve } from "path";
+import { findHost, DEFAULT_HOST } from "./hosts.js";
 
 /**
- * Installs the skill pack that lets external agent CLIs (Claude Code, codex)
- * drive the plasalid harness. Pure filesystem work; the CLI command wraps
- * this and maps thrown errors onto exit codes. The Claude skill is a
- * checked-in file (skills/SKILL.md) copied verbatim — no template rendering.
+ * Filesystem installer for the skill pack. Every host receives the checked-in
+ * skills/SKILL.md verbatim; no templating, no per-host wrapper.
  */
 
-type InstallKind = "claude" | "codex";
-
-interface InstalledTarget {
-  kind: InstallKind;
+export interface InstalledTarget {
+  /** The host id it landed under, or "dir" for an explicit --dir install. */
+  kind: string;
   path: string;
   version: string;
 }
 
-interface InstallResult {
-  installed: InstalledTarget[];
-}
-
 export interface InstallOptions {
-  claude?: boolean;
-  codex?: boolean;
-  /** Install to the home dir (~/.claude) rather than the cwd (./.claude). */
+  /** Target host id; defaults to DEFAULT_HOST. */
+  host?: string;
+  /** Install under the host's home skills dir rather than the cwd. */
   global?: boolean;
-  /** Override the base directory: <dir>/skills/plasalid for claude, <dir>/AGENTS.md for codex. */
+  /** Explicit base dir: the pack lands at <dir>/skills/plasalid, ignoring the host. */
   dir?: string;
   /** Overwrite an installed skill dir whose VERSION differs. */
   force?: boolean;
@@ -69,20 +61,19 @@ export function skillMd(): string {
   return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
 }
 
-/** Absolute path to the Claude skill dir for the given options. */
-function claudeSkillDir(opts: InstallOptions): string {
-  const base = opts.dir
-    ? resolve(opts.dir)
-    : opts.global
-      ? join(homedir(), ".claude")
-      : join(process.cwd(), ".claude");
-  return join(base, "skills", "plasalid");
-}
-
-/** Absolute path to the codex AGENTS.md for the given options. */
-function codexAgentsPath(opts: InstallOptions): string {
-  const base = opts.dir ? resolve(opts.dir) : process.cwd();
-  return join(base, "AGENTS.md");
+/**
+ * The final `plasalid` skill dir for the given options.
+ *   --dir D  → resolve(D)/skills/plasalid  (host-agnostic; D is a bare base)
+ *   host     → <cwd or home>/<host skills dir>/plasalid  (the dir already ends in skills)
+ */
+function resolveTarget(opts: InstallOptions): { kind: string; dir: string } {
+  if (opts.dir) {
+    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "plasalid") };
+  }
+  const host = findHost(opts.host ?? DEFAULT_HOST);
+  if (!host) throw new Error(`unknown skill host: ${opts.host}`);
+  const base = opts.global ? host.globalDir() : resolve(process.cwd(), host.projectDir);
+  return { kind: host.id, dir: join(base, "plasalid") };
 }
 
 function readVersionFile(skillDir: string): string | null {
@@ -91,61 +82,20 @@ function readVersionFile(skillDir: string): string | null {
   return readFileSync(versionPath, "utf8").trim();
 }
 
-function installClaude(opts: InstallOptions, version: string): InstalledTarget {
-  const skillDir = claudeSkillDir(opts);
+/** Idempotent at the same version; throws SkillPackVersionError on a clash without --force. */
+export function installSkill(opts: InstallOptions = {}): InstalledTarget {
+  const version = getVersion();
+  const { kind, dir } = resolveTarget(opts);
 
-  const existing = readVersionFile(skillDir);
+  const existing = readVersionFile(dir);
   if (existing !== null && existing !== version && !opts.force) {
-    throw new SkillPackVersionError({
-      installedVersion: existing,
-      cliVersion: version,
-      path: skillDir,
-    });
+    throw new SkillPackVersionError({ installedVersion: existing, cliVersion: version, path: dir });
   }
   // existing === version -> silent idempotent overwrite; different + force -> overwrite.
 
-  mkdirSync(skillDir, { recursive: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), skillMd());
+  writeFileSync(join(dir, "VERSION"), version + "\n");
 
-  writeFileSync(join(skillDir, "SKILL.md"), skillMd());
-  writeFileSync(join(skillDir, "VERSION"), version + "\n");
-
-  return { kind: "claude", path: skillDir, version };
-}
-
-function installCodex(opts: InstallOptions, version: string): InstalledTarget {
-  const agentsPath = codexAgentsPath(opts);
-  const block = AGENTS_MD_BLOCK(version);
-
-  let next: string;
-  if (existsSync(agentsPath)) {
-    const current = readFileSync(agentsPath, "utf8");
-    if (CODEX_BLOCK_RE.test(current)) {
-      // Replace the existing block in place (any version) — keeps AGENTS.md free
-      // of duplicate plasalid blocks across re-installs.
-      next = current.replace(CODEX_BLOCK_RE, block);
-    } else {
-      const sep = current.endsWith("\n") ? "\n" : "\n\n";
-      next = current + sep + block + "\n";
-    }
-  } else {
-    mkdirSync(dirname(agentsPath), { recursive: true });
-    next = block + "\n";
-  }
-  writeFileSync(agentsPath, next);
-
-  return { kind: "codex", path: agentsPath, version };
-}
-
-/** Installs the skill pack (defaults to Claude when neither target is
- *  requested); throws SkillPackVersionError on a version clash without --force. */
-export function installSkillPack(opts: InstallOptions = {}): InstallResult {
-  const version = getVersion();
-
-  const wantClaude = opts.claude || (!opts.claude && !opts.codex);
-  const wantCodex = !!opts.codex;
-
-  const installed: InstalledTarget[] = [];
-  if (wantClaude) installed.push(installClaude(opts, version));
-  if (wantCodex) installed.push(installCodex(opts, version));
-  return { installed };
+  return { kind, path: dir, version };
 }

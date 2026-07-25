@@ -1,22 +1,26 @@
 import type { Command } from "commander";
 import { currentMode, emit, fail, runAction } from "../output.js";
 import {
-  installSkillPack,
+  installSkill,
   skillMd,
   SkillPackVersionError,
   type InstallOptions,
 } from "../../setup/install.js";
+import { SKILL_HOSTS, findHost, DEFAULT_HOST } from "../../setup/hosts.js";
 
 interface SetupOpts {
-  claude?: boolean;
-  codex?: boolean;
+  host?: string;
   global?: boolean;
   dir?: string;
   force?: boolean;
   print?: boolean;
 }
 
-async function setupSkillPack(opts: SetupOpts): Promise<void> {
+function hostIds(): string {
+  return SKILL_HOSTS.map((h) => h.id).join(", ");
+}
+
+async function setupSkill(opts: SetupOpts): Promise<void> {
   // --print dumps the checked-in SKILL.md so a human/agent can inspect it
   // without touching the filesystem. It is markdown, not NDJSON, even under --json.
   if (opts.print) {
@@ -26,17 +30,21 @@ async function setupSkillPack(opts: SetupOpts): Promise<void> {
     return;
   }
 
+  const host = opts.host ?? DEFAULT_HOST;
+  if (!findHost(host)) {
+    fail("USAGE", `unknown --host ${host}`, { hint: `known hosts: ${hostIds()}` });
+  }
+
   const installOpts: InstallOptions = {
-    claude: opts.claude,
-    codex: opts.codex,
+    host,
     global: opts.global,
     dir: opts.dir,
     force: opts.force,
   };
 
-  let result;
+  let target;
   try {
-    result = installSkillPack(installOpts);
+    target = installSkill(installOpts);
   } catch (err) {
     if (err instanceof SkillPackVersionError) {
       fail("INVALID", err.message, {
@@ -53,23 +61,20 @@ async function setupSkillPack(opts: SetupOpts): Promise<void> {
 
   const mode = currentMode();
   if (mode.json) {
-    emit({ installed: result.installed });
+    emit({ installed: [target] });
   } else {
-    for (const t of result.installed) {
-      process.stdout.write(`${t.kind}\t${t.path}\t${t.version}\n`);
-    }
+    process.stdout.write(`${target.kind}\t${target.path}\t${target.version}\n`);
   }
 }
 
 export function registerSetup(program: Command): void {
   program
     .command("setup")
-    .description("Install the skill pack so external agent CLIs can drive the harness")
-    .option("--claude", "install the Claude Code skill (default when no target is given)")
-    .option("--codex", "install/patch the codex AGENTS.md block")
-    .option("--global", "install to the home dir (~/.claude) instead of the cwd (./.claude)")
+    .description("Install the skill for an agent CLI")
+    .option("--host <id>", `target agent host: ${hostIds()}`, DEFAULT_HOST)
+    .option("--global", "install under the host's home skills dir instead of the cwd")
     .option("--dir <path>", "override the install base directory")
     .option("--force", "overwrite an installed skill dir whose version differs")
     .option("--print", "print SKILL.md to stdout as raw markdown and exit (ignores --json)")
-    .action(runAction(setupSkillPack));
+    .action(runAction(setupSkill));
 }
