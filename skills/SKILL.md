@@ -9,11 +9,11 @@ You drive `plasalid`, a deterministic CLI over a local double-entry ledger — n
 
 ## Setup: get plasalid running
 
-- **Detect:** `plasalid --version` prints a version if plasalid is installed; skip Install/First-run and go to Version check.
-- **Install:** check `node --version` (>= 18); if missing, STOP and ask the human to install it (nodejs.org or Homebrew). Then `npm install -g plasalid`. EACCES -> `npm install -g --prefix "$HOME/.npm-global" plasalid`, then use `$HOME/.npm-global/bin/plasalid`.
-- **First run:** skip when `plasalid status --json` shows `"configured":true`. Otherwise `plasalid config --generate-key --json` (creates ~/.plasalid: config, encrypted db, data dir), then `plasalid doctor --json` — every check must pass.
-- **Statements in:** the data directory path is `dataDir` in `plasalid config show --json`; `plasalid data` opens it in the file manager. Sandboxed/VM: ask the human to upload it there.
-- **Version check:** compare `plasalid --version` with `npm view plasalid version`; behind -> `npm install -g plasalid@latest` (never downgrade); registry unreachable -> proceed. `plasalid <noun> --help` outranks this doc on any disagreement. `plasalid doctor --json` also flags skill drift; `plasalid setup --force` refreshes it.
+- **Detect:** `plasalid --version` prints a version when installed; if it does, skip to Version check.
+- **Install:** needs `node --version` >= 18; if missing, STOP and ask the human to install Node. Then `npm install -g plasalid`. On EACCES: `npm install -g --prefix "$HOME/.npm-global" plasalid`, then use `$HOME/.npm-global/bin/plasalid`.
+- **First run:** skip when `plasalid status --json` shows `"configured":true`. Otherwise `plasalid config --generate-key --json` (creates ~/.plasalid), then `plasalid doctor --json`; every check must pass.
+- **Statements in:** `dataDir` from `plasalid config show --json` is where PDFs go; `plasalid data` opens it. Sandboxed/VM: ask the human to upload there.
+- **Version check:** compare `plasalid --version` with `npm view plasalid version`; behind -> `npm install -g plasalid@latest` (never downgrade), registry unreachable -> proceed. `plasalid <noun> --help` outranks this doc. `plasalid doctor --json` flags skill drift; `plasalid setup --force` refreshes it.
 
 ## Golden rules
 
@@ -187,16 +187,4 @@ Account roots + suggested subtypes — build colon-paths under each root:
 - **expense** — food, transport, utilities, rent, housing, healthcare, entertainment, shopping, subscriptions, education, travel, fees_and_interest, tax, insurance, other
 - **equity** — opening-balance, conversion:<ccy> (opening balances and FX legs)
 
-Account-forming institution codes are stable handles — use each as the account leaf (asset:bank:kbank, liability:credit_card:ktc). Insurers, government offices, telcos, and utilities are never accounts; add them as merchants via merchants upsert instead.
-
-### Thai institution codes
-
-**Banks** · `KBANK` Kasikornbank · `SCB` Siam Commercial Bank · `BBL` Bangkok Bank · `KTB` Krungthai Bank · `BAY` Krungsri · `TTB` TMBThanachart · `UOB-TH` UOB Thailand · `CIMB-TH` CIMB Thai · `GHB` Government Housing Bank · `GSB` Government Savings Bank · `LH-BANK` Land and Houses Bank · `KKP` Kiatnakin Phatra · `TISCO` TISCO Bank · `IBT` Islamic Bank of Thailand · `ICBC-TH` ICBC (Thai) · `BAAC` Agri. Cooperatives Bank
-
-**Card issuers** · `KTC` Krungthai Card · `AEON` AEON Thana Sinsap · `FIRSTCHOICE` Krungsri First Choice · `CITI-TH` Citibank Thailand (historical) · `AMEX-TH` American Express · `CARDX` CardX · `DINERS` Diners Club Thailand · `UOB-TH` UOB Thailand cards
-
-**E-wallets** · `TRUEMONEY` TrueMoney Wallet · `LINEPAY` Rabbit LINE Pay · `SHOPEEPAY` ShopeePay · `GRABPAY` GrabPay · `DOLFIN` Dolfin Wallet · `MPAY` mPay · `PAOTANG` Paotang
-
-**Brokers** · `INNOVESTX` InnovestX · `BLS` Bualuang Sec. · `KS` Kasikorn Sec. · `KGI-TH` KGI Sec. · `MAYBANK-SEC` Maybank Sec. · `ASP` Asia Plus Sec. · `TISCO-SEC` TISCO Sec. · `KSS` Krungsri Sec. · `KKPS` Kiatnakin Phatra Sec. · `LH-SEC` Land & Houses Sec. · `FINANSIA` Finansia Syrus · `YUANTA-TH` Yuanta Sec. · `DBSVICKERS` DBS Vickers · `KTBST` Krungthai Xspring
-
-**Crypto exchanges** · `BITKUB` Bitkub · `UPBIT-TH` Upbit Thailand · `ORBIX` Orbix Trade · `GULF-BINANCE` Binance Thailand · `KUCOIN-TH` KuCoin Thailand · `WAANX` WaanX · `TDX` Thai Digital Assets Exchange · `GMO-Z-EX` Z.com EX · `ZIPMEX` Zipmex (defunct)
+Institution codes and country defaults are data, not literals here: `plasalid datasets institutions --country <c> [--kind <k>] --json` lists a country's codes, `plasalid datasets defaults --json` its locale and currency. Use a code as the account leaf and bank field (asset:bank:kbank, liability:credit_card:ktc). Only banks, card issuers, wallets, brokers, and exchanges form accounts; insurers, telcos, and utilities are merchants, added with `merchants upsert`.

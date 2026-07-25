@@ -22,21 +22,21 @@ import { registerDatasets } from "./commands/datasets.js";
 import { registerData } from "./commands/data.js";
 
 export const COMMANDS = [
-  { name: "status", desc: "Harness status: config, database, ledger counts, net worth (default)" },
+  { name: "status", desc: "Status: config, database, ledger counts, net worth (default)" },
   { name: "doctor", desc: "Diagnose the harness environment" },
-  { name: "setup", desc: "Install the skill pack for external agent CLIs (Claude Code, codex)" },
-  { name: "config", desc: "Configure the harness (converge/init) and show configuration" },
-  { name: "ingest", desc: "Ingest pipeline: list/prepare/commit/done/fail" },
-  { name: "files", desc: "Browse ingested files (list/show/drop)" },
+  { name: "setup", desc: "Install the skill for an agent CLI (--host <id> | --dir <path>)" },
+  { name: "config", desc: "Configuration" },
+  { name: "ingest", desc: "Ingest pipeline: list / prepare / commit / done / fail" },
+  { name: "files", desc: "Browse ingested files (list / show / drop)" },
   { name: "vault", desc: "Manage file-password patterns for encrypted statements" },
-  { name: "transactions", desc: "Transactions: list/show/add/update/delete/recategorize/dedupe" },
+  { name: "transactions", desc: "Transactions: list / show / add / update / delete / recategorize / dedupe" },
   { name: "accounts", desc: "Manage the chart of accounts" },
   { name: "merchants", desc: "Manage merchants and their default accounts" },
   { name: "questions", desc: "List, answer, and defer open questions" },
-  { name: "report", desc: "Income/expenses/net over a date range (net worth: plasalid status)" },
+  { name: "report", desc: "Income, expenses, and net" },
   { name: "notes", desc: "Manage freeform notes" },
-  { name: "datasets", desc: "Reference datasets: plasalid datasets [name] (institutions, defaults)" },
-  { name: "data", desc: "Open the data folder in your OS file explorer (alias: open)" },
+  { name: "datasets", desc: "Reference datasets" },
+  { name: "data", desc: "Open the data folder in file explorer (alias: open)" },
 ];
 
 const GLOBAL_OPTIONS = [

@@ -131,7 +131,18 @@ async function mergeMerchants(opts: MergeMerchantsOpts): Promise<void> {
 }
 
 export function registerMerchants(program: Command): void {
-  const merchants = program.command("merchants").description("Manage merchants");
+  const merchants = program
+    .command("merchants")
+    .description("Manage merchants and their default accounts")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: manages merchants and their default accounts; an alias maps raw bank text to a merchant.",
+        "Typical flow: resolve a descriptor; if unknown, upsert with a name and alias, then set-default.",
+        "Example: plasalid merchants resolve --descriptor \"POS STARBUCKS\" --json",
+      ].join("\n"),
+    );
 
   merchants
     .command("list")

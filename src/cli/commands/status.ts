@@ -239,7 +239,7 @@ function stripBanner(): string {
 export function registerStatus(program: Command): void {
   program
     .command("status")
-    .description("Show harness status: config, database, ledger counts, net worth")
+    .description("Status: config, database, ledger counts, net worth")
     .option("--no-redact", "skip PII redaction (on by default)")
     .action(runAction(showStatus));
 }

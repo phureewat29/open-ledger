@@ -478,7 +478,16 @@ async function recategorizeTransactions(opts: Record<string, unknown>): Promise<
 export function registerTransactions(program: Command): void {
   const transactions = program
     .command("transactions")
-    .description("Transactions: list / show / add / update / delete / recategorize / dedupe");
+    .description("Transactions: list / show / add / update / delete / recategorize / dedupe")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: reads the ledger (list, show) and edits it (add, update, delete, recategorize, dedupe, merge).",
+        "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add.",
+        "Example: plasalid transactions list --account expense:food --json",
+      ].join("\n"),
+    );
 
   transactions
     .command("list")

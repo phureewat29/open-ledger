@@ -49,8 +49,17 @@ async function showReport(opts: ShowReportOpts): Promise<void> {
 export function registerReport(program: Command): void {
   program
     .command("report")
-    .description("Income / expenses / net over a date range (net worth: plasalid status)")
+    .description("Income, expenses, and net")
     .option("--from <date>", "start date")
     .option("--to <date>", "end date")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: sums income, expenses, and net over a date range. For net worth use plasalid status.",
+        "Typical flow: both dates are required and ISO (YYYY-MM-DD).",
+        "Example: plasalid report --from 2025-01-01 --to 2025-03-31 --json",
+      ].join("\n"),
+    )
     .action(runAction(showReport));
 }

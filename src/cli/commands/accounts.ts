@@ -534,7 +534,18 @@ async function updateAccount(id: string, opts: Record<string, unknown>): Promise
 }
 
 export function registerAccounts(program: Command): void {
-  const accounts = program.command("accounts").description("Manage accounts");
+  const accounts = program
+    .command("accounts")
+    .description("Manage the chart of accounts")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: manages the chart of accounts, colon-paths under asset, liability, income, expense, equity.",
+        "Typical flow: match to reuse an existing account before create; read balances with tree or show.",
+        "Example: plasalid accounts match --query groceries --json",
+      ].join("\n"),
+    );
 
   accounts
     .command("list")

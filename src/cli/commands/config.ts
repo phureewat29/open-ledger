@@ -174,10 +174,8 @@ function showConfig(): void {
 export function registerConfig(program: Command): void {
   const configCmd = program
     .command("config")
-    // Needed because `config` has both a bare action and a `show` subcommand
-    // (see program.ts's note on enablePositionalOptions).
     .enablePositionalOptions()
-    .description("Configure the harness (bare with flags converges; bare with none shows)")
+    .description("Configuration")
     .option("--data-dir <dir>", "data directory")
     .option("--db <path>", "database path")
     .option("--generate-key", "generate a new encryption key")

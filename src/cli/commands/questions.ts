@@ -126,7 +126,18 @@ async function deferQuestion(id: string, opts: Record<string, unknown>): Promise
 }
 
 export function registerQuestions(program: Command): void {
-  const questions = program.command("questions").description("Manage open questions");
+  const questions = program
+    .command("questions")
+    .description("List, answer, and defer open questions")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
+        "Typical flow: list --json, resolve each by kind (merge, recategorize, upsert), then answer or defer.",
+        "Example: plasalid questions list --json",
+      ].join("\n"),
+    );
 
   questions
     .command("list")

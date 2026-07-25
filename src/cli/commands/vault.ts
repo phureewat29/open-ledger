@@ -75,7 +75,7 @@ async function removeVaultEntry(patternOrId: string, opts: RemoveVaultEntryOpts)
 }
 
 export function registerVault(program: Command): void {
-  const vault = program.command("vault").description("Manage the credential vault");
+  const vault = program.command("vault").description("Manage file-password patterns for encrypted statements");
 
   vault
     .command("add <pattern>")

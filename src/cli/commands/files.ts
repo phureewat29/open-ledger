@@ -72,7 +72,7 @@ async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
 }
 
 export function registerFiles(program: Command): void {
-  const files = program.command("files").description("Browse ingested files");
+  const files = program.command("files").description("Browse ingested files (list / show / drop)");
 
   files
     .command("list")

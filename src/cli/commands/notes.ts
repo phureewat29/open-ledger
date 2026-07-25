@@ -67,7 +67,7 @@ async function removeNote(id: string, opts: { yes?: boolean }): Promise<void> {
 }
 
 export function registerNotes(program: Command): void {
-  const notes = program.command("notes").description("Manage notes");
+  const notes = program.command("notes").description("Manage freeform notes");
 
   notes
     .command("list")

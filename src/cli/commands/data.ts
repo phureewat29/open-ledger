@@ -67,6 +67,6 @@ export function registerData(program: Command): void {
   program
     .command("data")
     .alias("open")
-    .description("Open the Plasalid data folder in your OS file explorer")
+    .description("Open the data folder in file explorer")
     .action(runAction(openDataDir));
 }

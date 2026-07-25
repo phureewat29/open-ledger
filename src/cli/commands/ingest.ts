@@ -221,7 +221,18 @@ async function failIngest(id: string, opts: FailIngestOpts): Promise<void> {
 }
 
 export function registerIngest(program: Command): void {
-  const ingest = program.command("ingest").description("Ingest pipeline");
+  const ingest = program
+    .command("ingest")
+    .description("Ingest pipeline: list / prepare / commit / done / fail")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: the statement pipeline, list files, prepare pages to read, commit rows, mark done or failed.",
+        "Typical flow: list, prepare <id>, read the returned document, then commit --file <sf:id> --input <batch>.",
+        "Example: plasalid ingest prepare statement.pdf --json",
+      ].join("\n"),
+    );
 
   ingest
     .command("list")

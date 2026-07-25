@@ -70,8 +70,17 @@ function datasets(name: string | undefined, opts: DatasetsOpts): void {
 export function registerDatasets(program: Command): void {
   program
     .command("datasets [name]")
-    .description("Reference datasets: bare lists them, `datasets <name>` shows rows (institutions, defaults)")
+    .description("Reference datasets")
     .option("--country <code>", "filter rows by country (e.g. th)")
     .option("--kind <kind>", "filter institutions by kind")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: read-only reference data, institution codes and per-country defaults behind account leaves.",
+        "Typical flow: bare datasets lists them; datasets institutions --country th filters a country's institutions.",
+        "Example: plasalid datasets institutions --country th --kind bank --json",
+      ].join("\n"),
+    )
     .action(runAction(datasets));
 }
