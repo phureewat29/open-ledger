@@ -1,8 +1,8 @@
-# Corgi Agent
+# Corgi Claude
 
-An end-to-end agenctic demo of the `claude` CLI (Claude Code) driving the Plasalid
-harness over a synthetic, password-protected credit-card statement. Using
-only the documented `plasalid` CLI surface, the agent:
+An end-to-end agentic demo with plasalid: the `claude` CLI (Claude Code) works
+through a synthetic, password-protected credit-card statement. Using only the
+documented `plasalid` CLI surface, the agent:
 
 1. **Discovers** the statement in the data directory
    (`plasalid ingest list` — it reports the file as encrypted, with a vault
@@ -30,7 +30,7 @@ Skills (`--allowedTools "Bash(plasalid:*),Read,Write,Skill"`).
 ## Run it
 
 ```sh
-cd examples/corgi-agent
+cd examples/corgi-claude
 npm install
 npm start
 ```
@@ -72,7 +72,7 @@ Steps, in order:
    built `dist/cli/index.js`.
 4. **export isolation env** — `PATH` (so the shim resolves), `HOME` /
    `USERPROFILE`, and the `PLASALID_*` variables described below.
-5. **place statement** — copies `card-statement-2026-05.pdf` into the
+5. **place statement** — copies `fixtures/card-statement-2026-05.pdf` into the
    workspace's data directory.
 6. **install skill** — installs the plasalid skill pack so `claude` can
    discover the harness.
@@ -117,7 +117,7 @@ agent may defer some), and the run prints a final `PASS`/`FAIL` line.
 
 ## The statement
 
-`card-statement-2026-05.pdf` is a synthetic credit-card statement from a
+`fixtures/card-statement-2026-05.pdf` is a synthetic credit-card statement from a
 fictional bank ("Corgi Bank"), generated as demo data. It ships
 **password-protected (AES-256)**; the password is `password` and the demo
 stores it in plasalid's encrypted vault, which is how the harness unlocks

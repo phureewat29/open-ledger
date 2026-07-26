@@ -71,7 +71,7 @@ export interface TurnData {
 
 /** Header text pinned as the first scrollback item (rendered bold cyan). Kept in
  *  state so it sits above all history rather than below it. */
-export const HEADER_TEXT = "🐶 corgi-agent — plasalid x claude -p";
+export const HEADER_TEXT = "🐶 corgi-claude — plasalid x claude -p";
 
 export type ScrollbackKind = "header" | "step" | "turn" | "info";
 

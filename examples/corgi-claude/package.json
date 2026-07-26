@@ -1,8 +1,8 @@
 {
-  "name": "corgi-agent",
+  "name": "corgi-claude",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone agentic demo using an external Claude Code CLI drives the Plasalid harness end to end.",
+  "description": "Standalone agentic demo with plasalid, run end to end by an external Claude Code CLI.",
   "type": "module",
   "scripts": {
     "start": "tsx src/demo.tsx",

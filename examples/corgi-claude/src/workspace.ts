@@ -1,4 +1,4 @@
-/** Workspace setup/teardown for the corgi-agent demo. */
+/** Workspace setup/teardown for the corgi-claude demo. */
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -34,7 +34,7 @@ export interface WorkspacePaths {
 /** Create a fresh workspace directory tree (mktemp-style). Pure filesystem
  *  setup - no env/PATH side effects (see buildEnv / writeBinShim). */
 export function createWorkspace(): WorkspacePaths {
-  const root = mkdtempSync(join(tmpdir(), "corgi-agent-"));
+  const root = mkdtempSync(join(tmpdir(), "corgi-claude-"));
   const cwd = join(root, "cwd");
   const paths: WorkspacePaths = {
     root,

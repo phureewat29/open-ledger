@@ -179,7 +179,7 @@ export async function runPlain(
   onWorkspaceReady: (paths: WorkspacePaths) => void,
   keepWorkspace: boolean,
 ): Promise<number> {
-  console.log("corgi-agent demo");
+  console.log("corgi-claude demo");
   const reporter = makePlainReporter();
   const outcome = await runDemo(opts, reporter, onWorkspaceReady);
   if (outcome.paths && keepWorkspace) {

@@ -1,5 +1,5 @@
 /**
- * CLI argument parsing for the corgi-agent demo: --skip-claude,
+ * CLI argument parsing for the corgi-claude demo: --skip-claude,
  * --keep-workspace, --turn-timeout <seconds>, and -h/--help. Pure - no I/O and
  * no process access; main() reads process.argv and acts on the result.
  */

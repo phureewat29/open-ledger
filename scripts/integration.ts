@@ -276,10 +276,16 @@ function stepConfigShowEncrypted(ctx: Ctx): void {
   assert(cfg.dbEncryptionKey?.set === true, `config show did not reflect the generated key: ${JSON.stringify(cfg)}`);
 }
 
-/** Committed demo statement (examples/corgi-agent/): a synthetic, AES-256
+/** Committed demo statement (examples/corgi-claude/fixtures/): a synthetic, AES-256
  *  password-protected statement from a fictional bank. Must stay in the
  *  repo for this test to run. */
-const FIXTURE_STATEMENT = join(REPO_ROOT, "examples", "corgi-agent", "card-statement-2026-05.pdf");
+const FIXTURE_STATEMENT = join(
+  REPO_ROOT,
+  "examples",
+  "corgi-claude",
+  "fixtures",
+  "card-statement-2026-05.pdf",
+);
 const FIXTURE_PASSWORD = "password";
 
 function stepPlaceStatement(ctx: Ctx): void {

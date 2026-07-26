@@ -27,7 +27,7 @@ import type { Reporter } from "./reporters.js";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..", "..", "..");
-const STATEMENT_SOURCE = resolve(SCRIPT_DIR, "..", "card-statement-2026-05.pdf");
+const STATEMENT_SOURCE = resolve(SCRIPT_DIR, "..", "fixtures", "card-statement-2026-05.pdf");
 const STATEMENT_PASSWORD = "password";
 const VAULT_PATTERN = "^card-statement";
 const DEMO_TOOLS = "Bash(plasalid:*),Read,Write,Skill";
