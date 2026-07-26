@@ -1,16 +1,14 @@
 {
   "name": "plasalid",
-  "version": "0.11.3",
+  "version": "0.13.0",
   "description": "Plasalid — The Harness Layer for Personal Finance",
   "keywords": [
     "finance",
     "harness",
     "personal",
-    "aggregator",
-    "parser",
+    "ledger",
     "cli",
-    "ai",
-    "local"
+    "ai"
   ],
   "homepage": "https://github.com/phureewat29/plasalid#readme",
   "bugs": {
