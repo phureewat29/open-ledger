@@ -3,11 +3,11 @@ name: plasalid
 description: A local double-entry personal-finance harness, via the CLI. Use for anything about the ledger, bank or credit-card statements, bank PDFs, net worth, spending, accounts, transactions, or merchants — or whenever the user names plasalid, asks to install it, or wants tracking set up from statement PDFs. Ingests, categorizes, and reports on it; installs the CLI from npm on first use.
 ---
 
-# plasalid
+# Plasalid
 
-You drive `plasalid`, a deterministic CLI over a local double-entry ledger — no AI loop of its own; you supply the intelligence.
+You run `plasalid`, a deterministic CLI over a local double-entry ledger — no AI loop of its own; you supply the intelligence.
 
-## Setup: get plasalid running
+## Setup
 
 - **Detect:** `plasalid --version` prints a version when installed; if it does, skip to Version check.
 - **Install:** needs `node --version` >= 18; if missing, STOP and ask the human to install Node. Then `npm install -g plasalid`. On EACCES: `npm install -g --prefix "$HOME/.npm-global" plasalid`, then use `$HOME/.npm-global/bin/plasalid`.
@@ -15,7 +15,7 @@ You drive `plasalid`, a deterministic CLI over a local double-entry ledger — n
 - **Statements in:** `dataDir` from `plasalid config show --json` is where PDFs go; `plasalid data` opens it. Sandboxed/VM: ask the human to upload there.
 - **Version check:** compare `plasalid --version` with `npm view plasalid version`; behind -> `npm install -g plasalid@latest` (never downgrade), registry unreachable -> proceed. `plasalid <noun> --help` outranks this doc. `plasalid doctor --json` flags skill drift; `plasalid setup --force` refreshes it.
 
-## Golden rules
+## Rules
 
 - **Always pass `--json`.** NDJSON out: one object per line; streaming commands end with a `{"type":"summary",...}` line. Never scrape human tables.
 - **Orient first:** `plasalid status --json` (config, database, ledger counts, net worth).
@@ -40,7 +40,7 @@ Degrade in this order when your *environment* fights you — never silently brea
 - **Normal balances:** `asset`/`expense` increase by a DEBIT; `liability`/`income`/`equity` by a CREDIT. Pick the two sides by which account each half grows.
 - **Accounts** are colon-paths under `asset`, `liability`, `income`, `expense`, `equity` (e.g. `expense:food:groceries`). Reuse first: `plasalid accounts match --query <name> --json`. `accounts create` auto-creates missing parents (`created_parents` in output) — check `match` first to avoid near-duplicates. `--input <file>` batch-creates (NDJSON/JSON, same fields) for institution accounts.
 
-### Direction table
+### Direction
 
 | Situation | Debit account | Credit account |
 |---|---|---|
@@ -111,7 +111,7 @@ One standalone NDJSON item; a compound item swaps the top-level account/amount f
 | `linked` | array | no | Compound: omit top-level `debit_account`/`credit_account`/`amount`; legs are `{debit_account, credit_account, amount, description?, currency?, code?}`, committed atomically under one `group_id`. |
 | `currency` | string | no | Hint only; default `THB`. Stored currency comes from the accounts; a differing hint is ignored (`transactions add --resolve` reports `currency_overridden`). |
 | `code` | string | no | External reference, carried onto the transaction. |
-| `raw_descriptor` | string | no | Verbatim bank text; drives merchant-alias learning. |
+| `raw_descriptor` | string | no | Verbatim bank text; feeds merchant-alias learning. |
 | `source_page` | number | no | Page the row came from; part of the derived id, set whenever `row_index` is. |
 | `row_index` | number | no | 0-based row position on the page; with `source_page` + `--file` makes re-ingest idempotent. |
 | `source_file_id` | string | no | `sf:` id; falls back to `--file`, supplying the file hash for id derivation. |
@@ -134,7 +134,7 @@ Cross-currency as a conversion pair (36000 THB out, 1000 USD in; each leg homoge
 {"date":"2025-04-02","description":"THB to USD","source_page":3,"row_index":0,"linked":[{"debit_account":"equity:conversion:thb","credit_account":"asset:bank:kbank","amount":36000.00,"currency":"THB","description":"THB out"},{"debit_account":"asset:bank:wise-usd","credit_account":"equity:conversion:usd","amount":1000.00,"currency":"USD","description":"USD in"}]}
 ```
 
-### Commit output (NDJSON)
+### Commit output
 
 `plasalid ingest commit` emits one `result` per input item, then a terminal `summary`.
 

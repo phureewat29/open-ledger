@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-    A local harness that lets your AI turn scattered statements into a private, deterministic ledger — and into whatever money app you ask for.
+    A local harness where your AI turns scattered statements into a private, deterministic ledger, then builds whatever financial app you ask for.
 </p>
 
 <p align="center">
@@ -19,17 +19,15 @@
 
 <br />
 
-**You've thought about pasting a bank statement into ChatGPT — and stopped, because you know where that data ends up. So your net worth still lives in six bank apps and a spreadsheet you update by hand, while the most capable assistant you've ever had knows nothing about your money.**
+You've tried many personal finance apps. None of them fits what you need, because each is someone else's idea of your money. So you asked AI to build the one that would, and it failed you too. It made up numbers, mangled your data, and never quite understood what you wanted.
 
-**The missing piece was never a smarter AI. It's a set of books your AI can't get wrong: deterministic, local, private, yours. Plasalid is built for that.**
+The missing piece was never a smarter AI. It's a financial harness your AI can't get wrong: deterministic, private. Plasalid is built for that.
 
-In the US and Europe, aggregators like Plaid link your bank accounts once and show your whole financial life in one place. Most of the world, Thailand included, has no such infrastructure.
+Plasalid is a secure ledger that serves as a harness for your AI. The data source is what you already receive: the monthly statements from your banks and credit cards. Your AI reads each statement and posts what it finds; the harness keeps the books double-entry, so nothing gets in unless it balances. Where the AI would have guessed, the harness makes it ask.
 
-Your data sits scattered across separate bank apps. Tracking your net worth means logging into half a dozen of them and doing the math by hand. You forget subscriptions, miss strange charges, and can't plan big financial goals with any confidence.
+Everything stays on your machine: the database is encrypted, and whatever the AI reads back has PII masked by default. No bank logins, no cloud, no one else's servers.
 
-Plasalid is the harness underneath: a deterministic, double-entry ledger your AI drives end to end — chat app or coding agent. The data always stays on your machine, encrypted, with PII masked by default. And on that foundation, your AI can build whatever you ask for: a budget tracker, a retirement planner, a personal CFO. 
-
-One harness underneath; endless AI agents and apps you can build on top.
+By using this harness, your AI can build the app you never found: a budget tracker, a subscription auditor, a retirement planner, a personal CFO. You describe it; the foundation is already there.
 
 ## Use Plasalid with your AI
 
@@ -61,13 +59,13 @@ npm install -g plasalid
 npx skills add phureewat29/plasalid
 ```
 
-You can also run `plasalid setup` to writes the skill to `.agents/skills/`, the shared directory most agents read; (use `--host claude` for Claude Code).
+Or run `plasalid setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read (use `--host claude` for Claude Code).
 
 ### Your own agent stack
 
-Every command speaks `--json` with typed exit codes, built to be driven programmatically. `plasalid setup --dir <agent-home>` installs the skill anywhere; [`examples/corgi-agent`](./examples/corgi-agent) is a complete scripted reference, from encrypted statement to answered spending questions.
+Every command speaks `--json` with typed exit codes, built to be scripted. `plasalid setup --dir <agent-home>` installs the skill anywhere. Two complete references ship in this repo: [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`, and [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
 
-Once the skill is installed, give your agent a real task:
+With the skill installed, give your agent a real task:
 
 1. Start with the statements you have waiting: *"Ingest my new statements."* It discovers new files, prepares and reads each one, commits the transactions it finds, and raises a question for anything it can't resolve on its own.
 2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through open questions, such as an unrecognized merchant or an ambiguous account match, one at a time.
@@ -114,7 +112,7 @@ plasalid data           # Open the data folder in file explorer (alias: open)
 ## Security & Privacy
 
 - All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.plasalid/db.sqlite`.
-- The config file (`~/.plasalid/config.json`) carries `0600` permissions; the only secret it holds is the database encryption key, and `config`/`status` only ever surface a fingerprint of it, never the plaintext.
+- The config file (`~/.plasalid/config.json`) carries `0600` permissions; the only secret it holds is the database encryption key, and `config`/`status` surface only a fingerprint of it, never the plaintext.
 - Encrypted-PDF passwords sit AES-GCM-encrypted in `db.sqlite` under a filename pattern; plaintext never touches disk.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
 - No telemetry, no analytics. Plasalid makes no network calls of its own.
