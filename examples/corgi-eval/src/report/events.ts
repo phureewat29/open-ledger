@@ -5,7 +5,7 @@
  * how a model and the OpenLedger contract fit together, not how fast either is.
  */
 
-export type PhaseId = "orient" | "ingest" | "resolve" | "answer";
+export type PhaseId = "ingest" | "resolve" | "answer";
 
 export interface TokenUsage {
   promptTokens: number;

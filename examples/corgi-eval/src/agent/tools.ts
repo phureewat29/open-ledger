@@ -1,9 +1,9 @@
 import * as z from "zod";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { tryExecute, type Result } from "../core/result.js";
-import { artifactsOf, type OpenLedgerArtifacts } from "../open-ledger/artifacts.js";
-import type { OpenLedgerRunner } from "../open-ledger/command.js";
-import { parseNdjson } from "../open-ledger/ndjson.js";
+import { artifactsOf, type OpenLedgerArtifacts } from "../oled/artifacts.js";
+import type { OpenLedgerRunner } from "../oled/command.js";
+import { parseNdjson } from "../oled/ndjson.js";
 import type { CommitCounters, RejectionType, ToolObservation } from "../report/events.js";
 
 /**
@@ -257,6 +257,12 @@ async function runArgv(runner: OpenLedgerRunner, spec: RunSpec): Promise<ToolRes
 const REFUSED_SHELL =
   "refused: args cannot contain | & ; < > ` or $. Run one oled command per call and send a batch through the `stdin` field instead of a pipe.";
 
+// Docs write placeholders as <pattern>; a model copying one verbatim needs a different correction than a pipe.
+const PLACEHOLDER = /<[a-z][a-z0-9:_-]*>/i;
+
+const REFUSED_PLACEHOLDER =
+  "refused: args contain a <placeholder>. Replace every <...> from the docs with a real value from a previous command's output.";
+
 function countRows(ndjson: string): number {
   return ndjson.split("\n").filter((line) => line.trim().length > 0).length;
 }
@@ -286,7 +292,8 @@ function prepareRun(rawArgs: string): StagedRun {
   const args = truncate(parsed.value.args, MAX_ARGS_ECHO);
   const called = { ...spec, args, command: `oled ${args}` };
   if (SHELL_METACHARACTERS.test(parsed.value.args)) {
-    return { ok: false, refusal: refuse("refused_shell", called, REFUSED_SHELL) };
+    const message = PLACEHOLDER.test(parsed.value.args) ? REFUSED_PLACEHOLDER : REFUSED_SHELL;
+    return { ok: false, refusal: refuse("refused_shell", called, message) };
   }
 
   const tokens = tokenize(parsed.value.args);
