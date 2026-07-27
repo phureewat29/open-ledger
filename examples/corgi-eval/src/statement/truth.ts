@@ -49,7 +49,6 @@ export type StatementGroup = z.infer<typeof GROUP>;
 
 /** What the ledger must hold once every seeded statement is ingested. */
 export interface ExpectedLedger {
-  statements: string[];
   currency: string;
   rows: number;
   charges: number;
@@ -60,7 +59,7 @@ export interface ExpectedLedger {
 const PDF_SUFFIX = /\.pdf$/i;
 
 /** The 1-1 link: `card-statement-2026-05.pdf` → `card-statement-2026-05.expected.json`. */
-export function factsPathFor(pdfPath: string): string {
+function factsPathFor(pdfPath: string): string {
   return `${pdfPath.replace(PDF_SUFFIX, "")}.expected.json`;
 }
 
@@ -101,7 +100,7 @@ function reconcile(facts: StatementFacts): string[] {
   return disagreements;
 }
 
-export function loadStatementFacts(pdfPath: string): Result<StatementFacts> {
+function loadStatementFacts(pdfPath: string): Result<StatementFacts> {
   const path = factsPathFor(pdfPath);
   const read = tryExecute(() => readFileSync(path, "utf8"));
   if (!read.ok) return { ok: false, error: `cannot read ${path}: ${read.error}` };
@@ -141,7 +140,6 @@ export function expectLedger(every: StatementFacts[]): ExpectedLedger {
   const sum = (pick: (facts: StatementFacts) => number): number =>
     every.reduce((total, facts) => total + minor(pick(facts)), 0) / 100;
   return {
-    statements: every.map((facts) => facts.statement),
     currency: every[0]?.currency ?? "",
     rows: every.reduce((total, facts) => total + rowsIn(facts), 0),
     charges: sum((facts) => facts.groups.charges.total),

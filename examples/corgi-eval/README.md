@@ -1,7 +1,7 @@
 # Corgi Eval
 
 An eval of how well an AI model and OpenLedger fit with each other. Each
-run hands a model with the OpenLedger skill, a sandbox of its own and a password-protected card
+run hands a model the OpenLedger skill, a sandbox of its own and a password-protected card
 statement, then reports what the pair got done and where they misread each other.
 
 ## Run it
@@ -39,7 +39,7 @@ in the report.
 This is transport, not help. The model chooses the command; the host only hands
 back what that command produced, byte for byte. It never opens, parses, or
 summarizes a statement, and it never writes to the ledger. Claude Code does the
-same job with `Read` in `examples/corgi-claude`, which is why the skill under test
+same job with `Read` in `examples/corgi-claude`; `oled ingest --help` is what
 tells an agent to read what `ingest prepare` returns. Coaching would be extracting
 rows for the model or naming the flag it should run; neither happens, and a run can
 still fail.
@@ -49,16 +49,16 @@ own. Whether it does is part of what the eval measures.
 
 ## Findings so far
 
-Recorded here, not fixed: they are product decisions, and this example only
-reports them.
+Two of these drove CLI fixes, now shipped. The third is what the eval still
+watches for.
 
-- Models invent `--format text`. Sonnet 5 did, and the `E_USAGE` reply names the
-  two valid formats but carries no `hint`. `--format png` is what a model that
-  cannot read PDFs needs, and nothing points there. `ingest prepare --help` hides
-  `--format` as well, so SKILL.md is the only place it appears.
-- `skills/SKILL.md` step 5 says to stage the batch to a file, which an agent with
-  no file writes cannot do. Standard input takes a batch, but it is documented
-  only in `ingest commit --help`.
+- Models invented `--format text`. `ingest prepare --help` hid the flag, so
+  SKILL.md was the only place it appeared. Fixed: `--format` and `--dpi` now
+  show in `--help`, a `USAGE` error carries a `hint` pointing at `--help`, and a
+  bad `--format` value hints "pdf or png".
+- `skills/SKILL.md` step 5 told an agent to stage its batch to a file, which an
+  agent with no file writes cannot do. Fixed: standard input takes a batch, and
+  `ingest commit --help` and the empty-batch hint both say so.
 - Three runs scored zero rows because the harness handed nothing back, and it took
   reading all three reports to see it. Section 6 of every report now names what
   the model reached for and never got, where it said it was stuck, and how far the

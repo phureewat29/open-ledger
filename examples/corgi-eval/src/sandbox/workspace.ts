@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
-import type { OpenLedgerRunner } from "../open-ledger/command.js";
+import type { OpenLedgerRunner } from "../oled/command.js";
 
 /**
  * A throwaway directory tree plus the env that pins oled inside it. Nothing
@@ -124,7 +124,7 @@ export async function installSkillPack(
   return pack;
 }
 
-export function disposeWorkspace(workspace: Workspace): void {
+function disposeWorkspace(workspace: Workspace): void {
   rmSync(workspace.root, { recursive: true, force: true });
 }
 

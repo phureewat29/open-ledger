@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { MODALITIES, type Modality } from "./model/capabilities.js";
+import { BUDGET_ENV, MODALITIES, MODALITIES_ENV, type Modality } from "./model/capabilities.js";
 
 export interface Config {
   baseUrl: string;
@@ -52,8 +52,8 @@ const ENV_SPEC = z.object({
   LLM_MODEL: z.string().min(1).optional(),
   LLM_STREAM: z.enum(["true", "false"]).default("true"),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
-  LLM_INPUT_MODALITIES: MODALITY_LIST.optional(),
-  CONTEXT_BUDGET_TOKENS: z.coerce.number().int().positive().optional(),
+  [MODALITIES_ENV]: MODALITY_LIST.optional(),
+  [BUDGET_ENV]: z.coerce.number().int().positive().optional(),
 });
 
 interface Flags {

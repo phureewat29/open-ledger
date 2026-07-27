@@ -11,7 +11,7 @@ import {
   type Modality,
   type ModelCapabilities,
 } from "../model/capabilities.js";
-import type { OpenLedgerArtifacts } from "../open-ledger/artifacts.js";
+import type { OpenLedgerArtifacts } from "../oled/artifacts.js";
 import type { OperationalType } from "../report/events.js";
 
 /**
@@ -22,7 +22,7 @@ import type { OperationalType } from "../report/events.js";
  * statement, because doing the model's work would leave nothing to measure.
  */
 
-export const TRANSPORTS = ["file", "images"] as const;
+const TRANSPORTS = ["file", "images"] as const;
 
 /** file: the PDF as one file part. images: one part per rasterized page. */
 export type TransportKind = (typeof TRANSPORTS)[number];
@@ -194,9 +194,9 @@ function describe(artifacts: OpenLedgerArtifacts): string {
 
 /**
  * A PDF goes as a file part when the model reads files, otherwise page images go
- * as images. Neither means nothing is attached: degrading from there is the
- * skill's own instruction, and whether the model does it is what is being
- * measured.
+ * as images. Neither means nothing is attached: degrading from there is what
+ * `oled ingest --help` tells the model to do, and whether it finds that is what
+ * is being measured.
  */
 export async function attachArtifacts(
   plan: TransportPlan,
