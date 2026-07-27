@@ -1,6 +1,12 @@
-import { groupedRows, type LedgerProbe } from "../open-ledger/ledger.js";
+import { groupedRows, type LedgerProbe } from "../oled/ledger.js";
 import type { ExpectedLedger } from "../statement/truth.js";
-import { analyzeFriction, redundantCommits, repeatedCommands, type FrictionAnalysis } from "./friction.js";
+import {
+  analyzeFriction,
+  helpCalls,
+  redundantCommits,
+  repeatedCommands,
+  type FrictionAnalysis,
+} from "./friction.js";
 import type { OperationalType, PhaseId } from "./events.js";
 import type { PhaseTally, RunMetrics } from "./recorder.js";
 
@@ -36,6 +42,8 @@ export interface Claim {
 export interface Profile {
   modelCalls: number;
   toolCalls: number;
+  /** Of those, calls that asked for `--help`. The skill sends the model there. */
+  helpCalls: number;
   toolCallsPerPostedRow: number | null;
   repeatedCommands: number;
   redundantCommits: number;
@@ -56,7 +64,6 @@ export interface Scorecard {
   profile: Profile;
   excluded: Excluded;
   passed: boolean;
-  finalReply: string;
 }
 
 export interface ScorecardInput {
@@ -140,9 +147,9 @@ function uncategorizedCheck(ledger: LedgerProbe): Check {
 /**
  * The expected count is the sum of the statement's charge, refund and payment
  * groups, so the ledger side has to be the same three groups. Counting every row
- * instead failed a run for the opening balance the skill orders it to post: a row
- * the statement's own totals do not cover, and the reason the money checks passed
- * while this one did not.
+ * instead failed a run for an opening balance: a row the statement's own totals do
+ * not cover, which `oled transactions --help` shows how to post, and the reason
+ * the money checks passed while this one did not.
  */
 function rowsCheck(ledger: LedgerProbe, expected: number): Check {
   const grouped = groupedRows(ledger.money);
@@ -279,6 +286,7 @@ export function buildScorecard(input: ScorecardInput): Scorecard {
     profile: {
       modelCalls: metrics.llmCalls,
       toolCalls: metrics.toolCalls,
+      helpCalls: helpCalls(metrics.events),
       toolCallsPerPostedRow:
         ledger.postedRows > 0 ? metrics.toolCalls / ledger.postedRows : null,
       repeatedCommands: repeatedCommands(metrics.events),
@@ -292,6 +300,5 @@ export function buildScorecard(input: ScorecardInput): Scorecard {
     excluded: metrics.operational,
     passed:
       outcome.every((entry) => entry.status !== "fail") && claims.every((claim) => claim.passed),
-    finalReply: metrics.finalReply,
   };
 }

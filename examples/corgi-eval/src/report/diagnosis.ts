@@ -92,8 +92,9 @@ const MISSING_RULES: MissingRule[] = [
     asked: (match) => match[1] ?? "",
   },
   {
+    // Both forms the CLI writes: `(got "x")` and `, got "x"`.
     kind: "flag_value",
-    pattern: /(--[a-z0-9-]+) must be[^(]*\(got "([^"]+)"\)/i,
+    pattern: /(--[a-z0-9-]+) must be .*?[(,]\s*got "([^"]+)"/i,
     asked: (match) => `${match[1]} ${match[2]}`,
   },
 ];

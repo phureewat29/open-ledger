@@ -36,7 +36,7 @@ export interface NextAttempt {
   args: string;
   ok: boolean;
   message: string;
-  /** true when this attempt used a flag the previous failure's hint named. */
+  /** true when this attempt did what the previous failure's hint asked. */
   followedHint: boolean;
 }
 
@@ -92,6 +92,8 @@ export interface RecoveryRow {
 export interface SubcommandRow {
   subcommand: string;
   calls: number;
+  /** Of those, calls that asked for `--help`. Reported, never scored. */
+  help: number;
   failures: number;
   types: TypeCount[];
   /** Failures where oled emitted a hint. */
@@ -106,7 +108,7 @@ export interface SubcommandRow {
 export interface HintEfficacy {
   /** Failures where oled emitted a hint. */
   emitted: number;
-  /** Of those, hints naming a flag, so "followed" is decidable. */
+  /** Of those, hints whose "followed" is decidable: one naming a flag, or the help advice. */
   actionable: number;
   /** Of those, hints the model had a later turn to act on. */
   judged: number;
@@ -139,6 +141,8 @@ const UNKNOWN_COMMAND = /unknown command/i;
 const DATE_FLAG = /--(?:from|to)(?:=|\s+)"?([^\s"]+)"?/g;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HINT_FLAG = /--[a-z][a-z0-9-]*/g;
+const HINT_STDIN = /\bstdin\b/i;
+const HELP_FLAGS = ["--help", "-h"];
 
 interface Attempt {
   phase: PhaseId;
@@ -161,8 +165,43 @@ function hintFlags(hint: string | null): string[] {
   return [...hint.matchAll(HINT_FLAG)].map((match) => match[0]);
 }
 
-function usedAny(args: string, flags: string[]): boolean {
-  return flags.some((flag) => args.includes(flag));
+function isHelpCall(args: string): boolean {
+  return args.split(/\s+/).some((token) => HELP_FLAGS.includes(token));
+}
+
+/**
+ * What a hint asks for. The root CLI appends "append --help to the command" to
+ * every usage error, which names no flag the call was missing: it is advice to go
+ * read, so a help call and a working call both answer it, and nothing answers it
+ * wrongly. `flags` is therefore empty for those, and only a hint naming a real
+ * flag can be missed.
+ */
+interface HintAsk {
+  flags: string[];
+  advisory: boolean;
+  /** The hint offers stdin as a route, so a batch sent there follows it. */
+  stdin: boolean;
+}
+
+function hintAsk(hint: string | null): HintAsk {
+  const named = hintFlags(hint);
+  const advisory = named.length > 0 && named.every((flag) => HELP_FLAGS.includes(flag));
+  return {
+    flags: advisory ? [] : named,
+    advisory,
+    stdin: hint !== null && HINT_STDIN.test(hint),
+  };
+}
+
+/** A hint that asks for nothing decidable is neither followed nor ignored. */
+function isActionable(ask: HintAsk): boolean {
+  return ask.advisory || ask.flags.length > 0;
+}
+
+function follows(ask: HintAsk, o: ToolObservation): boolean {
+  if (ask.advisory) return isHelpCall(o.args) || o.ok;
+  if (ask.stdin && (o.rows ?? 0) > 0) return true;
+  return ask.flags.some((flag) => o.args.includes(flag));
 }
 
 function badDateValue(args: string): boolean {
@@ -195,10 +234,10 @@ function classify(o: ToolObservation, missed: boolean): FrictionType | null {
   return EXIT_FRICTION[o.exitCode] ?? "command_error";
 }
 
-/** The last failing attempt at a subcommand: the flags its hint named, and when. */
+/** The last failing attempt at a subcommand: what its hint asked for, and when. */
 interface Outstanding {
   turn: number;
-  flags: string[];
+  ask: HintAsk;
 }
 
 /**
@@ -207,9 +246,9 @@ interface Outstanding {
  * anything.
  */
 function missedHint(call: Attempt, outstanding: Outstanding | undefined): boolean {
-  if (!outstanding || outstanding.flags.length === 0) return false;
+  if (!outstanding || outstanding.ask.flags.length === 0) return false;
   if (outstanding.turn >= call.turn) return false;
-  return !usedAny(call.observation.args, outstanding.flags);
+  return !follows(outstanding.ask, call.observation);
 }
 
 /**
@@ -238,19 +277,22 @@ function followups(calls: Attempt[], from: Attempt): Followups {
 function nextAttempt(later: Attempt[], hint: string | null): NextAttempt | null {
   const first = later[0]?.observation;
   if (!first) return null;
-  const flags = hintFlags(hint);
+  const ask = hintAsk(hint);
   return {
     command: first.command,
     args: first.args,
     ok: first.ok,
     message: first.message,
-    followedHint: flags.length > 0 && usedAny(first.args, flags),
+    followedHint: isActionable(ask) && follows(ask, first),
   };
 }
 
 function recoveryOf(o: ToolObservation, next: Followups): RecoveryOutcome | null {
   if (o.ok) return null;
-  if (next.later.some((call) => call.observation.ok)) return "recovered";
+  // A help lookup exits 0 but does no work; recovery means a real retry succeeded.
+  if (next.later.some((call) => call.observation.ok && !isHelpCall(call.observation.args))) {
+    return "recovered";
+  }
   const first = next.later[0]?.observation;
   if (!first) return next.concurrent ? "same_turn" : "abandoned";
   return first.command === o.command ? "repeated" : "changed";
@@ -333,6 +375,7 @@ function buildSubcommands(calls: Attempt[], items: FrictionItem[]): SubcommandRo
     const created: SubcommandRow = {
       subcommand,
       calls: 0,
+      help: 0,
       failures: 0,
       types: [],
       hinted: 0,
@@ -347,6 +390,7 @@ function buildSubcommands(calls: Attempt[], items: FrictionItem[]): SubcommandRo
   for (const call of calls) {
     const row = rowFor(call.observation.subcommand);
     row.calls += 1;
+    if (isHelpCall(call.observation.args)) row.help += 1;
     if (call.observation.ok) continue;
     row.failures += 1;
     if (call.observation.hint) row.hinted += 1;
@@ -380,13 +424,13 @@ function buildHintEfficacy(calls: Attempt[]): HintEfficacy {
     const o = call.observation;
     if (o.ok || !o.hint) continue;
     emitted += 1;
-    const flags = hintFlags(o.hint);
-    if (flags.length === 0) continue;
+    const ask = hintAsk(o.hint);
+    if (!isActionable(ask)) continue;
     actionable += 1;
     const next = followups(calls, call).later[0]?.observation;
     if (!next) continue;
     judged += 1;
-    if (!usedAny(next.args, flags)) continue;
+    if (!follows(ask, next)) continue;
     followed += 1;
     if (next.ok) recovered += 1;
   }
@@ -412,7 +456,7 @@ export function analyzeFriction(events: RunEvent[]): FrictionAnalysis {
     const type = classify(o, missedHint(call, outstanding.get(o.subcommand)));
     outstanding.set(o.subcommand, {
       turn: call.turn,
-      flags: o.ok ? [] : hintFlags(o.hint),
+      ask: hintAsk(o.ok ? null : o.hint),
     });
     if (!type) continue;
     const next = followups(calls, call);
@@ -443,19 +487,27 @@ export function analyzeFriction(events: RunEvent[]): FrictionAnalysis {
 }
 
 /**
- * Commands the model sent more than once. Calls carrying a batch on stdin are
- * excluded: their argv is identical by design (`ingest commit --file <sf:id>`)
- * while the rows differ, so counting them here would report five distinct
- * batches as four repeats. Re-sending the same batch shows up in
- * `redundantCommits`, which reads what oled actually posted.
+ * Commands the model sent more than once. Two kinds are excluded. Calls carrying
+ * a batch on stdin have an argv that is identical by design
+ * (`ingest commit --file <sf:id>`) while the rows differ, so counting them here
+ * would report five distinct batches as four repeats; re-sending the same batch
+ * shows up in `redundantCommits`, which reads what oled actually posted. Help
+ * calls are the contract working: the skill sends the model to `--help`, and
+ * reading the same page twice is not flailing.
  */
 export function repeatedCommands(events: RunEvent[]): number {
   const seen = new Map<string, number>();
   for (const call of toolCalls(events)) {
     if (call.observation.rows !== null) continue;
+    if (isHelpCall(call.observation.args)) continue;
     seen.set(call.observation.command, (seen.get(call.observation.command) ?? 0) + 1);
   }
   return [...seen.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+}
+
+/** Calls that asked for `--help`, whatever the subcommand. */
+export function helpCalls(events: RunEvent[]): number {
+  return toolCalls(events).filter((call) => isHelpCall(call.observation.args)).length;
 }
 
 /** Commits that posted nothing because every row already existed. */

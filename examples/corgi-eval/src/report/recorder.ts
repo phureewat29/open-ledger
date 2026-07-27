@@ -22,7 +22,6 @@ export interface RunMetrics {
   phases: PhaseTally[];
   llmCalls: number;
   toolCalls: number;
-  failedToolCalls: number;
   tokensIn: number;
   tokensOut: number;
   /** true when any call's token counts were estimated rather than reported. */
@@ -32,7 +31,6 @@ export interface RunMetrics {
   operational: Record<OperationalType, number>;
   /** Questions oled raised across every commit. */
   questionsRaised: number;
-  finalReply: string;
 }
 
 export interface Recorder {
@@ -130,15 +128,12 @@ export function createRecorder(): Recorder {
 
     snapshot() {
       const ordered = [...phases.values()];
-      const last = ordered.filter((phase) => phase.reply).at(-1);
       return {
         events,
         phases: ordered,
         llmCalls: ordered.reduce((sum, phase) => sum + phase.llmCalls, 0),
         toolCalls: ordered.reduce((sum, phase) => sum + phase.toolCalls, 0),
-        failedToolCalls: ordered.reduce((sum, phase) => sum + phase.failedToolCalls, 0),
         ...totals,
-        finalReply: last?.reply ?? "",
       };
     },
   };

@@ -1,10 +1,10 @@
 import chalk from "chalk";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
 import type { TransportKind } from "../agent/attach.js";
 import type { BudgetSource, Modality, ModalitySource } from "../model/capabilities.js";
-import { groupedRows, type LedgerProbe } from "../open-ledger/ledger.js";
+import { groupedRows, type LedgerProbe } from "../oled/ledger.js";
 import type { ExpectedLedger, StatementFacts, StatementGroup } from "../statement/truth.js";
 import type { Check, CheckStatus, Claim, ClaimStatus, Excluded, Scorecard } from "./scorecard.js";
 import type { MissingKind, PhaseProgress, RunDiagnosis, Wall } from "./diagnosis.js";
@@ -253,6 +253,7 @@ function profileLines(scorecard: Scorecard): string[] {
     [
       plural(profile.modelCalls, "model call"),
       plural(profile.toolCalls, "tool call"),
+      plural(profile.helpCalls, "help lookup"),
       `${perRow === null ? "-" : perRow.toFixed(2)} per posted row`,
     ].join(" · "),
     [
@@ -393,10 +394,21 @@ function code(text: string): string {
 
 function subcommandTable(rows: SubcommandRow[]): string[] {
   return markdownTable(
-    ["subcommand", "calls", "failures", "types", "hinted", "recovered", "same turn", "recovery"],
+    [
+      "subcommand",
+      "calls",
+      "help",
+      "failures",
+      "types",
+      "hinted",
+      "recovered",
+      "same turn",
+      "recovery",
+    ],
     rows.map((row) => [
       `\`${cell(row.subcommand)}\``,
       String(row.calls),
+      String(row.help),
       String(row.failures),
       row.types.length === 0 ? "-" : row.types.map((k) => `${k.type} ×${k.count}`).join(", "),
       String(row.hinted),
@@ -513,7 +525,8 @@ function statementRows(statements: StatementFacts[]): string[][] {
   return rows;
 }
 
-export function renderMarkdown(report: RunReport): string {
+/** `skill` is the installed SKILL.md, read back at write time; null when it is gone. */
+function renderMarkdown(report: RunReport, skill: string | null): string {
   const { scorecard, statements, expected, ledger, identity } = report;
   const { friction } = scorecard;
   const lines: string[] = [];
@@ -597,7 +610,7 @@ export function renderMarkdown(report: RunReport): string {
   lines.push("What the pairing accomplished, read back through the CLI. Every row must pass.");
   lines.push("");
   lines.push(
-    "`every statement row posted` counts the rows that became one of the statement's charges, refunds or card payments, which is what its printed totals cover. Bookkeeping outside those groups — a carried-forward opening balance is the usual one — is reported in the ledger readout and never scored.",
+    "`every statement row posted` counts the rows that became one of the statement's charges, refunds or card payments, which is what its printed totals cover. Bookkeeping outside those groups — a carried-forward opening balance, say — is reported in the ledger readout and never scored.",
   );
   lines.push("");
   lines.push(
@@ -632,11 +645,11 @@ export function renderMarkdown(report: RunReport): string {
   lines.push("### Per subcommand");
   lines.push("");
   lines.push(
-    "A subcommand with failures and no hint, or with hints that never lead to recovery, is a harness defect.",
+    "A subcommand whose failures carry hints that never lead to recovery is a harness defect: the copy is there and it does not teach.",
   );
   lines.push("");
   lines.push(
-    "`types` can exceed `failures`: `bad_date_format` is misuse the CLI may still accept. `same turn` failures are outside `recovery`, which needs a later turn to read.",
+    "`types` can exceed `failures`: `bad_date_format` is misuse the CLI may still accept. `same turn` failures are outside `recovery`, which needs a later turn to read. `help` counts the calls that asked for `--help`, which are calls, never failures.",
   );
   lines.push("");
   lines.push(
@@ -733,11 +746,16 @@ export function renderMarkdown(report: RunReport): string {
   lines.push("Volume, not time.");
   lines.push("");
   lines.push(
+    "`help lookups` counts the calls that asked for `--help`. The skill is short and sends the model to the CLI's own help for everything else, so whether it goes there is worth seeing. Reported, never scored.",
+  );
+  lines.push("");
+  lines.push(
     ...markdownTable(
       ["metric", "value"],
       [
         ["model calls", String(scorecard.profile.modelCalls)],
         ["tool calls", String(scorecard.profile.toolCalls)],
+        ["help lookups", String(scorecard.profile.helpCalls)],
         [
           "tool calls per posted row",
           scorecard.profile.toolCallsPerPostedRow === null
@@ -816,7 +834,7 @@ export function renderMarkdown(report: RunReport): string {
   );
   lines.push("");
   lines.push(
-    "`rows linked to a statement file` is each file's own count, from `files show`. A row outside the statement's groups — an opening balance through `equity` — is bookkeeping the statement's printed totals do not cover. Both readings are neutral: reported so they are visible, never scored.",
+    "`rows linked to a statement file` is each file's own count, from `files show`. A row outside the statement's groups — an opening balance through `equity`, if the model posted one — is bookkeeping the statement's printed totals do not cover. Both readings are neutral: reported so they are visible, never scored.",
   );
 
   lines.push("");
@@ -833,7 +851,22 @@ export function renderMarkdown(report: RunReport): string {
   }
 
   lines.push("");
+  lines.push("## The skill under test");
+  lines.push("");
+  lines.push(
+    `What the model was handed, verbatim: ${identity.skill.version}, ${identity.skill.length} chars, sha256 \`${identity.skill.sha256}\`. It is short on purpose — everything it leaves out lives in the CLI's own \`--help\`, which is why the profile counts help lookups.`,
+  );
+  lines.push("");
+  lines.push(
+    skill === null
+      ? "_The installed skill could not be read back._"
+      : ["````markdown", skill.trimEnd(), "````"].join("\n"),
+  );
+
+  lines.push("");
   lines.push("## Environment adapter (verbatim)");
+  lines.push("");
+  lines.push("Appended to the skill above, so the model knows what this host can and cannot do.");
   lines.push("");
   lines.push("```markdown");
   lines.push(identity.environmentAdapter);
@@ -847,6 +880,12 @@ export interface WrittenReport {
   jsonPath: string;
 }
 
+/** The report is written before the sandbox is disposed, so the file is still there. */
+function readSkill(path: string): string | null {
+  const read = tryExecute(() => readFileSync(path, "utf8"));
+  return read.ok ? read.value : null;
+}
+
 export function writeReport(
   directory: string,
   name: string,
@@ -856,7 +895,7 @@ export function writeReport(
     mkdirSync(directory, { recursive: true });
     const markdownPath = join(directory, `${name}.md`);
     const jsonPath = join(directory, `${name}.json`);
-    writeFileSync(markdownPath, renderMarkdown(report));
+    writeFileSync(markdownPath, renderMarkdown(report, readSkill(report.identity.skill.path)));
     writeFileSync(jsonPath, JSON.stringify(report, null, 2) + "\n");
     return { markdownPath, jsonPath };
   });
