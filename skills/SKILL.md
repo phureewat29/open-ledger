@@ -1,44 +1,44 @@
 ---
-name: plasalid
-description: A local double-entry personal-finance harness, via the CLI. Use for anything about the ledger, bank or credit-card statements, bank PDFs, net worth, spending, accounts, transactions, or merchants — or whenever the user names plasalid, asks to install it, or wants tracking set up from statement PDFs. Ingests, categorizes, and reports on it; installs the CLI from npm on first use.
+name: open-ledger
+description: A local double-entry personal-finance harness, via the CLI. Use for anything about the ledger, bank or credit-card statements, bank PDFs, net worth, spending, accounts, transactions, or merchants — or whenever the user names OpenLedger, asks to install it, or wants tracking set up from statement PDFs. Ingests, categorizes, and reports on it; installs the CLI from npm on first use.
 ---
 
-# Plasalid
+# OpenLedger
 
-You run `plasalid`, a deterministic CLI over a local double-entry ledger — no AI loop of its own; you supply the intelligence.
+You run `oled`, a deterministic CLI over a local double-entry ledger — no AI loop of its own; you supply the intelligence.
 
 ## Setup
 
-- **Detect:** `plasalid --version` prints a version when installed; if it does, skip to Version check.
-- **Install:** needs `node --version` >= 18; if missing, STOP and ask the human to install Node. Then `npm install -g plasalid`. On EACCES: `npm install -g --prefix "$HOME/.npm-global" plasalid`, then use `$HOME/.npm-global/bin/plasalid`.
-- **First run:** skip when `plasalid status --json` shows `"configured":true`. Otherwise `plasalid config --generate-key --json` (creates ~/.plasalid), then `plasalid doctor --json`; every check must pass.
-- **Statements in:** `dataDir` from `plasalid config show --json` is where PDFs go; `plasalid data` opens it. Sandboxed/VM: ask the human to upload there.
-- **Version check:** compare `plasalid --version` with `npm view plasalid version`; behind -> `npm install -g plasalid@latest` (never downgrade), registry unreachable -> proceed. `plasalid <noun> --help` outranks this doc. `plasalid doctor --json` flags skill drift; `plasalid setup --force` refreshes it.
+- **Detect:** `oled --version` prints a version when installed; if it does, skip to Version check.
+- **Install:** needs `node --version` >= 18; if missing, STOP and ask the human to install Node. Then `npm install -g open-ledger`. On EACCES: `npm install -g --prefix "$HOME/.npm-global" open-ledger`, then use `$HOME/.npm-global/bin/oled`.
+- **First run:** skip when `oled status --json` shows `"configured":true`. Otherwise `oled config --generate-key --json` (creates ~/.oled), then `oled doctor --json`; every check must pass.
+- **Statements in:** `dataDir` from `oled config show --json` is where PDFs go; `oled data` opens it. Sandboxed/VM: ask the human to upload there.
+- **Version check:** compare `oled --version` with `npm view open-ledger version`; behind -> `npm install -g open-ledger@latest` (never downgrade), registry unreachable -> proceed. `oled <noun> --help` outranks this doc. `oled doctor --json` flags skill drift; `oled setup --force` refreshes it.
 
 ## Rules
 
 - **Always pass `--json`.** NDJSON out: one object per line; streaming commands end with a `{"type":"summary",...}` line. Never scrape human tables.
-- **Orient first:** `plasalid status --json` (config, database, ledger counts, net worth).
+- **Orient first:** `oled status --json` (config, database, ledger counts, net worth).
 - **Never invent ids.** Account paths and `sf:` file / `tx:` transaction / `cn:` question / `m:` merchant ids come from the harness — find them with `accounts match`, `merchants resolve`, or a `list`.
 - **The harness never prompts.** Destructive commands need `--yes`; passwords go through `--password-stdin` or the vault.
-- **Branch on the exit code:** 0 ok · 1 error · 2 usage · 3 not-ready (see Setup, or `plasalid doctor --json`) · 4 input required (password / `--yes` — ask the human, retry) · 5 not-found (wrong id — `list`/`match`) · 6 invalid · 7 partial (batch partly failed — inspect each `result`).
+- **Branch on the exit code:** 0 ok · 1 error · 2 usage · 3 not-ready (see Setup, or `oled doctor --json`) · 4 input required (password / `--yes` — ask the human, retry) · 5 not-found (wrong id — `list`/`match`) · 6 invalid · 7 partial (batch partly failed — inspect each `result`).
 - **Errors** are one stderr object `{"error":{"code":"E_...","message":...,"hint":...}}`. Always read `hint`.
-- **Read output is PII-redacted by default:** `[USER]`/`[CARD]`/`[ACCT]`… are mask placeholders, not data; never write them back. Verbatim only when asked: `plasalid transactions list --no-redact --json`.
-- **Statement rows go through `plasalid ingest commit --file <sf:id> --input <path>`, never `transactions add` per row.** Batch every row into ONE commit via `--input` — it links rows to the source file and keeps re-ingest idempotent. `transactions add` is only for one-offs with no source document.
+- **Read output is PII-redacted by default:** `[USER]`/`[CARD]`/`[ACCT]`… are mask placeholders, not data; never write them back. Verbatim only when asked: `oled transactions list --no-redact --json`.
+- **Statement rows go through `oled ingest commit --file <sf:id> --input <path>`, never `transactions add` per row.** Batch every row into ONE commit via `--input` — it links rows to the source file and keeps re-ingest idempotent. `transactions add` is only for one-offs with no source document.
 
 ## When you are blocked
 
 Degrade in this order when your *environment* fights you — never silently break the rules above.
 
-- **Cannot Read the PDF** (no PDF support): `plasalid ingest prepare <sf:id> --format png --dpi 200 --json` returns one PNG per page in `pages`; Read those (bundled rasterizer, no system deps).
-- **File writes blocked** (cannot stage the `--input` batch): write it in the cwd first (usually allowed); if Write stays blocked, ASK the human to enable it. Last resort: commit rows one-by-one with `plasalid transactions add --resolve`, then TELL the user this drops idempotency + source-file linkage — a re-run double-posts.
-- **One `plasalid` command per Bash call.** Never chain with `&&`/`;`/`echo`, never heredoc JSON (blocked by an allowlist + brace guard). Move batches via `--input <file>`.
+- **Cannot Read the PDF** (no PDF support): `oled ingest prepare <sf:id> --format png --dpi 200 --json` returns one PNG per page in `pages`; Read those (bundled rasterizer, no system deps).
+- **File writes blocked** (cannot stage the `--input` batch): write it in the cwd first (usually allowed); if Write stays blocked, ASK the human to enable it. Last resort: commit rows one-by-one with `oled transactions add --resolve`, then TELL the user this drops idempotency + source-file linkage — a re-run double-posts.
+- **One `oled` command per Bash call.** Never chain with `&&`/`;`/`echo`, never heredoc JSON (blocked by an allowlist + brace guard). Move batches via `--input <file>`.
 
 ## Core concepts
 
 - **Every entry is a _transaction_:** debits exactly one account, credits exactly one, by one positive amount. Direction is WHICH account is debit vs credit — never a sign. Amounts are DECIMAL as printed (`135.00`); stored as integer minor units.
 - **Normal balances:** `asset`/`expense` increase by a DEBIT; `liability`/`income`/`equity` by a CREDIT. Pick the two sides by which account each half grows.
-- **Accounts** are colon-paths under `asset`, `liability`, `income`, `expense`, `equity` (e.g. `expense:food:groceries`). Reuse first: `plasalid accounts match --query <name> --json`. `accounts create` auto-creates missing parents (`created_parents` in output) — check `match` first to avoid near-duplicates. `--input <file>` batch-creates (NDJSON/JSON, same fields) for institution accounts.
+- **Accounts** are colon-paths under `asset`, `liability`, `income`, `expense`, `equity` (e.g. `expense:food:groceries`). Reuse first: `oled accounts match --query <name> --json`. `accounts create` auto-creates missing parents (`created_parents` in output) — check `match` first to avoid near-duplicates. `--input <file>` batch-creates (NDJSON/JSON, same fields) for institution accounts.
 
 ### Direction
 
@@ -60,42 +60,42 @@ Degrade in this order when your *environment* fights you — never silently brea
 - **Compound = shared-leg decomposition:** a split line becomes `linked` legs that commit atomically under one `group_id`. Find the ONE shared account; never invent clearing accounts. Payslip legs share `income:salary`; loan-payment legs share the paying `asset:bank:<x>`.
 - **Idempotency (once, everywhere):** put `row_index` (0-based, per page) + `source_page` on every item and pass `--file <sf:id>`. The harness derives a stable id from file hash + page + row, so re-ingest is a `duplicate:true` no-op. Never renumber rows between retries.
 - **Currency:** a transaction's two accounts must share one currency (derived from the accounts, never trusted from input). A cross-currency row drops as `currency_mismatch` — post it as two linked legs, one per currency, through `equity:conversion:<ccy>` (see the conversion-pair example).
-- **Corrections:** wrong category -> `plasalid transactions recategorize`; wrong amount/currency -> `plasalid transactions delete` then re-ingest it. A refund is a forward transaction (see table), never an edit.
+- **Corrections:** wrong category -> `oled transactions recategorize`; wrong amount/currency -> `oled transactions delete` then re-ingest it. A refund is a forward transaction (see table), never an edit.
 - **Account ids are HINTS:** each side resolves exact -> fuzzy (>= 0.7) -> placeholder — silent for a well-formed multi-segment hint, no question. An ambiguous hint (bare leaf, invalid type) falls back to `expense:uncategorized` and raises one. Send `raw_descriptor` + `merchant:{canonical_name, alias}` so aliases learn.
 
 ## Workflow: ingest statements
 
-1. `plasalid ingest list --json` — each PDF's status (`new`/`pending`/`ingested`/`failed`), `file_id`, and whether it's encrypted.
-2. `plasalid ingest prepare <pathOrId> --json` per new/pending file — `<pathOrId>` is the `path`/`rel_path` from `ingest list` or the `sf:` id (any cwd); returns `document`, the PDF to Read. Exit 4 = locked: ask for the password, then `printf '%s' "$PW" | plasalid ingest prepare <id> --password-stdin --json`; store it with `plasalid vault add <pattern> --password-stdin`.
+1. `oled ingest list --json` — each PDF's status (`new`/`pending`/`ingested`/`failed`), `file_id`, and whether it's encrypted.
+2. `oled ingest prepare <pathOrId> --json` per new/pending file — `<pathOrId>` is the `path`/`rel_path` from `ingest list` or the `sf:` id (any cwd); returns `document`, the PDF to Read. Exit 4 = locked: ask for the password, then `printf '%s' "$PW" | oled ingest prepare <id> --password-stdin --json`; store it with `oled vault add <pattern> --password-stdin`.
 3. **Read the `document` PDF** and extract every row. (No PDF support? See **When you are blocked**.)
 4. Build one NDJSON item per row (schema below): set `row_index` + `source_page`; send `raw_descriptor` + `merchant`.
-5. Stage the batch to a file, then `plasalid ingest commit --file <sf:id> --input <path> --json`. Each line is a `result`; the `summary` has `batch_id`, `posted`, `duplicates`, `failed`. Exit 7 = some rows failed (a `duplicate` is a successful no-op).
+5. Stage the batch to a file, then `oled ingest commit --file <sf:id> --input <path> --json`. Each line is a `result`; the `summary` has `batch_id`, `posted`, `duplicates`, `failed`. Exit 7 = some rows failed (a `duplicate` is a successful no-op).
 6. **Opening balances:** when the header implies an existing balance (prior card balance, account starting balance), POST it per the direction table (`equity:opening-balance`) then REPORT what you posted — do not ask first.
-7. Card metadata from the header: `plasalid accounts update <liability:credit_card:x> --masked <digits> --points <n> --due-day <d> --statement-day <d> --json`. Stored form is `••` + last 4 significant digits (a full number truncates); echoed back in the result.
-8. `plasalid questions list --batch <batch_id> --json` — resolve or defer (below).
-9. `plasalid ingest done <sf:id> --agent claude-code --json` (failure: `plasalid ingest fail <sf:id> --error "<why>" --json`).
+7. Card metadata from the header: `oled accounts update <liability:credit_card:x> --masked <digits> --points <n> --due-day <d> --statement-day <d> --json`. Stored form is `••` + last 4 significant digits (a full number truncates); echoed back in the result.
+8. `oled questions list --batch <batch_id> --json` — resolve or defer (below).
+9. `oled ingest done <sf:id> --agent claude-code --json` (failure: `oled ingest fail <sf:id> --error "<why>" --json`).
 
 ## Workflow: clear questions
 
-`plasalid questions list --json`, then by `kind`:
-- **similar_accounts** — near-duplicate; if the same: `plasalid accounts merge --from <id> --to <id> --yes --json`.
-- **uncategorized** (placeholder created) — `plasalid transactions recategorize --set-account <id> --filter-account <placeholder> --json`, then `plasalid merchants set-default --merchant <id> --account <id> --json`.
-- **unknown_merchant** — `plasalid merchants upsert --name <canonical> --alias <descriptor> --json`.
+`oled questions list --json`, then by `kind`:
+- **similar_accounts** — near-duplicate; if the same: `oled accounts merge --from <id> --to <id> --yes --json`.
+- **uncategorized** (placeholder created) — `oled transactions recategorize --set-account <id> --filter-account <placeholder> --json`, then `oled merchants set-default --merchant <id> --account <id> --json`.
+- **unknown_merchant** — `oled merchants upsert --name <canonical> --alias <descriptor> --json`.
 - **currency_mismatch** — re-post as a linked conversion pair.
-- Answer: `plasalid questions answer <id> --answer "<text>" --json` (`--also <id,id>` closes siblings); `plasalid questions defer <id> --days <n> --json` when unknowable.
-- Durable user preference/rule? `plasalid notes add --content "..." --category preference --json` (check `plasalid notes list --json` first).
+- Answer: `oled questions answer <id> --answer "<text>" --json` (`--also <id,id>` closes siblings); `oled questions defer <id> --days <n> --json` when unknowable.
+- Durable user preference/rule? `oled notes add --content "..." --category preference --json` (check `oled notes list --json` first).
 
 ## Other workflows
 
-- **Manual entry** — a one-off the user dictates ("300 baht lunch, cash"), not statement rows: find ids with `plasalid accounts match --query <name> --json`, then `plasalid transactions add --debit-account expense:food --credit-account asset:cash --amount 300 --json`. `--resolve` fuzzy-resolves hint ids and raises questions, not failing.
-- **Reporting** — net worth: `plasalid status --json` (`net_worth`); `plasalid report --from <date> --to <date> --json`; `plasalid accounts show <id> --json` and `plasalid accounts tree --json` (`balance`/`debits_posted`/`credits_posted`, rollups); `plasalid transactions list --json` (+ `show <tx:id> --json`; 50 rows default, 500 max via `--limit`, summary has `has_more`); `plasalid transactions dedupe --json`.
-- **Cross-statement mirrors** — same payment on two statements: ingest both, find the pair with `plasalid transactions dedupe --json` (or `list --amount <decimal> [--currency <code>]`), then `plasalid transactions merge --from <tx:id> --to <tx:id> --yes --json` voids `--from` into `--to` (kept; idempotent re-ingest). Match amount, currency, and both accounts.
-- **Source files** — inspect or drop the statement files backing the ledger: `plasalid files list --json`, `plasalid files show <sf:id> --json`, `plasalid files drop <sf:id> --yes --json` (cascades its transactions + questions).
-- **Reference data** — the institution codes + country defaults behind account leaves: `plasalid datasets --json` lists the datasets; `plasalid datasets institutions --country th --kind bank --json` filters a country's institutions; `plasalid datasets defaults --json` gives per-country locale/currency.
+- **Manual entry** — a one-off the user dictates ("300 baht lunch, cash"), not statement rows: find ids with `oled accounts match --query <name> --json`, then `oled transactions add --debit-account expense:food --credit-account asset:cash --amount 300 --json`. `--resolve` fuzzy-resolves hint ids and raises questions, not failing.
+- **Reporting** — net worth: `oled status --json` (`net_worth`); `oled report --from <date> --to <date> --json`; `oled accounts show <id> --json` and `oled accounts tree --json` (`balance`/`debits_posted`/`credits_posted`, rollups); `oled transactions list --json` (+ `show <tx:id> --json`; 50 rows default, 500 max via `--limit`, summary has `has_more`); `oled transactions dedupe --json`.
+- **Cross-statement mirrors** — same payment on two statements: ingest both, find the pair with `oled transactions dedupe --json` (or `list --amount <decimal> [--currency <code>]`), then `oled transactions merge --from <tx:id> --to <tx:id> --yes --json` voids `--from` into `--to` (kept; idempotent re-ingest). Match amount, currency, and both accounts.
+- **Source files** — inspect or drop the statement files backing the ledger: `oled files list --json`, `oled files show <sf:id> --json`, `oled files drop <sf:id> --yes --json` (cascades its transactions + questions).
+- **Reference data** — the institution codes + country defaults behind account leaves: `oled datasets --json` lists the datasets; `oled datasets institutions --country th --kind bank --json` filters a country's institutions; `oled datasets defaults --json` gives per-country locale/currency.
 
 ## Ingest items
 
-One standalone NDJSON item; a compound item swaps the top-level account/amount fields for a `linked:[...]` array sharing one group (payslip, loan, FX). Standalone requires: `date`, `description`, `debit_account`, `credit_account`, `amount` (> 0); account ids are HINTS. Full flags and subcommands: `plasalid <noun> --help`.
+One standalone NDJSON item; a compound item swaps the top-level account/amount fields for a `linked:[...]` array sharing one group (payslip, loan, FX). Standalone requires: `date`, `description`, `debit_account`, `credit_account`, `amount` (> 0); account ids are HINTS. Full flags and subcommands: `oled <noun> --help`.
 
 ```json
 {"date":"2025-03-14","description":"Starbucks Paragon","raw_descriptor":"POS 1234 STARBUCKS","source_page":2,"row_index":0,"merchant":{"canonical_name":"Starbucks","alias":"STARBUCKS"},"debit_account":"expense:food:coffee","credit_account":"asset:bank:kbank","amount":135.00,"currency":"THB"}
@@ -136,7 +136,7 @@ Cross-currency as a conversion pair (36000 THB out, 1000 USD in; each leg homoge
 
 ### Commit output
 
-`plasalid ingest commit` emits one `result` per input item, then a terminal `summary`.
+`oled ingest commit` emits one `result` per input item, then a terminal `summary`.
 
 Standalone success:
 
@@ -169,7 +169,7 @@ Summary — questions attach to the `batch_id`; exit 7 when `failed` > 0; duplic
 
 ### Prepare output
 
-`plasalid ingest prepare <pathOrId> --json` returns `document` (the PDF to Read) and one entry per page in `pages`:
+`oled ingest prepare <pathOrId> --json` returns `document` (the PDF to Read) and one entry per page in `pages`:
 
 ```json
 {"file_id":"sf:...","format":"pdf","document":"/abs/statement.pdf","page_count":3,"pages":[{"page":0,"path":"/abs/statement.pdf"}]}
@@ -187,4 +187,4 @@ Account roots + suggested subtypes — build colon-paths under each root:
 - **expense** — food, transport, utilities, rent, housing, healthcare, entertainment, shopping, subscriptions, education, travel, fees_and_interest, tax, insurance, other
 - **equity** — opening-balance, conversion:<ccy> (opening balances and FX legs)
 
-Institution codes and country defaults are data, not literals here: `plasalid datasets institutions --country <c> [--kind <k>] --json` lists a country's codes, `plasalid datasets defaults --json` its locale and currency. Use a code as the account leaf and bank field (asset:bank:kbank, liability:credit_card:ktc). Only banks, card issuers, wallets, brokers, and exchanges form accounts; insurers, telcos, and utilities are merchants, added with `merchants upsert`.
+Institution codes and country defaults are data, not literals here: `oled datasets institutions --country <c> [--kind <k>] --json` lists a country's codes, `oled datasets defaults --json` its locale and currency. Use a code as the account leaf and bank field (asset:bank:kbank, liability:credit_card:ktc). Only banks, card issuers, wallets, brokers, and exchanges form accounts; insurers, telcos, and utilities are merchants, added with `merchants upsert`.

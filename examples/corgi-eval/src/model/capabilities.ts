@@ -3,7 +3,7 @@ import { tryExecute, type Result } from "../core/result.js";
 
 /**
  * What the endpoint says a model can take: which input types, and how big a
- * window. The host has to know both before the run starts. plasalid hands a
+ * window. The host has to know both before the run starts. OpenLedger hands a
  * statement back as a PDF or as PNG pages, so a model that accepts neither
  * cannot be scored on this task; and a budget set above the model's real window
  * turns an endpoint error into what reads like a model failure.
@@ -41,7 +41,7 @@ export const BUDGET_ENV = "CONTEXT_BUDGET_TOKENS";
  * has the way out. A model this host cannot deliver to is a different failure.
  */
 const DECLARE_INSTEAD =
-  `plasalid hands a statement back as a PDF or as PNG pages, so the eval has to know which of them the model can take. ` +
+  `OpenLedger hands a statement back as a PDF or as PNG pages, so the eval has to know which of them the model can take. ` +
   `Set ${MODALITIES_ENV}=text,image (add file for a model that reads PDFs directly) and run again.`;
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";

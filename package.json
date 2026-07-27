@@ -1,7 +1,7 @@
 {
-  "name": "plasalid",
+  "name": "open-ledger",
   "version": "0.13.1",
-  "description": "Plasalid — The Harness Layer for Personal Finance",
+  "description": "OpenLedger — The Harness Layer for Personal Finance",
   "keywords": [
     "finance",
     "harness",
@@ -10,19 +10,19 @@
     "cli",
     "ai"
   ],
-  "homepage": "https://github.com/phureewat29/plasalid#readme",
+  "homepage": "https://github.com/phureewat29/open-ledger#readme",
   "bugs": {
-    "url": "https://github.com/phureewat29/plasalid/issues"
+    "url": "https://github.com/phureewat29/open-ledger/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phureewat29/plasalid.git"
+    "url": "git+https://github.com/phureewat29/open-ledger.git"
   },
   "license": "SEE LICENSE IN LICENSE",
   "author": "Phureewat A",
   "type": "module",
   "bin": {
-    "plasalid": "dist/cli/index.js"
+    "oled": "dist/cli/index.js"
   },
   "files": [
     "dist/",

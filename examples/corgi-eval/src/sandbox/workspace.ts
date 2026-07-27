@@ -3,12 +3,12 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
-import type { PlasalidRunner } from "../plasalid/command.js";
+import type { OpenLedgerRunner } from "../open-ledger/command.js";
 
 /**
- * A throwaway directory tree plus the env that pins plasalid inside it. Nothing
- * here touches the caller's real ~/.plasalid: HOME is redirected and every
- * PLASALID_* path points into the tree.
+ * A throwaway directory tree plus the env that pins oled inside it. Nothing
+ * here touches the caller's real ~/.oled: HOME is redirected and every
+ * OLED_* path points into the tree.
  */
 
 export interface Workspace {
@@ -17,7 +17,7 @@ export interface Workspace {
   data: string;
   cwd: string;
   cache: string;
-  /** `plasalid setup --dir` base; the pack lands at <agent>/skills/plasalid. */
+  /** `oled setup --dir` base; the pack lands at <agent>/skills/open-ledger. */
   agent: string;
   /** npm --global --prefix target for the packed CLI. */
   npm: string;
@@ -43,11 +43,11 @@ function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
     PATH: `${bin}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
     HOME: paths.home,
     USERPROFILE: paths.home,
-    PLASALID_DIR: join(paths.home, ".plasalid"),
-    PLASALID_DB_PATH: paths.dbPath,
-    PLASALID_DATA_DIR: paths.data,
-    PLASALID_CACHE_DIR: paths.cache,
-    PLASALID_DB_ENCRYPTION_KEY: "",
+    OLED_DIR: join(paths.home, ".oled"),
+    OLED_DB_PATH: paths.dbPath,
+    OLED_DATA_DIR: paths.data,
+    OLED_CACHE_DIR: paths.cache,
+    OLED_DB_ENCRYPTION_KEY: "",
     NO_COLOR: "1",
   };
 }
@@ -98,18 +98,18 @@ export function seedStatements(workspace: Workspace, sourcePdfs: string[]): Resu
  */
 export async function installSkillPack(
   workspace: Workspace,
-  runner: PlasalidRunner,
+  runner: OpenLedgerRunner,
 ): Promise<Result<SkillPack>> {
   const setup = await runner.run(["setup", "--dir", workspace.agent, "--json"]);
-  if (!setup.ok) return { ok: false, error: `plasalid setup did not run: ${setup.message}` };
+  if (!setup.ok) return { ok: false, error: `oled setup did not run: ${setup.message}` };
   if (setup.value.exitCode !== 0) {
     return {
       ok: false,
-      error: `plasalid setup exited ${setup.value.exitCode}: ${setup.value.stderr.trim()}`,
+      error: `oled setup exited ${setup.value.exitCode}: ${setup.value.stderr.trim()}`,
     };
   }
 
-  const dir = join(workspace.agent, "skills", "plasalid");
+  const dir = join(workspace.agent, "skills", "open-ledger");
   const pack = tryExecute(() => {
     const text = readFileSync(join(dir, "SKILL.md"), "utf8");
     return {

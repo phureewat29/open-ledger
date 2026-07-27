@@ -1,9 +1,9 @@
 /**
  * corgi-claude demo entry point.
  *
- * An external `claude` CLI agent works end to end with plasalid over a real,
+ * An external `claude` CLI agent works end to end with OpenLedger over a real,
  * password-protected Thai credit-card statement, using only the documented
- * `plasalid` CLI surface. See README.md for the full story.
+ * `oled` CLI surface. See README.md for the full story.
  *
  * Usage:
  *   npm start --                          full demo (requires the `claude` CLI)

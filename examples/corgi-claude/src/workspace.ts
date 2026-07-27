@@ -14,19 +14,19 @@ import { join } from "node:path";
 export interface WorkspacePaths {
   /** Workspace root (a fresh mkdtemp directory). */
   root: string;
-  /** Redirected HOME/USERPROFILE - keeps ~/.plasalid (and ~/.claude) isolated. */
+  /** Redirected HOME/USERPROFILE - keeps ~/.oled (and ~/.claude) isolated. */
   home: string;
-  /** PLASALID_DATA_DIR - where statements get placed for discovery. */
+  /** OLED_DATA_DIR - where statements get placed for discovery. */
   data: string;
   /** Working directory the demo (and `claude`) run from. */
   cwd: string;
-  /** Holds the `plasalid` bin shim, put on PATH. */
+  /** Holds the `oled` bin shim, put on PATH. */
   bin: string;
-  /** PLASALID_CACHE_DIR - scratch space for prepared/decrypted documents. */
+  /** OLED_CACHE_DIR - scratch space for prepared/decrypted documents. */
   cache: string;
-  /** PLASALID_DB_PATH - sqlite db file (does not need to pre-exist). */
+  /** OLED_DB_PATH - sqlite db file (does not need to pre-exist). */
   dbPath: string;
-  /** Where `plasalid setup` installs the skill pack (.claude under cwd).
+  /** Where `oled setup` installs the skill pack (.claude under cwd).
    *  Created by setup, not pre-made by createWorkspace. */
   skillDir: string;
 }
@@ -54,19 +54,19 @@ export function createWorkspace(): WorkspacePaths {
   return paths;
 }
 
-/** Write a `plasalid` shim into the workspace bin dir that execs this
+/** Write an `oled` shim into the workspace bin dir that execs this
  *  checkout's freshly-built dist/cli/index.js. */
 export function writeBinShim(paths: WorkspacePaths, repoRoot: string): void {
-  const shimPath = join(paths.bin, "plasalid");
+  const shimPath = join(paths.bin, "oled");
   const distEntry = join(repoRoot, "dist", "cli", "index.js");
   const script = `#!/bin/sh\nexec node "${distEntry}" "$@"\n`;
   writeFileSync(shimPath, script, { mode: 0o755 });
   chmodSync(shimPath, 0o755);
 }
 
-/** Build the isolation env: HOME/USERPROFILE, PLASALID_* paths, a blank
+/** Build the isolation env: HOME/USERPROFILE, OLED_* paths, a blank
  *  encryption key (plain db, reproducible), NO_COLOR, and PATH prefixed with
- *  the workspace bin dir so `plasalid` resolves to the shim above. */
+ *  the workspace bin dir so `oled` resolves to the shim above. */
 export function buildEnv(
   paths: WorkspacePaths,
   base: NodeJS.ProcessEnv = process.env,
@@ -76,17 +76,17 @@ export function buildEnv(
     PATH: `${paths.bin}${base.PATH ? `:${base.PATH}` : ""}`,
     HOME: paths.home,
     USERPROFILE: paths.home,
-    PLASALID_DIR: join(paths.home, ".plasalid"),
-    PLASALID_DB_PATH: paths.dbPath,
-    PLASALID_DATA_DIR: paths.data,
-    PLASALID_CACHE_DIR: paths.cache,
-    PLASALID_DB_ENCRYPTION_KEY: "",
+    OLED_DIR: join(paths.home, ".oled"),
+    OLED_DB_PATH: paths.dbPath,
+    OLED_DATA_DIR: paths.data,
+    OLED_CACHE_DIR: paths.cache,
+    OLED_DB_ENCRYPTION_KEY: "",
     NO_COLOR: "1",
   };
 }
 
 /** Copy the bundled card statement into the workspace data dir
- *  (data/corgi-bank/), same relative layout `plasalid ingest list` expects to
+ *  (data/corgi-bank/), same relative layout `oled ingest list` expects to
  *  discover. Returns the destination path. */
 export function placeStatement(
   paths: WorkspacePaths,
@@ -144,34 +144,34 @@ export function runCommand(
 
 /** `npm run build` at the repo root - builds dist/cli/index.js for the bin
  *  shim to exec. */
-export function buildPlasalid(repoRoot: string): Promise<RunResult> {
+export function buildOpenLedger(repoRoot: string): Promise<RunResult> {
   return runCommand("npm", ["run", "build"], { cwd: repoRoot });
 }
 
-/** Run a `plasalid` subcommand through the workspace bin shim (resolved via
+/** Run an `oled` subcommand through the workspace bin shim (resolved via
  *  the isolation env's PATH). */
-export function runPlasalid(
+export function runOpenLedger(
   args: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): Promise<RunResult> {
-  return runCommand("plasalid", args, { cwd, env });
+  return runCommand("oled", args, { cwd, env });
 }
 
-/** Installs the plasalid skill pack into `paths.skillDir` (via `plasalid
+/** Installs the OpenLedger skill pack into `paths.skillDir` (via `oled
  *  setup`) so `claude` can discover the harness. */
 export function installSkill(
   paths: WorkspacePaths,
   env: NodeJS.ProcessEnv,
 ): Promise<RunResult> {
-  return runPlasalid(
+  return runOpenLedger(
     ["setup", "--dir", paths.skillDir, "--json"],
     env,
     paths.cwd,
   );
 }
 
-/** `plasalid vault add <pattern> --password-stdin --json`, piping the
+/** `oled vault add <pattern> --password-stdin --json`, piping the
  *  password over stdin (never as an argv value). */
 export function vaultAddPassword(
   pattern: string,
@@ -180,7 +180,7 @@ export function vaultAddPassword(
   cwd: string,
 ): Promise<RunResult> {
   return runCommand(
-    "plasalid",
+    "oled",
     ["vault", "add", pattern, "--password-stdin", "--json"],
     {
       cwd,

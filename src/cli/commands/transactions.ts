@@ -370,7 +370,7 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   }
 
   const accountHint =
-    "create it with `plasalid accounts create`, or find a close match with `plasalid accounts match --query <name>`, or re-run with --resolve";
+    "create it with `oled accounts create`, or find a close match with `oled accounts match --query <name>`, or re-run with --resolve";
   const debit = findAccountById(db, raw.debit_account_id);
   if (!debit) fail("NOT_FOUND", `account "${raw.debit_account_id}" not found`, { hint: accountHint });
   const credit = findAccountById(db, raw.credit_account_id);
@@ -485,7 +485,7 @@ export function registerTransactions(program: Command): void {
         "",
         "Behavior: reads the ledger (list, show) and edits it (add, update, delete, recategorize, dedupe, merge).",
         "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add.",
-        "Example: plasalid transactions list --account expense:food --json",
+        "Example: oled transactions list --account expense:food --json",
       ].join("\n"),
     );
 

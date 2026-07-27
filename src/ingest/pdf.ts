@@ -213,7 +213,7 @@ export function readPdf(path: string): LoadedFile {
   const mime = MIME_BY_EXT[ext];
   if (!mime) {
     throw new Error(
-      `Unsupported file extension: ${ext}. Plasalid v1 only ingests PDFs.`,
+      `Unsupported file extension: ${ext}. OpenLedger v1 only ingests PDFs.`,
     );
   }
   const stat = statSync(path);

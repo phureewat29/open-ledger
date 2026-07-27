@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
 import type { TransportKind } from "../agent/attach.js";
 import type { BudgetSource, Modality, ModalitySource } from "../model/capabilities.js";
-import { groupedRows, type LedgerProbe } from "../plasalid/ledger.js";
+import { groupedRows, type LedgerProbe } from "../open-ledger/ledger.js";
 import type { ExpectedLedger, StatementFacts, StatementGroup } from "../statement/truth.js";
 import type { Check, CheckStatus, Claim, ClaimStatus, Excluded, Scorecard } from "./scorecard.js";
 import type { MissingKind, PhaseProgress, RunDiagnosis, Wall } from "./diagnosis.js";
@@ -57,7 +57,7 @@ export interface RunIdentity {
   stream: boolean;
   host: HostIdentity;
   context: ContextIdentity;
-  plasalid: { version: string; tarball: string; fileCount: number };
+  oled: { version: string; tarball: string; fileCount: number };
   skill: { path: string; version: string; sha256: string; length: number };
   /** The adapter appended to the installed SKILL.md, verbatim. */
   environmentAdapter: string;
@@ -272,7 +272,7 @@ export function renderConsole(report: RunReport, reportPath: string): string {
   lines.push(chalk.bold(`corgi-eval — ${identity.model} @ ${identity.baseUrl}`));
   lines.push(
     chalk.dim(
-      `plasalid ${identity.plasalid.version} · skill ${identity.skill.version} (${identity.skill.length} chars, sha256 ${identity.skill.sha256.slice(0, 12)})`,
+      `oled ${identity.oled.version} · skill ${identity.skill.version} (${identity.skill.length} chars, sha256 ${identity.skill.sha256.slice(0, 12)})`,
     ),
   );
   lines.push(
@@ -418,7 +418,7 @@ function nextAttemptCell(item: FrictionItem): string {
   return "_never tried this subcommand again_";
 }
 
-/** One block per friction item: what was tried, what plasalid said, what came next. */
+/** One block per friction item: what was tried, what oled said, what came next. */
 function frictionDetail(item: FrictionItem, index: number): string[] {
   const lines = [`#### ${index + 1}. ${item.type} — ${item.phase}`, ""];
   lines.push(
@@ -524,7 +524,7 @@ export function renderMarkdown(report: RunReport): string {
   );
   lines.push("");
   lines.push(
-    "An eval of how well this model and the plasalid CLI contract work with each other. Sections 1 and 4 decide the verdict; 2, 3, and 5 are diagnostics for changing the harness.",
+    "An eval of how well this model and the OpenLedger CLI contract work with each other. Sections 1 and 4 decide the verdict; 2, 3, and 5 are diagnostics for changing the harness.",
   );
   lines.push("");
 
@@ -562,8 +562,8 @@ export function renderMarkdown(report: RunReport): string {
           `${identity.context.budgetTokens} tokens (${identity.context.source}: ${identity.context.detail})`,
         ],
         [
-          "plasalid",
-          `${identity.plasalid.version} (${identity.plasalid.fileCount} files, ${identity.plasalid.tarball.split("/").at(-1)})`,
+          "oled",
+          `${identity.oled.version} (${identity.oled.fileCount} files, ${identity.oled.tarball.split("/").at(-1)})`,
         ],
         ["skill", `${identity.skill.version}, ${identity.skill.length} chars`],
         ["skill sha256", identity.skill.sha256],
@@ -692,7 +692,7 @@ export function renderMarkdown(report: RunReport): string {
   lines.push("");
   lines.push("### Hint efficacy");
   lines.push("");
-  lines.push("Whether plasalid's error copy actually teaches.");
+  lines.push("Whether oled's error copy actually teaches.");
   lines.push("");
   lines.push(
     ...markdownTable(

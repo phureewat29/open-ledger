@@ -100,10 +100,10 @@ export function up(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS questions_batch_idx ON questions(batch_id);
     CREATE INDEX IF NOT EXISTS questions_deferred_idx ON questions(deferred_until);
 
-    CREATE TABLE IF NOT EXISTS memories (
+    CREATE TABLE IF NOT EXISTS notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       content TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'general',
+      category TEXT NOT NULL CHECK(category IN ('rule','preference','fact')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 

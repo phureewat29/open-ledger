@@ -57,12 +57,12 @@ export function buildProgram(): Command {
   program.enablePositionalOptions();
 
   program
-    .name("plasalid")
+    .name("oled")
     .description("The Harness Layer for Personal Finance")
     .version(version)
     .addHelpCommand(false)
-    .showHelpAfterError("Run `plasalid --help` for the list of commands.")
-    // Bare `plasalid` reports harness status (same implementation as `status`).
+    .showHelpAfterError("Run `oled --help` for the list of commands.")
+    // Bare `oled` reports harness status (same implementation as `status`).
     .action(
       runAction(async () => {
         await showStatus();

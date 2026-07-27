@@ -1,4 +1,4 @@
-import { groupedRows, type LedgerProbe } from "../plasalid/ledger.js";
+import { groupedRows, type LedgerProbe } from "../open-ledger/ledger.js";
 import type { ExpectedLedger } from "../statement/truth.js";
 import { analyzeFriction, redundantCommits, repeatedCommands, type FrictionAnalysis } from "./friction.js";
 import type { OperationalType, PhaseId } from "./events.js";

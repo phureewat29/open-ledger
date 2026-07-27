@@ -17,7 +17,7 @@ interface CliResult {
 let sandbox: Sandbox;
 
 beforeAll(() => {
-  sandbox = createSandbox("plasalid-it-");
+  sandbox = createSandbox("oled-it-");
 });
 
 afterAll(() => {

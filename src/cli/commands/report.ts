@@ -56,9 +56,9 @@ export function registerReport(program: Command): void {
       "after",
       [
         "",
-        "Behavior: sums income, expenses, and net over a date range. For net worth use plasalid status.",
+        "Behavior: sums income, expenses, and net over a date range. For net worth use oled status.",
         "Typical flow: both dates are required and ISO (YYYY-MM-DD).",
-        "Example: plasalid report --from 2025-01-01 --to 2025-03-31 --json",
+        "Example: oled report --from 2025-01-01 --to 2025-03-31 --json",
       ].join("\n"),
     )
     .action(runAction(showReport));

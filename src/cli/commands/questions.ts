@@ -135,7 +135,7 @@ export function registerQuestions(program: Command): void {
         "",
         "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
         "Typical flow: list --json, resolve each by kind (merge, recategorize, upsert), then answer or defer.",
-        "Example: plasalid questions list --json",
+        "Example: oled questions list --json",
       ].join("\n"),
     );
 

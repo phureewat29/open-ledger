@@ -23,7 +23,7 @@ export interface ConfigFailure {
 
 export type ConfigResult = { ok: true; value: Config } | ConfigFailure;
 
-export const HELP = `corgi-eval — an eval of how well a model and the plasalid contract work together
+export const HELP = `corgi-eval — an eval of how well a model and the OpenLedger contract work together
 
   npm start [-- <flags>]
 

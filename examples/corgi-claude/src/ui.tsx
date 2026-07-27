@@ -242,7 +242,7 @@ function TurnBlock({
       {!running && (
         <Text bold color={turn.status === "ok" ? "green" : "red"}>
           {turn.status === "ok" ? "✅" : "❌"}{" "}
-          {turnSummaryText(turn.turn, turn.status === "ok", turn.durationMs, turn.plasalidCalls)}
+          {turnSummaryText(turn.turn, turn.status === "ok", turn.durationMs, turn.oledCalls)}
         </Text>
       )}
       <Text dimColor>{DIVIDER}</Text>

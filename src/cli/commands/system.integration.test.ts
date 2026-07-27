@@ -27,13 +27,13 @@ let sandbox: Sandbox;
 let dbPath: string;
 
 beforeAll(() => {
-  sandbox = createSandbox("plasalid-system-it-");
+  sandbox = createSandbox("oled-system-it-");
   dbPath = sandbox.dbPath;
 
   // Minimal config.json so `doctor`'s config_exists check is true and `config show` resolves.
-  mkdirSync(join(sandbox.home, ".plasalid"), { recursive: true });
+  mkdirSync(join(sandbox.home, ".oled"), { recursive: true });
   writeFileSync(
-    join(sandbox.home, ".plasalid", "config.json"),
+    join(sandbox.home, ".oled", "config.json"),
     JSON.stringify({ displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" }, null, 2) + "\n",
   );
 
@@ -94,7 +94,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "config --generate-key on a fresh env: config show reflects it redacted, never plaintext",
     async () => {
-      const isolated = createSandbox("plasalid-system-setup-it-");
+      const isolated = createSandbox("oled-system-setup-it-");
       try {
         const setupDataDir = isolated.dataDir;
         const setupDbPath = isolated.dbPath;
@@ -145,7 +145,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "config --generate-key re-run keeps the live key instead of orphaning the encrypted db",
     async () => {
-      const isolated = createSandbox("plasalid-system-rekey-it-");
+      const isolated = createSandbox("oled-system-rekey-it-");
       try {
         const first = await runCli(
           ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--generate-key", "--json"],
@@ -170,7 +170,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "config --generate-key refuses to key an existing keyless db (INVALID) and leaves it usable",
     async () => {
-      const isolated = createSandbox("plasalid-system-plain-db-it-");
+      const isolated = createSandbox("oled-system-plain-db-it-");
       try {
         // Any db-touching command run with the sandbox's blank key creates a
         // plain db first — the agent-bootstrap path the demo exercises.

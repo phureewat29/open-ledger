@@ -80,17 +80,17 @@ export function execCapture(
   });
 }
 
-export interface PlasalidRunner {
+export interface OpenLedgerRunner {
   readonly bin: string;
   run(argv: string[], opts?: { stdin?: string }): Promise<CommandResult>;
 }
 
-export function createPlasalidRunner(args: {
+export function createOpenLedgerRunner(args: {
   bin: string;
   env: NodeJS.ProcessEnv;
   cwd: string;
   timeoutMs: number;
-}): PlasalidRunner {
+}): OpenLedgerRunner {
   return {
     bin: args.bin,
     run: (argv, opts = {}) =>

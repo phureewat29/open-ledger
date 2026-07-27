@@ -27,7 +27,7 @@ function openDb(dbPath: string, encryptionKey?: string): Database.Database {
     // cause for debugging.
     throw new Error(
       "Failed to open database. Wrong encryption key or corrupt database file. " +
-      "If you changed your encryption key, restore from backup or delete ~/.plasalid/db.sqlite to start fresh.",
+      "If you changed your encryption key, restore from backup or delete ~/.oled/db.sqlite to start fresh.",
       { cause: err },
     );
   }

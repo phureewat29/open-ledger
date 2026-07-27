@@ -50,7 +50,7 @@ interface DatasetsOpts {
 function datasets(name: string | undefined, opts: DatasetsOpts): void {
   if (name === undefined) {
     if (opts.country || opts.kind) {
-      fail("USAGE", "--country/--kind need a dataset name (e.g. `plasalid datasets institutions --country th`)");
+      fail("USAGE", "--country/--kind need a dataset name (e.g. `oled datasets institutions --country th`)");
     }
     emitList(listDatasets(), DATASET_COLUMNS);
     return;
@@ -79,7 +79,7 @@ export function registerDatasets(program: Command): void {
         "",
         "Behavior: read-only reference data, institution codes and per-country defaults behind account leaves.",
         "Typical flow: bare datasets lists them; datasets institutions --country th filters a country's institutions.",
-        "Example: plasalid datasets institutions --country th --kind bank --json",
+        "Example: oled datasets institutions --country th --kind bank --json",
       ].join("\n"),
     )
     .action(runAction(datasets));

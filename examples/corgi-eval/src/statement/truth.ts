@@ -6,7 +6,7 @@ import { tryExecute, type Result } from "../core/result.js";
 /**
  * What each statement says, read from the PDF once and checked in beside it as
  * fact. The example ships no PDF machinery of its own: reading a statement is the
- * model's job, through plasalid, and nothing here may become a second way to do
+ * model's job, through oled, and nothing here may become a second way to do
  * it. Fact files never enter the sandbox, so they cannot leak the answers.
  *
  * One statement, one fact file: `<name>.pdf` is described by `<name>.expected.json`

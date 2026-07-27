@@ -543,7 +543,7 @@ export function registerAccounts(program: Command): void {
         "",
         "Behavior: manages the chart of accounts, colon-paths under asset, liability, income, expense, equity.",
         "Typical flow: match to reuse an existing account before create; read balances with tree or show.",
-        "Example: plasalid accounts match --query groceries --json",
+        "Example: oled accounts match --query groceries --json",
       ].join("\n"),
     );
 

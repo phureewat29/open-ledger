@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "fs";
 import { dirname, resolve } from "path";
-import { getPlasalidDir } from "./config.js";
+import { getOledDir } from "./config.js";
 import { tryExecute } from "./lib/result.js";
 
 export function getContextPath(): string {
-  return resolve(getPlasalidDir(), "context.md");
+  return resolve(getOledDir(), "context.md");
 }
 
 export function readContext(): string {
@@ -25,6 +25,6 @@ function writeContext(content: string): void {
 export function createContextTemplate(userName: string): void {
   if (existsSync(getContextPath())) return;
   writeContext(
-    `# Plasalid context for ${userName}\n\n## Family\n- ${userName}\n\n## Income\n- (Optional: add your primary income source so Plasalid can mark it as PII when sending data to the model.)\n\n## Notes\n- (Free-form notes about your accounts, bank preferences, or anything Plasalid should keep in mind when ingesting.)\n`,
+    `# OpenLedger context for ${userName}\n\n## Family\n- ${userName}\n\n## Income\n- (Optional: add your primary income source so OpenLedger can mark it as PII when sending data to the model.)\n\n## Notes\n- (Free-form notes about your accounts, bank preferences, or anything OpenLedger should keep in mind when ingesting.)\n`,
   );
 }

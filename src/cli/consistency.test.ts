@@ -40,8 +40,8 @@ function readmeCommandsBlock(readme: string): string {
 }
 
 /**
- * Extracts the noun named on each `plasalid <noun> ...` README line. The bare
- * `plasalid` line documents the no-arg default action (an alias for `status`),
+ * Extracts the noun named on each `oled <noun> ...` README line. The bare
+ * `oled` line documents the no-arg default action (an alias for `status`),
  * mapped explicitly rather than left unmatched.
  */
 function extractReadmeCommandNames(readme: string): Set<string> {
@@ -49,11 +49,11 @@ function extractReadmeCommandNames(readme: string): Set<string> {
   const names = new Set<string>();
   for (const rawLine of block.split("\n")) {
     const trimmed = rawLine.trim();
-    if (!trimmed.startsWith("plasalid")) continue;
+    if (!trimmed.startsWith("oled")) continue;
     const beforeComment = trimmed.split("#")[0].trim();
     const parts = beforeComment.split(/\s+/).filter(Boolean);
     if (parts.length < 2) {
-      names.add("status"); // bare `plasalid` line == the status default action
+      names.add("status"); // bare `oled` line == the status default action
       continue;
     }
     names.add(parts[1]);
@@ -61,13 +61,13 @@ function extractReadmeCommandNames(readme: string): Set<string> {
   return names;
 }
 
-/** All `` `plasalid ...` `` backtick spans anywhere in a markdown string. */
-function extractPlasalidCodeSpans(md: string): string[] {
+/** All `` `oled ...` `` backtick spans anywhere in a markdown string. */
+function extractOledCodeSpans(md: string): string[] {
   const spans: string[] = [];
   const re = /`([^`]+)`/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(md))) {
-    if (m[1].startsWith("plasalid ") || m[1] === "plasalid") spans.push(m[1]);
+    if (m[1].startsWith("oled ") || m[1] === "oled") spans.push(m[1]);
   }
   return spans;
 }
@@ -83,9 +83,9 @@ function isArgToken(token: string): boolean {
 }
 
 /**
- * The concrete command noun a span names — the first token after `plasalid`,
- * when it's a real command word. A bare `plasalid`, a root flag, or a generic
- * `plasalid <noun> --help` template names no command and returns undefined.
+ * The concrete command noun a span names — the first token after `oled`,
+ * when it's a real command word. A bare `oled`, a root flag, or a generic
+ * `oled <noun> --help` template names no command and returns undefined.
  */
 function commandNounOf(span: string): string | undefined {
   const noun = span.trim().split(/\s+/)[1];
@@ -93,10 +93,10 @@ function commandNounOf(span: string): string | undefined {
   return noun;
 }
 
-/** Set of concrete command nouns mentioned across a markdown doc's plasalid spans. */
+/** Set of concrete command nouns mentioned across a markdown doc's oled spans. */
 function extractSpanNouns(md: string): Set<string> {
   const nouns = new Set<string>();
-  for (const span of extractPlasalidCodeSpans(md)) {
+  for (const span of extractOledCodeSpans(md)) {
     const noun = commandNounOf(span);
     if (noun) nouns.add(noun);
   }
@@ -115,7 +115,7 @@ function firstSubToken(span: string): string | undefined {
 }
 
 /**
- * Resolves the command a doc code-span like `plasalid transactions recategorize
+ * Resolves the command a doc code-span like `oled transactions recategorize
  * --set-account <id> ...` refers to: the noun command, drilled into a subcommand
  * when the span names one.
  */
@@ -170,7 +170,7 @@ describe("docs consistency (no subprocesses)", () => {
     const program = buildProgram();
     const problems: string[] = [];
 
-    for (const span of extractPlasalidCodeSpans(SKILL)) {
+    for (const span of extractOledCodeSpans(SKILL)) {
       const noun = commandNounOf(span);
       if (!noun) continue;
       // Unknown nouns are the noun-set test's job; here we only vet the subcommand.
@@ -178,22 +178,22 @@ describe("docs consistency (no subprocesses)", () => {
       if (!nounCmd || nounCmd.commands.length === 0) continue;
 
       const sub = firstSubToken(span);
-      if (!sub) continue; // span targets the parent noun (e.g. `plasalid config --generate-key`)
+      if (!sub) continue; // span targets the parent noun (e.g. `oled config --generate-key`)
       const child = nounCmd.commands.find((c) => c.name() === sub);
       if (!child) problems.push(`\`${span}\` — \`${sub}\` is not a subcommand of \`${noun}\``);
     }
     expect(problems).toEqual([]);
   });
 
-  it("every --flag on a plasalid span in SKILL.md is a real option on the resolved command", () => {
+  it("every --flag on an oled span in SKILL.md is a real option on the resolved command", () => {
     const program = buildProgram();
     const globalFlags = new Set(["--json", "--no-color"]);
     const problems: string[] = [];
     const sources: Array<[string, string]> = [["SKILL.md", SKILL]];
 
     for (const [label, md] of sources) {
-      for (const span of extractPlasalidCodeSpans(md)) {
-        // Bare `plasalid`, root flags, and generic `--help` templates name no command to check.
+      for (const span of extractOledCodeSpans(md)) {
+        // Bare `oled`, root flags, and generic `--help` templates name no command to check.
         if (!commandNounOf(span)) continue;
         const target = resolveTargetCommand(program, span);
         if (!target) {

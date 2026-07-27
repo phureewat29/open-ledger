@@ -39,13 +39,13 @@ export const SCENARIO: Phase[] = [
 /** Recorded verbatim in the report, so a score is always readable against the prompt that produced it. */
 /**
  * Environment facts the model cannot infer, and nothing else. Every rule about
- * using plasalid is deliberately absent: SKILL.md and `plasalid <noun> --help`
+ * using oled is deliberately absent: SKILL.md and `oled <noun> --help`
  * are the surface under test, so repeating their advice here would measure this
  * text instead of the harness.
  */
 export const ENVIRONMENT_ADAPTER = `## This environment
 
-- You have one tool, \`plasalid\`, and no filesystem: one command per call, no shell operators, and no way to create or read files yourself.
+- You have one tool, \`oled\`, and no filesystem: one command per call, no shell operators, and no way to create or read files yourself.
 - Whatever a command produces for you to read is delivered into this conversation automatically.
 - Whatever a command would read from stdin goes in the tool's \`stdin\` field.
 - Keep replies short. This run scores your actions, not your prose.`;

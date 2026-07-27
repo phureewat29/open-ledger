@@ -40,14 +40,13 @@ export function printKeyValues(
 
 export function banner(): string {
   return (
-    chalk.cyan("<°(((><  ") +
-    chalk.bold("Plasalid") +
+    chalk.bold("OpenLedger") +
     chalk.dim("  ·  The Harness Layer for Personal Finance")
   );
 }
 
 const DISCLAIMER =
-  "Plasalid is an assistant, it only summarizes financial statements — verify amounts against your statements before relying on them.";
+  "OpenLedger is an assistant, it only summarizes financial statements — verify amounts against your statements before relying on them.";
 
 const SCENARIO = [
   "Drop bank statements in a folder; your AI posts each row to a local encrypted ledger.",
@@ -76,8 +75,8 @@ export function helpScreen(
     `${chalk.cyan(name.padEnd(nameWidth))}    ${chalk.dim(desc)}`;
 
   const usageLines = [
-    row("plasalid", "<command> [OPTIONS]"),
-    row("plasalid", "Show harness status (default)"),
+    row("oled", "<command> [OPTIONS]"),
+    row("oled", "Show harness status (default)"),
   ];
 
   return [

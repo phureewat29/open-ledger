@@ -1,8 +1,11 @@
 <p align="center">
-  <img src="https://i.ibb.co/fdkHzmZk/plasalid-logo.png" alt="Plasalid" width="108" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="OpenLedger" width="108">
+  </picture>
 </p>
 
-<h1 align="center">Plasalid</h1>
+<h1 align="center">OpenLedger</h1>
 
 <p align="center">
   <strong>The Harness Layer for Personal Finance</strong>
@@ -13,40 +16,40 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/plasalid"><img src="https://img.shields.io/npm/v/plasalid.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/plasalid"><img src="https://img.shields.io/npm/dt/plasalid.svg" alt="npm total downloads" /></a>
+  <a href="https://www.npmjs.com/package/open-ledger"><img src="https://img.shields.io/npm/v/open-ledger.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/open-ledger"><img src="https://img.shields.io/npm/dt/open-ledger.svg" alt="npm total downloads" /></a>
 </p>
 
 <br />
 
 You've tried many personal finance apps from the App Store. None of them fits what you need, because each is someone else's idea of your money and lifestyle. So you asked AI to build the one that would, and it failed you too. It halucinate the numbers, mangled your data, and never quite understood what you wanted.
 
-AI fails when it has nowhere reliable to keep the numbers. Plasalid gives it that place, a deterministic harness that holds every number in your own records.
+AI fails when it has nowhere reliable to keep the numbers. OpenLedger gives it that place, a deterministic harness that holds every number in your own records.
 
-Plasalid is a secure ledger that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
+OpenLedger is a secure ledger that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
 
 Everything stays on your machine, the database is fully encrypted, and what the harness returns to your AI has PII redacted by default before it sends to AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
 
 By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is yours to reimagine, and everything you build reads from the same ledger, so you can keep adding without starting over.
 
-## Use Plasalid with your AI
+## Use OpenLedger with your AI
 
-The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host gets the same bytes; `plasalid setup --print` prints them.
+The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host gets the same bytes; `oled setup --print` prints them.
 
 ### AI Chat Apps (ChatGPT, Claude, Gemini, Kimi)
 
 1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
 
    ```bash
-   npm install -g plasalid
+   npm install -g open-ledger
    ```
 
 2. Paste into your AI chat:
 
    ```
-   Download https://raw.githubusercontent.com/phureewat29/plasalid/main/skills/SKILL.md
+   Download https://raw.githubusercontent.com/phureewat29/open-ledger/main/skills/SKILL.md
    and follow it as your instructions whenever I ask about my finances.
-   I have plasalid installed. Set up my ledger with me: one command at a time,
+   I have oled installed. Set up my ledger with me: one command at a time,
    and I'll paste back the output.
    ```
 
@@ -55,15 +58,15 @@ Your AI walks you through the rest.
 ### Coding Agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, PI)
 
 ```bash
-npm install -g plasalid
-npx skills add phureewat29/plasalid
+npm install -g open-ledger
+npx skills add phureewat29/open-ledger
 ```
 
-Or run `plasalid setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read (use `--host claude` for Claude Code).
+Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read (use `--host claude` for Claude Code).
 
 ### Your own agent stack
 
-Every command speaks `--json` with typed exit codes, built to be scripted. `plasalid setup --dir <agent-home>` installs the skill anywhere. Two complete references ship in this repo: [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`, and [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
+Every command speaks `--json` with typed exit codes, built to be scripted. `oled setup --dir <agent-home>` installs the skill anywhere. Two complete references ship in this repo: [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`, and [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
 
 With the skill installed, give your agent a real task:
 
@@ -77,54 +80,54 @@ Every row becomes a *transaction*: it debits one account and credits another by 
 
 This is the loop the skill teaches an agent to run:
 
-1. **Discover**: `plasalid ingest list --json` to find new/pending files.
-2. **Prepare**: `plasalid ingest prepare <path>` registers the file and returns its readable `document` path, unlocking encrypted PDFs via `plasalid vault`.
-3. **Read**: the agent reads the statement PDF directly (modern agent models read PDFs natively; Plasalid stays deterministic).
-4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `plasalid ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, fuzzy account match, uncategorized fallback, cross-currency row).
-5. **Resolve**: the agent (or you) works through `plasalid questions` for whatever got raised, then closes the file out with `plasalid ingest done <id>`.
+1. **Discover**: `oled ingest list --json` to find new/pending files.
+2. **Prepare**: `oled ingest prepare <path>` registers the file and returns its readable `document` path, unlocking encrypted PDFs via `oled vault`.
+3. **Read**: the agent reads the statement PDF directly (modern agent models read PDFs natively; OpenLedger stays deterministic).
+4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, fuzzy account match, uncategorized fallback, cross-currency row).
+5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
 
 ## Commands
 
-Run `plasalid --help` (or `plasalid <noun> --help`) for the full flag reference. Grouped overview:
+Run `oled --help` (or `oled <noun> --help`) for the full flag reference. Grouped overview:
 
 ```
-plasalid                # Status: config, database, ledger counts, net worth (default)
-plasalid doctor         # Diagnose the harness environment
-plasalid setup          # Install the skill for an agent CLI (--host <id> | --dir <path>)
-plasalid config         # Configuration
+oled                # Status: config, database, ledger counts, net worth (default)
+oled doctor         # Diagnose the harness environment
+oled setup          # Install the skill for an agent CLI (--host <id> | --dir <path>)
+oled config         # Configuration
 
-plasalid ingest         # Ingest pipeline: list / prepare / commit / done / fail
-plasalid files          # Browse ingested files (list / show / drop)
-plasalid vault          # Manage file-password patterns for encrypted statements
+oled ingest         # Ingest pipeline: list / prepare / commit / done / fail
+oled files          # Browse ingested files (list / show / drop)
+oled vault          # Manage file-password patterns for encrypted statements
 
-plasalid transactions   # Transactions: list / show / add / update / delete / recategorize / dedupe
-plasalid accounts       # Manage the chart of accounts
-plasalid merchants      # Manage merchants and their default accounts
-plasalid questions      # List, answer, and defer open questions
+oled transactions   # Transactions: list / show / add / update / delete / recategorize / dedupe
+oled accounts       # Manage the chart of accounts
+oled merchants      # Manage merchants and their default accounts
+oled questions      # List, answer, and defer open questions
 
-plasalid report         # Income, expenses, and net
-plasalid notes          # Manage freeform notes
-plasalid datasets       # Reference datasets
+oled report         # Income, expenses, and net
+oled notes          # Manage freeform notes
+oled datasets       # Reference datasets
 
-plasalid data           # Open the data folder in file explorer (alias: open)
+oled data           # Open the data folder in file explorer (alias: open)
 ```
 
 ## Security & Privacy
 
-- All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.plasalid/db.sqlite`.
-- The config file (`~/.plasalid/config.json`) carries `0600` permissions; the only secret it holds is the database encryption key, and `config`/`status` surface only a fingerprint of it, never the plaintext.
+- All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.oled/db.sqlite`.
+- The config file (`~/.oled/config.json`) carries `0600` permissions; the only secret it holds is the database encryption key, and `config`/`status` surface only a fingerprint of it, never the plaintext.
 - Encrypted-PDF passwords sit AES-GCM-encrypted in `db.sqlite` under a filename pattern; plaintext never touches disk.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
-- No telemetry, no analytics. Plasalid makes no network calls of its own.
+- No telemetry, no analytics. OpenLedger makes no network calls of its own.
 
 ## Configuration
 
-Plasalid stores everything in `~/.plasalid/`:
+OpenLedger stores everything in `~/.oled/`:
 
 ```
-~/.plasalid/
+~/.oled/
   config.json    # locale, currency, paths, encryption key fingerprint (0600 permissions)
-  context.md     # persistent freeform context an agent can read (path shown as context_path in plasalid config show)
+  context.md     # persistent freeform context an agent can read (path shown as context_path in oled config show)
   db.sqlite      # encrypted SQLite database
   data/          # drop any PDFs here (subfolders allowed)
   cache/         # scratch space for rasterized/decrypted pages handed to an agent
@@ -135,38 +138,41 @@ Plasalid stores everything in `~/.plasalid/`:
 See `.env.example` for the current list:
 
 ```bash
-# Relocates the entire ~/.plasalid directory, including config.json.
-PLASALID_DIR=
+# OpenLedger environment variables. Copy this file to `.env` and fill the values.
 
-# Passphrase used to encrypt the local SQLite database (AES-256).
-# `plasalid config --generate-key` generates one if left blank.
-PLASALID_DB_ENCRYPTION_KEY=
+# Optional. Relocates the entire ~/.oled directory. Individual
+# OLED_* overrides below still win for their own paths.
+OLED_DIR=
 
-# Default: ~/.plasalid/db.sqlite
-PLASALID_DB_PATH=
+# Optional. Passphrase used to encrypt the local SQLite database (AES-256).
+# `oled config --generate-key` generates one if left blank.
+OLED_DB_ENCRYPTION_KEY=
 
-# Default: ~/.plasalid/data
-PLASALID_DATA_DIR=
+# Optional. Default: ~/.oled/db.sqlite
+OLED_DB_PATH=
 
-# Scratch space for decrypted/rasterized artifacts handed to external agent CLIs.
-# Default: ~/.plasalid/cache
-PLASALID_CACHE_DIR=
+# Optional. Default: ~/.oled/data
+OLED_DATA_DIR=
+
+# Optional. Scratch space for decrypted/rasterized artifacts handed to external
+# agent CLIs. Default: ~/.oled/cache
+OLED_CACHE_DIR=
 ```
 
 ## Contributing
 
 ```bash
-git clone https://github.com/phureewat29/plasalid
-cd plasalid
+git clone https://github.com/phureewat29/open-ledger
+cd open-ledger
 npm install
 npm run build
-npm link # makes 'plasalid' available globally
+npm link # makes 'oled' available globally
 ```
 
 `npm run integration` builds the CLI and runs a two-stage integration test against the built binary: a read-surface sweep (NDJSON validity, exit codes, zero ANSI) and a full write-path lifecycle in an isolated environment.
 
 ## License
 
-Plasalid uses the [Apache License 2.0 with the Commons Clause](./LICENSE).
+OpenLedger uses the [Apache License 2.0 with the Commons Clause](./LICENSE).
 
-You're free to use, copy, modify, distribute, and fork it. The Commons Clause adds one restriction: **you may not Sell the Software**, meaning you may not provide a paid product or service whose value derives entirely or substantially from Plasalid's functionality (including paid hosting or support). For commercial-resale rights, contact the copyright holder to negotiate a separate license.
+You're free to use, copy, modify, distribute, and fork it. The Commons Clause adds one restriction: **you may not Sell the Software**, meaning you may not provide a paid product or service whose value derives entirely or substantially from OpenLedger's functionality (including paid hosting or support). For commercial-resale rights, contact the copyright holder to negotiate a separate license.

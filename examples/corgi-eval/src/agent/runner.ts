@@ -25,7 +25,7 @@ export interface TurnCounter {
 export interface RunnerDeps {
   model: ChatModel;
   tools: Tool[];
-  /** How what plasalid produces reaches this model. */
+  /** How what oled produces reaches this model. */
   transport: TransportPlan;
   emit: EventSink;
   contextBudgetTokens: number;

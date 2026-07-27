@@ -2,7 +2,7 @@
  * Two-stage integration test for the deterministic CLI harness.
  *
  * Stage 1 spawns `node dist/cli/index.js <cmd> --json` for every read-only
- * command against a throwaway env (temp HOME + PLASALID_DB_PATH/DATA_DIR/
+ * command against a throwaway env (temp HOME + OLED_DB_PATH/DATA_DIR/
  * CACHE_DIR) over an empty ledger, asserting NDJSON stdout/stderr, the
  * expected exit code, and no ANSI escapes.
  *
@@ -594,7 +594,7 @@ function stepSkillSetup(ctx: Ctx): void {
     `unexpected setup result: ${JSON.stringify(result)}`,
   );
 
-  const skillDir = join(skillBase, "skills", "plasalid");
+  const skillDir = join(skillBase, "skills", "open-ledger");
   assert(existsSync(join(skillDir, "SKILL.md")), `missing SKILL.md under ${skillDir}`);
   assert(existsSync(join(skillDir, "VERSION")), `missing VERSION under ${skillDir}`);
 }
@@ -644,7 +644,7 @@ const STAGE2_STEPS: { label: string; fn: (ctx: Ctx) => void }[] = [
  * into config.json is picked up by every later invocation.
  */
 async function runStage2(): Promise<Result[]> {
-  const sandbox = createSandbox("plasalid-integration-stage2-");
+  const sandbox = createSandbox("oled-integration-stage2-");
   activeRoots.add(sandbox.root);
   const ctx: Ctx = {
     env: sandbox.env,
@@ -672,7 +672,7 @@ async function runStage2(): Promise<Result[]> {
         results.push({ label: step.label, pass: false, detail: msg });
         console.error(`\nintegration: STAGE 2 FAILURE in "${step.label}"`);
         if (ctx.last) {
-          console.error(`command: plasalid ${ctx.last.args.join(" ")}`);
+          console.error(`command: oled ${ctx.last.args.join(" ")}`);
           console.error(`exit code: ${ctx.last.code}`);
           console.error(`stdout:\n${ctx.last.stdout}`);
           console.error(`stderr:\n${ctx.last.stderr}`);
@@ -693,7 +693,7 @@ async function main(): Promise<void> {
   console.log("integration: building...");
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "inherit" });
 
-  const sandbox = createSandbox("plasalid-integration-");
+  const sandbox = createSandbox("oled-integration-");
   activeRoots.add(sandbox.root);
   console.log(`integration: stage 1 temp env at ${sandbox.root}`);
 

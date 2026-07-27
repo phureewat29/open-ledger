@@ -275,7 +275,7 @@ const NOT_READY_PATTERNS = [
   "not a database",
   "file is encrypted",
   "not configured",
-  "unrecognized legacy schema",
+  "not an openledger database",
 ];
 
 function isNotReadyError(err: unknown): boolean {
@@ -290,7 +290,7 @@ function toCliError(err: unknown): CliError {
   if (err instanceof ValidationError) return new CliError("USAGE", err.message);
   if (isNotReadyError(err)) {
     return new CliError("NOT_READY", (err as Error).message, {
-      hint: "run `plasalid config --generate-key` to configure the harness",
+      hint: "run `oled config --generate-key` to configure the harness",
     });
   }
   return new CliError("GENERIC", errorMessage(err));

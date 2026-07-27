@@ -11,11 +11,11 @@ import {
   type Modality,
   type ModelCapabilities,
 } from "../model/capabilities.js";
-import type { PlasalidArtifacts } from "../plasalid/artifacts.js";
+import type { OpenLedgerArtifacts } from "../open-ledger/artifacts.js";
 import type { OperationalType } from "../report/events.js";
 
 /**
- * The host's one job with a statement: hand back what the model asked plasalid
+ * The host's one job with a statement: hand back what the model asked oled
  * to produce, in a form the model accepts. That is the service Claude Code's
  * Read performs in examples/corgi-claude, and it stops there. Bytes travel
  * verbatim; nothing here opens, parses, extracts from, or summarizes a
@@ -81,7 +81,7 @@ export async function planHostTransport(query: CapabilityQuery): Promise<Result<
       ok: false,
       error:
         `${query.model} accepts ${capabilities.modalities.join(", ")} and nothing else (${capabilities.detail}). ` +
-        `plasalid hands a statement back as a PDF file or as PNG page images, and the model cannot be sent either, ` +
+        `OpenLedger hands a statement back as a PDF file or as PNG page images, and the model cannot be sent either, ` +
         `so it cannot read the statement and cannot be scored on this task. Run a model that accepts image or file input.`,
     };
   }
@@ -187,7 +187,7 @@ async function attachPages(paths: string[]): Promise<Attached> {
   };
 }
 
-function describe(artifacts: PlasalidArtifacts): string {
+function describe(artifacts: OpenLedgerArtifacts): string {
   if (artifacts.document) return `the PDF ${artifacts.document}`;
   return count(artifacts.pages.length, "page image");
 }
@@ -200,7 +200,7 @@ function describe(artifacts: PlasalidArtifacts): string {
  */
 export async function attachArtifacts(
   plan: TransportPlan,
-  artifacts: PlasalidArtifacts,
+  artifacts: OpenLedgerArtifacts,
 ): Promise<Attached> {
   if (artifacts.document && plan.kinds.includes("file")) return attachDocument(artifacts.document);
   if (artifacts.pages.length > 0 && plan.kinds.includes("images")) return attachPages(artifacts.pages);

@@ -2,7 +2,7 @@
  * The run's observable vocabulary. The runner emits these; the recorder is the
  * only subscriber that keeps state, and the scorecard reads the recorded stream
  * back to derive every analysis. No event carries a duration: this run measures
- * how a model and the plasalid contract fit together, not how fast either is.
+ * how a model and the OpenLedger contract fit together, not how fast either is.
  */
 
 export type PhaseId = "orient" | "ingest" | "resolve" | "answer";
@@ -33,7 +33,7 @@ export interface CommitCounters {
 
 export interface ToolObservation {
   tool: string;
-  /** The command path plasalid dispatches on (`ingest commit`), or the tool name. */
+  /** The command path oled dispatches on (`ingest commit`), or the tool name. */
   subcommand: string;
   /** The argument string the model passed, truncated; bulk rows travel on stdin. */
   args: string;
@@ -45,7 +45,7 @@ export interface ToolObservation {
   rejected: RejectionType | null;
   /** First stderr line, or the harness's refusal message. */
   message: string;
-  /** plasalid's `hint` field, when the error carried one. */
+  /** oled's `hint` field, when the error carried one. */
   hint: string | null;
   /** NDJSON lines piped to `ingest commit` on stdin; null for every other call. */
   rows: number | null;
@@ -67,7 +67,7 @@ export type OperationalType =
   | "artifacts_attached"
   /** A size or count cap dropped part of it. */
   | "artifacts_capped"
-  /** A file plasalid named could not be read. */
+  /** A file oled named could not be read. */
   | "artifacts_unreadable"
   /** The model's input types allow no route for it. */
   | "artifacts_no_route";

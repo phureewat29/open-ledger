@@ -1,11 +1,11 @@
 import * as z from "zod";
 import type { Result } from "../core/result.js";
-import type { PlasalidRunner } from "./command.js";
+import type { OpenLedgerRunner } from "./command.js";
 import { parseNdjson } from "./ndjson.js";
 
 /**
  * Reads the ledger back through the same CLI the model uses, so the scorecard
- * judges what plasalid actually holds rather than what the model claimed.
+ * judges what oled actually holds rather than what the model claimed.
  */
 
 /** The three groups a card statement's own totals are printed as. */
@@ -31,7 +31,7 @@ export interface LedgerProbe {
   filesPending: number;
   /** Every transaction in the ledger, whatever produced it. */
   postedRows: number;
-  /** Rows plasalid links to a statement file, from each file's own count. */
+  /** Rows oled links to a statement file, from each file's own count. */
   linkedRows: number;
   uncategorizedRows: number;
   questionsOpen: number;
@@ -61,7 +61,7 @@ const ROW = z.object({
   void_of: z.string().nullable().optional(),
 });
 
-/** `files show <sf:id>`: plasalid's own count of the rows linked to one file. */
+/** `files show <sf:id>`: oled's own count of the rows linked to one file. */
 const FILE_DETAIL = z.object({ transaction_count: z.number() });
 
 type Row = z.infer<typeof ROW>;
@@ -71,7 +71,7 @@ const LIST_LIMIT = 500;
 const UNCATEGORIZED = "expense:uncategorized";
 
 async function readJson(
-  runner: PlasalidRunner,
+  runner: OpenLedgerRunner,
   label: string,
   argv: string[],
 ): Promise<Result<Record<string, unknown>[]>> {
@@ -152,7 +152,7 @@ function countOf(summary: Record<string, unknown>, key: string): number {
   return typeof value === "number" ? value : 0;
 }
 
-/** Files plasalid has on record; a statement it has never prepared has no id yet. */
+/** Files oled has on record; a statement it has never prepared has no id yet. */
 function fileIds(records: Record<string, unknown>[]): string[] {
   const ids: string[] = [];
   for (const record of records) {
@@ -164,13 +164,13 @@ function fileIds(records: Record<string, unknown>[]): string[] {
 
 /**
  * `files show` per file rather than a count over the row listing: it is
- * plasalid's own per-file count, so it stays right when the listing hits its
+ * oled's own per-file count, so it stays right when the listing hits its
  * ceiling.
  */
-async function countLinkedRows(runner: PlasalidRunner, ids: string[]): Promise<Result<number>> {
+async function countLinkedRows(runner: OpenLedgerRunner, ids: string[]): Promise<Result<number>> {
   let linked = 0;
   for (const id of ids) {
-    const label = `plasalid files show ${id}`;
+    const label = `oled files show ${id}`;
     const shown = await readJson(runner, label, ["files", "show", id, "--json"]);
     if (!shown.ok) return shown;
 
@@ -188,7 +188,7 @@ function readStatus(records: Record<string, unknown>[]): Result<StatusReport> {
   if (!parsed.success) {
     return {
       ok: false,
-      error: `plasalid status output was unreadable: ${z.prettifyError(parsed.error)}`,
+      error: `oled status output was unreadable: ${z.prettifyError(parsed.error)}`,
     };
   }
   if (!parsed.data.db.reachable) {
@@ -201,14 +201,14 @@ function readStatus(records: Record<string, unknown>[]): Result<StatusReport> {
  * `ingest list` rather than `status` for the file counts: only the per-file view
  * distinguishes a file closed with `ingest done` from one still pending.
  */
-export async function probeLedger(runner: PlasalidRunner): Promise<Result<LedgerProbe>> {
-  const status = await readJson(runner, "plasalid status", ["status", "--json"]);
+export async function probeLedger(runner: OpenLedgerRunner): Promise<Result<LedgerProbe>> {
+  const status = await readJson(runner, "oled status", ["status", "--json"]);
   if (!status.ok) return status;
 
   const report = readStatus(status.value);
   if (!report.ok) return report;
 
-  const listed = await readJson(runner, "plasalid transactions list", [
+  const listed = await readJson(runner, "oled transactions list", [
     "transactions",
     "list",
     "--limit",
@@ -217,7 +217,7 @@ export async function probeLedger(runner: PlasalidRunner): Promise<Result<Ledger
   ]);
   if (!listed.ok) return listed;
 
-  const files = await readJson(runner, "plasalid ingest list", ["ingest", "list", "--json"]);
+  const files = await readJson(runner, "oled ingest list", ["ingest", "list", "--json"]);
   if (!files.ok) return files;
 
   const linked = await countLinkedRows(runner, fileIds(files.value));

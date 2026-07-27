@@ -1,10 +1,10 @@
 import type { PhaseId, RunEvent, ToolObservation } from "./events.js";
 
 /**
- * Where the model and the plasalid contract collided, and whether the contract's
+ * Where the model and the OpenLedger contract collided, and whether the contract's
  * own error copy got the model unstuck. Nothing here is pass/fail: it is the
  * diagnostic feed for changing the CLI, so every item keeps enough context to
- * read as "the model tried X, plasalid said Y, the model then did Z".
+ * read as "the model tried X, oled said Y, the model then did Z".
  */
 
 export type FrictionType =
@@ -51,7 +51,7 @@ export interface FrictionItem {
   command: string;
   exitCode: number | null;
   message: string;
-  /** plasalid's hint, verbatim. */
+  /** oled's hint, verbatim. */
   hint: string | null;
   /** The next attempt at this subcommand in a LATER turn; null when there was none. */
   next: NextAttempt | null;
@@ -94,7 +94,7 @@ export interface SubcommandRow {
   calls: number;
   failures: number;
   types: TypeCount[];
-  /** Failures where plasalid emitted a hint. */
+  /** Failures where oled emitted a hint. */
   hinted: number;
   recovered: number;
   /** Failures the model had no later turn to answer; outside `recoveryRate`. */
@@ -104,7 +104,7 @@ export interface SubcommandRow {
 }
 
 export interface HintEfficacy {
-  /** Failures where plasalid emitted a hint. */
+  /** Failures where oled emitted a hint. */
   emitted: number;
   /** Of those, hints naming a flag, so "followed" is decidable. */
   actionable: number;
@@ -447,7 +447,7 @@ export function analyzeFriction(events: RunEvent[]): FrictionAnalysis {
  * excluded: their argv is identical by design (`ingest commit --file <sf:id>`)
  * while the rows differ, so counting them here would report five distinct
  * batches as four repeats. Re-sending the same batch shows up in
- * `redundantCommits`, which reads what plasalid actually posted.
+ * `redundantCommits`, which reads what oled actually posted.
  */
 export function repeatedCommands(events: RunEvent[]): number {
   const seen = new Map<string, number>();

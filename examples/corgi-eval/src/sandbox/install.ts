@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
-import { execCapture } from "../plasalid/command.js";
+import { execCapture } from "../open-ledger/command.js";
 
 /**
- * Installs plasalid the way a user would: pack the repo into a tarball, then
+ * Installs OpenLedger the way a user would: pack the repo into a tarball, then
  * `npm install --global` it into a throwaway prefix. The walkthrough scores the
  * published artifact, not the checkout's source tree.
  */
@@ -88,8 +88,8 @@ export async function installPackedCli(args: {
     };
   }
 
-  const binPath = join(args.prefix, "bin", "plasalid");
-  if (!existsSync(binPath)) return { ok: false, error: `no plasalid binary at ${binPath}` };
+  const binPath = join(args.prefix, "bin", "oled");
+  if (!existsSync(binPath)) return { ok: false, error: `no oled binary at ${binPath}` };
   return {
     ok: true,
     value: {

@@ -30,7 +30,7 @@ export interface RunMetrics {
   contextTrims: number;
   /** One count per operational event, so a new kind cannot go unreported. */
   operational: Record<OperationalType, number>;
-  /** Questions plasalid raised across every commit. */
+  /** Questions oled raised across every commit. */
   questionsRaised: number;
   finalReply: string;
 }

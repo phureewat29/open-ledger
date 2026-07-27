@@ -1,7 +1,7 @@
 # Corgi Eval
 
-An eval of how well an AI model and plasalid fit with each other. Each
-run hands a model with plasalid skill, a sandbox of its own and a password-protected card
+An eval of how well an AI model and OpenLedger fit with each other. Each
+run hands a model with the OpenLedger skill, a sandbox of its own and a password-protected card
 statement, then reports what the pair got done and where they misread each other.
 
 ## Run it
@@ -29,7 +29,7 @@ Each run prints a summary and writes `reports/<date>-<model>.md` and `.json`.
 
 ## What the host carries
 
-The model has one tool, `plasalid`, and no way to open a file. So when a command
+The model has one tool, `oled`, and no way to open a file. So when a command
 reports having produced something to read, the host puts it into the conversation:
 a PDF as a file part for a model that accepts files, page images for a model that
 accepts images, nothing at all for a model that accepts neither. Everything the

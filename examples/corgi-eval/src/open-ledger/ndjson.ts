@@ -1,7 +1,7 @@
 import { tryExecute } from "../core/result.js";
 
 /**
- * Every reader of plasalid's `--json` output starts here. Unparseable lines are
+ * Every reader of oled's `--json` output starts here. Unparseable lines are
  * skipped rather than reported: help text and warnings share the stream, and a
  * line that is not an object carries nothing any caller wants.
  */

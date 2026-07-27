@@ -7,7 +7,7 @@ import {
   keyFingerprint,
   loadPersistedConfig,
   saveConfig,
-  type PlasalidConfig,
+  type OpenLedgerConfig,
 } from "../../config.js";
 import { findCountryDefaults, availableCountries } from "../../datasets/defaults.js";
 import { generateKey } from "../../db/encryption.js";
@@ -17,13 +17,13 @@ import { currentMode, emit, fail, readSecretFromStdin, runAction, type OutputMod
 import * as z from "zod";
 import { parseInput, str, bool } from "../../lib/validate.js";
 
-type RedactedConfig = Omit<PlasalidConfig, "dbEncryptionKey"> & {
+type RedactedConfig = Omit<OpenLedgerConfig, "dbEncryptionKey"> & {
   dbEncryptionKey: { set: boolean; fingerprint?: string };
 };
 
 // dbEncryptionKey is the only secret in config; surface {set, fingerprint}
 // rather than the passphrase itself, which would land in shells/logs/bug reports.
-function redactConfig(cfg: PlasalidConfig): RedactedConfig {
+function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
   const key = cfg.dbEncryptionKey;
   const dbEncryptionKey = key
     ? { set: true, fingerprint: keyFingerprint(key) }
@@ -109,7 +109,7 @@ async function convergeConfig(flags: ConvergeFlags): Promise<void> {
 
   mkdirSync(dataDir, { recursive: true });
 
-  const patch: Partial<PlasalidConfig> = {
+  const patch: Partial<OpenLedgerConfig> = {
     dataDir,
     dbPath,
     displayLocale,

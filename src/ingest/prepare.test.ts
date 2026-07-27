@@ -74,19 +74,19 @@ let cacheDir: string;
 let outDir: string;
 
 beforeEach(() => {
-  dataDir = mkdtempSync(resolve(tmpdir(), "plasalid-ingest-data-"));
-  cacheDir = mkdtempSync(resolve(tmpdir(), "plasalid-ingest-cache-"));
-  outDir = mkdtempSync(resolve(tmpdir(), "plasalid-ingest-out-"));
+  dataDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-data-"));
+  cacheDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-cache-"));
+  outDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-out-"));
   config.dataDir = dataDir;
   config.dbEncryptionKey = generateKey();
-  process.env.PLASALID_CACHE_DIR = cacheDir;
+  process.env.OLED_CACHE_DIR = cacheDir;
 });
 
 afterEach(() => {
   for (const dir of [dataDir, cacheDir, outDir]) {
     rmSync(dir, { recursive: true, force: true });
   }
-  delete process.env.PLASALID_CACHE_DIR;
+  delete process.env.OLED_CACHE_DIR;
 });
 
 describe("discoverFiles", () => {
@@ -157,7 +157,7 @@ describe("resolveEntryPath", () => {
 
     // cwd is somewhere else entirely (an agent's shell rarely sits in the
     // data dir) — this is the exact failure a live agent session hit.
-    const elsewhere = mkdtempSync(resolve(tmpdir(), "plasalid-ingest-elsewhere-"));
+    const elsewhere = mkdtempSync(resolve(tmpdir(), "oled-ingest-elsewhere-"));
     const prevCwd = process.cwd();
     process.chdir(elsewhere);
     try {

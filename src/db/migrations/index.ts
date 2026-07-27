@@ -1,6 +1,5 @@
 import type Database from "libsql";
 import * as baseline from "./0001_baseline.js";
-import * as renameMemoriesToNotes from "./0002_rename_memories_to_notes.js";
 
 /** A forward migration. Its position in MIGRATIONS is its version (index 0 = v1). */
 export interface Migration {
@@ -12,4 +11,4 @@ export interface Migration {
  * dynamic import, so the bare `tsc` build ships nothing extra to dist/ and the
  * list type-checks. Append new migrations to the end; never reorder or remove.
  */
-export const MIGRATIONS: Migration[] = [baseline, renameMemoriesToNotes];
+export const MIGRATIONS: Migration[] = [baseline];

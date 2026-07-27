@@ -10,7 +10,7 @@ import { createHash } from "crypto";
 import { resolve } from "path";
 import { homedir } from "os";
 
-export interface PlasalidConfig {
+export interface OpenLedgerConfig {
   displayLocale: string;
   displayCurrency: string;
   dbPath: string;
@@ -19,9 +19,9 @@ export interface PlasalidConfig {
   userName: string;
 }
 
-const PLASALID_DIR = process.env.PLASALID_DIR
-  ? resolve(process.env.PLASALID_DIR)
-  : resolve(homedir(), ".plasalid");
+const OLED_DIR = process.env.OLED_DIR
+  ? resolve(process.env.OLED_DIR)
+  : resolve(homedir(), ".oled");
 
 /**
  * Drives both field resolution and the persisted-key list: `envVar` (when
@@ -29,27 +29,27 @@ const PLASALID_DIR = process.env.PLASALID_DIR
  * tolerated on read and dropped on the next write — saveConfig writes only
  * the fields listed here.
  */
-const CONFIG_FIELDS: Record<keyof PlasalidConfig, { envVar?: string; default: string }> = {
+const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: string }> = {
   // Single last-resort locale/currency constants for the whole codebase,
   // overridden by `config converge`. Every other module reads the resolved
   // config value (or getDisplayCurrency) rather than hardcoding a currency.
   // A later wave seeds these from the active dataset.
   displayLocale: { default: "th-TH" },
   displayCurrency: { default: "THB" },
-  dbPath: { envVar: "PLASALID_DB_PATH", default: resolve(PLASALID_DIR, "db.sqlite") },
-  dbEncryptionKey: { envVar: "PLASALID_DB_ENCRYPTION_KEY", default: "" },
-  dataDir: { envVar: "PLASALID_DATA_DIR", default: resolve(PLASALID_DIR, "data") },
+  dbPath: { envVar: "OLED_DB_PATH", default: resolve(OLED_DIR, "db.sqlite") },
+  dbEncryptionKey: { envVar: "OLED_DB_ENCRYPTION_KEY", default: "" },
+  dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },
   userName: { default: "User" },
 };
 
-const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as readonly (keyof PlasalidConfig)[];
+const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as readonly (keyof OpenLedgerConfig)[];
 
-export function getPlasalidDir(): string {
-  return PLASALID_DIR;
+export function getOledDir(): string {
+  return OLED_DIR;
 }
 
 export function getConfigPath(): string {
-  return resolve(PLASALID_DIR, "config.json");
+  return resolve(OLED_DIR, "config.json");
 }
 
 export function getDataDir(): string {
@@ -58,7 +58,7 @@ export function getDataDir(): string {
 
 /** Scratch space for decrypted/rasterized artifacts; env-overridable for tests. */
 export function getCacheDir(): string {
-  return process.env.PLASALID_CACHE_DIR || resolve(PLASALID_DIR, "cache");
+  return process.env.OLED_CACHE_DIR || resolve(OLED_DIR, "cache");
 }
 
 /** Non-reversible fingerprint (`sha256:` + first 8 hex) so `config`/`status`
@@ -67,7 +67,7 @@ export function keyFingerprint(key: string): string {
   return `sha256:${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 }
 
-function loadFileConfig(): Partial<PlasalidConfig> {
+function loadFileConfig(): Partial<OpenLedgerConfig> {
   const configPath = getConfigPath();
   if (!existsSync(configPath)) return {};
   try {
@@ -82,17 +82,17 @@ function loadFileConfig(): Partial<PlasalidConfig> {
 }
 
 /** Project an arbitrary object down to just the surviving config keys. */
-function pickConfigFields(obj: Record<string, unknown>): Partial<PlasalidConfig> {
-  const out: Partial<PlasalidConfig> = {};
+function pickConfigFields(obj: Record<string, unknown>): Partial<OpenLedgerConfig> {
+  const out: Partial<OpenLedgerConfig> = {};
   for (const key of CONFIG_KEYS) {
     if (obj[key] !== undefined) (out as Record<string, unknown>)[key] = obj[key];
   }
   return out;
 }
 
-function buildConfig(): PlasalidConfig {
+function buildConfig(): OpenLedgerConfig {
   const file = loadFileConfig();
-  const out = {} as PlasalidConfig;
+  const out = {} as OpenLedgerConfig;
   // Precedence env > file > default. `||` (not `??`) so an empty-string value falls through too.
   for (const key of CONFIG_KEYS) {
     const { envVar, default: fallback } = CONFIG_FIELDS[key];
@@ -109,13 +109,13 @@ export const config = buildConfig();
  * an explicitly-persisted value apart from a defaulted one, so it can slot a
  * dataset-derived default between the two.
  */
-export function loadPersistedConfig(): Partial<PlasalidConfig> {
+export function loadPersistedConfig(): Partial<OpenLedgerConfig> {
   return pickConfigFields(loadFileConfig() as Record<string, unknown>);
 }
 
-export function saveConfig(partial: Partial<PlasalidConfig>): void {
+export function saveConfig(partial: Partial<OpenLedgerConfig>): void {
   const configPath = getConfigPath();
-  if (!existsSync(PLASALID_DIR)) mkdirSync(PLASALID_DIR, { recursive: true });
+  if (!existsSync(OLED_DIR)) mkdirSync(OLED_DIR, { recursive: true });
 
   const existing = loadFileConfig();
   const merged = pickConfigFields({ ...existing, ...partial });

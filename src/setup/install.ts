@@ -20,7 +20,7 @@ export interface InstallOptions {
   host?: string;
   /** Install under the host's home skills dir rather than the cwd. */
   global?: boolean;
-  /** Explicit base dir: the pack lands at <dir>/skills/plasalid, ignoring the host. */
+  /** Explicit base dir: the pack lands at <dir>/skills/open-ledger, ignoring the host. */
   dir?: string;
   /** Overwrite an installed skill dir whose VERSION differs. */
   force?: boolean;
@@ -62,18 +62,18 @@ export function skillMd(): string {
 }
 
 /**
- * The final `plasalid` skill dir for the given options.
- *   --dir D  → resolve(D)/skills/plasalid  (host-agnostic; D is a bare base)
- *   host     → <cwd or home>/<host skills dir>/plasalid  (the dir already ends in skills)
+ * The final `open-ledger` skill dir for the given options.
+ *   --dir D  → resolve(D)/skills/open-ledger  (host-agnostic; D is a bare base)
+ *   host     → <cwd or home>/<host skills dir>/open-ledger  (the dir already ends in skills)
  */
 function resolveTarget(opts: InstallOptions): { kind: string; dir: string } {
   if (opts.dir) {
-    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "plasalid") };
+    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "open-ledger") };
   }
   const host = findHost(opts.host ?? DEFAULT_HOST);
   if (!host) throw new Error(`unknown skill host: ${opts.host}`);
   const base = opts.global ? host.globalDir() : resolve(process.cwd(), host.projectDir);
-  return { kind: host.id, dir: join(base, "plasalid") };
+  return { kind: host.id, dir: join(base, "open-ledger") };
 }
 
 function readVersionFile(skillDir: string): string | null {

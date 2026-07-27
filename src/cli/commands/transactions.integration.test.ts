@@ -21,7 +21,7 @@ let sandbox: Sandbox;
 let dbPath: string;
 
 beforeAll(() => {
-  sandbox = createSandbox("plasalid-ledger-it-");
+  sandbox = createSandbox("oled-ledger-it-");
   dbPath = sandbox.dbPath;
 });
 
@@ -645,7 +645,7 @@ describe("transactions CLI integration (subprocess)", () => {
   it(
     "accounts create --input batch-creates accounts, is idempotent on re-run, and PARTIALs on a malformed row",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "plasalid-accounts-input-"));
+      const dir = mkdtempSync(join(tmpdir(), "oled-accounts-input-"));
       const inputPath = join(dir, "accounts.ndjson");
       const rows = [
         { id: "equity:batch-a", name: "Batch A", type: "equity", masked: "111-1-11111-1" },
@@ -710,7 +710,7 @@ describe("transactions CLI integration (subprocess)", () => {
   it(
     "accounts create --input rejects per-account flags passed alongside it (USAGE)",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "plasalid-accounts-input-usage-"));
+      const dir = mkdtempSync(join(tmpdir(), "oled-accounts-input-usage-"));
       const inputPath = join(dir, "accounts.ndjson");
       writeFileSync(inputPath, JSON.stringify({ id: "equity:batch-e", name: "E", type: "equity" }) + "\n");
 
@@ -730,11 +730,11 @@ describe("transactions CLI integration (subprocess)", () => {
     "transactions list --json masks PII by default (card number + configured user name); --no-redact returns verbatim",
     async () => {
       const userName = "Nutcha Wong";
-      // The redactor sources config.userName from PLASALID_DIR/config.json's
+      // The redactor sources config.userName from OLED_DIR/config.json's
       // userName field (no env var override), same as system.integration.test.ts.
-      mkdirSync(join(sandbox.home, ".plasalid"), { recursive: true });
+      mkdirSync(join(sandbox.home, ".oled"), { recursive: true });
       writeFileSync(
-        join(sandbox.home, ".plasalid", "config.json"),
+        join(sandbox.home, ".oled", "config.json"),
         JSON.stringify({ userName }, null, 2) + "\n",
       );
 

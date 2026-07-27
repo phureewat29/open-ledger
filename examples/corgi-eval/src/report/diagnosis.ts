@@ -115,7 +115,7 @@ const BLOCKER_PATTERNS = [
 
 const MAX_SENTENCE = 300;
 
-/** plasalid's `--json` errors arrive as a JSON line, so the quotes inside are escaped. */
+/** oled's `--json` errors arrive as a JSON line, so the quotes inside are escaped. */
 function plainMessage(message: string): string {
   return message.replace(/\\"/g, '"');
 }

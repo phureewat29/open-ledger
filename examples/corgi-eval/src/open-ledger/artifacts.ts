@@ -3,11 +3,11 @@ import { parseNdjson } from "./ndjson.js";
 
 /**
  * What a command reported producing for its caller to read. Detection only: this
- * module recognizes the paths in plasalid's own output and nothing else, so no
+ * module recognizes the paths in oled's own output and nothing else, so no
  * part of a statement is ever read here.
  */
 
-export interface PlasalidArtifacts {
+export interface OpenLedgerArtifacts {
   /** `document` from `ingest prepare`, when it is a PDF. */
   document: string | null;
   /** `pages[]` PNG paths in page order, from `ingest prepare --format png`. */
@@ -27,7 +27,7 @@ const PREPARED = z.object({
   pages: z.array(z.object({ page: z.number(), path: z.string() })).optional(),
 });
 
-export function artifactsOf(stdout: string): PlasalidArtifacts | null {
+export function artifactsOf(stdout: string): OpenLedgerArtifacts | null {
   for (const row of parseNdjson(stdout)) {
     const parsed = PREPARED.safeParse(row);
     if (!parsed.success) continue;

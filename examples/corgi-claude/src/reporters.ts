@@ -19,7 +19,7 @@ const HEARTBEAT_MS = 15_000;
 
 export interface TurnSummary {
   durationMs?: number;
-  plasalidCalls: number;
+  oledCalls: number;
 }
 
 export interface Reporter {
@@ -51,18 +51,18 @@ export function formatSeconds(ms: number): string {
   return `${Math.max(0, Math.round(ms / 1000))}s`;
 }
 
-/** Shared turn-summary text, e.g. "turn 1 done in 84s · 12 plasalid calls"
+/** Shared turn-summary text, e.g. "turn 1 done in 84s · 12 oled calls"
  *  ("in Ns" omitted when duration is unknown). Ink prefixes its own ✅/❌;
  *  plain mode prints this line as-is. */
 export function turnSummaryText(
   turn: number,
   ok: boolean,
   durationMs: number | undefined,
-  plasalidCalls: number,
+  oledCalls: number,
 ): string {
   let head = `turn ${turn} ${ok ? "done" : "failed"}`;
   if (typeof durationMs === "number") head += ` in ${formatSeconds(durationMs)}`;
-  return `${head} · ${pluralize(plasalidCalls, "plasalid call")}`;
+  return `${head} · ${pluralize(oledCalls, "oled call")}`;
 }
 
 export function makePlainReporter(): Reporter {
@@ -122,7 +122,7 @@ export function makePlainReporter(): Reporter {
     turnDone(turn, ok, summary) {
       clearHeartbeat();
       console.log(DIVIDER);
-      console.log(turnSummaryText(turn, ok, summary.durationMs, summary.plasalidCalls));
+      console.log(turnSummaryText(turn, ok, summary.durationMs, summary.oledCalls));
     },
     info(line) {
       console.log(line);
@@ -164,7 +164,7 @@ export function makeInkReporter(
         turn,
         ok,
         durationMs: summary.durationMs,
-        plasalidCalls: summary.plasalidCalls,
+        oledCalls: summary.oledCalls,
       });
     },
     info(line) {

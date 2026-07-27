@@ -2,7 +2,7 @@
   "name": "corgi-claude",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone agentic demo with plasalid, run end to end by an external Claude Code CLI.",
+  "description": "Standalone agentic demo with OpenLedger, run end to end by an external Claude Code CLI.",
   "type": "module",
   "scripts": {
     "start": "tsx src/demo.tsx",

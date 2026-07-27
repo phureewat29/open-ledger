@@ -22,8 +22,8 @@ let sandbox: Sandbox;
 let dbPath: string;
 
 beforeAll(() => {
-  // createSandbox blanks PLASALID_DB_ENCRYPTION_KEY, so this file can read the db directly with `libsql`.
-  sandbox = createSandbox("plasalid-ingest-it-");
+  // createSandbox blanks OLED_DB_ENCRYPTION_KEY, so this file can read the db directly with `libsql`.
+  sandbox = createSandbox("oled-ingest-it-");
   dbPath = sandbox.dbPath;
 
   /**
@@ -207,7 +207,7 @@ describe("ingest commit v2 (subprocess)", () => {
     const { writeFileSync, mkdtempSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
-    const dir = mkdtempSync(join(tmpdir(), "plasalid-input-"));
+    const dir = mkdtempSync(join(tmpdir(), "oled-input-"));
     const inputPath = join(dir, "batch.ndjson");
     writeFileSync(
       inputPath,
@@ -523,7 +523,7 @@ describe("ingest fail (subprocess)", () => {
     }
 
     /**
-     * cleanCache resolves PLASALID_CACHE_DIR/<fileId>; precreate it so the subprocess
+     * cleanCache resolves OLED_CACHE_DIR/<fileId>; precreate it so the subprocess
      * has something real to remove, mirroring what `ingest prepare` would leave behind.
      */
     const cacheSubdir = join(sandbox.cacheDir, fileId);

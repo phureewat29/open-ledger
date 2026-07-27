@@ -15,10 +15,11 @@ export function migrate(db: Database.Database, dbPath?: string): void {
 /**
  * The migration runner, parameterised on the manifest so tests can drive a
  * synthetic one. Reads the applied version from `schema_migrations`; refuses a
- * database newer than the build; on a version-0 database, refuses an
- * unrecognized legacy shape loudly and without touching it; backs the file up
- * when it already holds user data; then applies each pending migration in its
- * own transaction, recording the version only if its `up` commits.
+ * database newer than the build; refuses a version-0 database that already
+ * holds tables, loudly and without touching it; backs the file up before
+ * upgrading one that is already at a known version; then applies each pending
+ * migration in its own transaction, recording the version only if its `up`
+ * commits.
  */
 export function applyMigrations(
   db: Database.Database,
@@ -30,24 +31,24 @@ export function applyMigrations(
   if (current > migrations.length) {
     throw new Error(
       `Database schema version ${current} is newer than this build supports ` +
-        `(${migrations.length}). Upgrade plasalid to open this database.`,
+        `(${migrations.length}). Upgrade OpenLedger to open this database.`,
     );
   }
   if (current === migrations.length) return;
 
-  if (current === 0) {
-    const reason = detectLegacyShape(db);
-    if (reason) {
-      const at = dbPath ? ` at ${dbPath}` : "";
-      throw new Error(
-        `This database${at} has an unrecognized legacy schema (${reason}) and ` +
-          `cannot be migrated automatically. Your data has not been touched. ` +
-          `Back up the database file, then start a fresh database to continue.`,
-      );
-    }
+  // Every migration is CREATE TABLE IF NOT EXISTS, so a foreign database would
+  // otherwise be half-adopted in silence.
+  if (current === 0 && hasUserTables(db)) {
+    const at = dbPath ? ` at ${dbPath}` : "";
+    throw new Error(
+      `This database${at} is not an OpenLedger database. Your data has not been ` +
+        `touched. Back up the file, then remove it to start fresh.`,
+    );
   }
 
-  if (dbPath && hasUserTables(db)) backupDatabase(db, dbPath);
+  // A version-0 database that reaches here is empty; only an upgrade has
+  // anything worth copying.
+  if (dbPath && current >= 1) backupDatabase(db, dbPath);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -93,34 +94,6 @@ function hasUserTables(db: Database.Database): boolean {
 }
 
 /**
- * Read-only probe for a pre-migration legacy shape: a legacy table name,
- * `questions.transfer_id`/`scan_id`, or a `transactions` table lacking
- * `void_of`. Returns a human-readable reason on a match, else null. Writes
- * nothing, so the caller can refuse the database with its bytes intact.
- */
-function detectLegacyShape(db: Database.Database): string | null {
-  const legacyTable = db
-    .prepare(
-      `SELECT name FROM sqlite_master
-        WHERE type = 'table' AND name IN ('conversation_history', 'hints', 'postings', 'transfers', 'scanned_files')
-        LIMIT 1`,
-    )
-    .get() as { name: string } | undefined;
-  if (legacyTable) return `legacy table ${legacyTable.name}`;
-
-  const questionCols = db.prepare(`PRAGMA table_info(questions)`).all() as { name: string }[];
-  if (questionCols.some((c) => c.name === "transfer_id" || c.name === "scan_id")) {
-    return "questions.transfer_id/scan_id";
-  }
-
-  const transactionCols = db.prepare(`PRAGMA table_info(transactions)`).all() as { name: string }[];
-  if (transactionCols.length > 0 && !transactionCols.some((c) => c.name === "void_of")) {
-    return "transactions table without void_of";
-  }
-  return null;
-}
-
-/**
  * Copies the database file to `<dbPath>.<YYYYMMDD-HHMMSS>.bak` before a
  * migration runs, keeping only the five newest. Checkpoints the WAL first so
  * the copy is complete; a non-WAL database tolerates the checkpoint failing.
@@ -159,5 +132,3 @@ function pruneBackups(dbPath: string): void {
     }
   }
 }
-
-// dropAllTables was removed: auto-dropping user data on a schema mismatch is forbidden; the open path now refuses unrecognized shapes instead.

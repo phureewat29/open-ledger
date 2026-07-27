@@ -159,11 +159,11 @@ async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise
     if (!(err instanceof PasswordRequiredError)) throw err;
     if (err.reason === "wrong_password") {
       fail("INPUT_REQUIRED", "incorrect password for encrypted PDF", {
-        hint: "pipe the correct password with --password-stdin, or store one via `plasalid vault add <pattern> --password-stdin`",
+        hint: "pipe the correct password with --password-stdin, or store one via `oled vault add <pattern> --password-stdin`",
       });
     }
     fail("INPUT_REQUIRED", "password required for encrypted PDF", {
-      hint: "pipe the password with --password-stdin, or store one via `plasalid vault add <pattern> --password-stdin`",
+      hint: "pipe the password with --password-stdin, or store one via `oled vault add <pattern> --password-stdin`",
     });
   }
 
@@ -230,7 +230,7 @@ export function registerIngest(program: Command): void {
         "",
         "Behavior: the statement pipeline, list files, prepare pages to read, commit rows, mark done or failed.",
         "Typical flow: list, prepare <id>, read the returned document, then commit --file <sf:id> --input <batch>.",
-        "Example: plasalid ingest prepare statement.pdf --json",
+        "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     );
 

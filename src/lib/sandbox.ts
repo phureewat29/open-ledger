@@ -14,8 +14,8 @@ export interface Sandbox {
 
 /**
  * A throwaway `mkdtemp` root (with `home/`/`data/` pre-created) plus an `env`
- * that redirects HOME and every PLASALID_* path into it, so nothing ever
- * touches the real `~/.plasalid`.
+ * that redirects HOME and every OLED_* path into it, so nothing ever
+ * touches the real `~/.oled`.
  */
 export function createSandbox(prefix: string): Sandbox {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -30,11 +30,11 @@ export function createSandbox(prefix: string): Sandbox {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
-    PLASALID_DIR: join(home, ".plasalid"),
-    PLASALID_DB_PATH: dbPath,
-    PLASALID_DATA_DIR: dataDir,
-    PLASALID_CACHE_DIR: cacheDir,
-    PLASALID_DB_ENCRYPTION_KEY: "",
+    OLED_DIR: join(home, ".oled"),
+    OLED_DB_PATH: dbPath,
+    OLED_DATA_DIR: dataDir,
+    OLED_CACHE_DIR: cacheDir,
+    OLED_DB_ENCRYPTION_KEY: "",
     NO_COLOR: "1",
   };
   // Node warns on stderr when NO_COLOR and FORCE_COLOR are both set, corrupting

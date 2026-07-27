@@ -10,8 +10,8 @@ import {
   buildSystemPrompt,
   ENVIRONMENT_ADAPTER,
 } from "./scenario.js";
-import { createPlasalidRunner } from "./plasalid/command.js";
-import { probeLedger, type LedgerProbe } from "./plasalid/ledger.js";
+import { createOpenLedgerRunner } from "./open-ledger/command.js";
+import { probeLedger, type LedgerProbe } from "./open-ledger/ledger.js";
 import { installPackedCli, type InstalledCli } from "./sandbox/install.js";
 import {
   createWorkspace,
@@ -59,7 +59,7 @@ const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 // Statements and their fact files live together in fixtures/, out of the project root.
 const FIXTURES = STATEMENT_FIXTURES.map((name) => join(EXAMPLE_ROOT, "fixtures", name));
 const REPORTS_DIR = join(EXAMPLE_ROOT, "reports");
-const PLASALID_TIMEOUT_MS = 120_000;
+const OLED_TIMEOUT_MS = 120_000;
 
 function note(text: string): void {
   process.stderr.write(`${text}\n`);
@@ -95,7 +95,7 @@ interface Sandbox {
   workspace: Workspace;
   cli: InstalledCli;
   skill: SkillPack;
-  runner: ReturnType<typeof createPlasalidRunner>;
+  runner: ReturnType<typeof createOpenLedgerRunner>;
   statements: StatementFacts[];
   ledger: LedgerProbe;
 }
@@ -115,7 +115,7 @@ async function prepare(
   register(workspace);
 
   const installed = await step(
-    "pack and install plasalid",
+    "pack and install open-ledger",
     (cli: InstalledCli) => `${cli.version}, ${cli.fileCount} files`,
     () =>
       installPackedCli({ repoRoot: REPO_ROOT, tarballDir: workspace.root, prefix: workspace.npm }),
@@ -123,11 +123,11 @@ async function prepare(
   if (!installed.ok) return installed;
 
   const cli = installed.value;
-  const runner = createPlasalidRunner({
+  const runner = createOpenLedgerRunner({
     bin: cli.binPath,
     env: workspace.env,
     cwd: workspace.cwd,
-    timeoutMs: PLASALID_TIMEOUT_MS,
+    timeoutMs: OLED_TIMEOUT_MS,
   });
 
   const seeded = await step(
@@ -264,7 +264,7 @@ function buildIdentity(args: {
       transports: transport.kinds,
     },
     context: { budgetTokens: budget.tokens, source: budget.source, detail: budget.detail },
-    plasalid: { version: cli.version, tarball: cli.tarball, fileCount: cli.fileCount },
+    oled: { version: cli.version, tarball: cli.tarball, fileCount: cli.fileCount },
     skill: {
       path: skill.path,
       version: skill.version,

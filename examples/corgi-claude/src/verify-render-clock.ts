@@ -1,7 +1,7 @@
 /**
  * Dev checks for the ink renderer's flicker-safety invariants (run via
  * `npm run verify`). Fully offline: needs neither the `claude` CLI nor the
- * plasalid build. Exits non-zero on any violation.
+ * OpenLedger build. Exits non-zero on any violation.
  *
  * Sections:
  *  1. Live-region line budget (computeLiveCaps): the capped live turn stays
@@ -72,16 +72,16 @@ function checkScrollback(problems: string[]): void {
   // Steps -> turn (mid-turn INFO) -> TURN_DONE -> turn 2 -> post-turn INFO ->
   // FINAL. Mid-turn info must land after turn 1's panel; post-turn info appends directly.
   const seq: UiAction[] = [
-    { type: "STEP_START", id: "s1", label: "build plasalid", at: 1000 },
-    { type: "STEP_DONE", id: "s1", label: "build plasalid", ok: true },
+    { type: "STEP_START", id: "s1", label: "build open-ledger", at: 1000 },
+    { type: "STEP_DONE", id: "s1", label: "build open-ledger", ok: true },
     { type: "STEP_START", id: "s2", label: "create workspace", at: 1100 },
     { type: "STEP_DONE", id: "s2", label: "create workspace", ok: true, detail: "/tmp/ws" },
     { type: "TURN_START", turn: 1, total: 2, prompt: "ingest", at: 1200 },
-    { type: "TURN_ACTIVITY", turn: 1, line: "> plasalid status --json" },
+    { type: "TURN_ACTIVITY", turn: 1, line: "> oled status --json" },
     { type: "INFO", line: "skill loaded: yes" },
-    { type: "TURN_DONE", turn: 1, ok: true, durationMs: 5000, plasalidCalls: 3 },
+    { type: "TURN_DONE", turn: 1, ok: true, durationMs: 5000, oledCalls: 3 },
     { type: "TURN_START", turn: 2, total: 2, prompt: "report", at: 1300 },
-    { type: "TURN_DONE", turn: 2, ok: true, durationMs: 6000, plasalidCalls: 2 },
+    { type: "TURN_DONE", turn: 2, ok: true, durationMs: 6000, oledCalls: 2 },
     { type: "INFO", line: "0 open question(s) after the demo" },
     { type: "FINAL", pass: true },
   ];
@@ -201,9 +201,9 @@ function runRenderClockCheck(): void {
   const lines: string[] = [];
   for (let i = 0; i < RAW_DELTAS; i++) {
     lines.push(deltaLine);
-    if (i > 0 && i % 50 === 0) lines.push(toolLine("plasalid status --json"));
+    if (i > 0 && i % 50 === 0) lines.push(toolLine("oled status --json"));
   }
-  lines.push(toolLine("plasalid transactions list --json"));
+  lines.push(toolLine("oled transactions list --json"));
   const TOOL_USES = 4;
 
   let state: UiState = initialUiState;
@@ -212,7 +212,7 @@ function runRenderClockCheck(): void {
   let totalTicks = 0;
   let deltaEventCount = 0;
   let activityEventCount = 0;
-  let plasalidCallCount = 0;
+  let oledCallCount = 0;
 
   /** Dispatch through the real reducer; report whether a new state reference (a
    *  visible change) was produced, mirroring what would trigger a React render. */
@@ -230,8 +230,8 @@ function runRenderClockCheck(): void {
     } else if (event.kind === "activity") {
       activityEventCount++;
       if (dispatch({ type: "TURN_ACTIVITY", turn: TURN, line: event.line })) renderCount++;
-    } else if (event.kind === "plasalid-call") {
-      plasalidCallCount++;
+    } else if (event.kind === "oled-call") {
+      oledCallCount++;
     }
   });
 
@@ -273,7 +273,7 @@ function runRenderClockCheck(): void {
     console.log(`raw text_delta chunks fed:       ${RAW_DELTAS}`);
     console.log(`coalesced delta events emitted:  ${deltaEventCount}`);
     console.log(
-      `tool_use lines fed:              ${TOOL_USES} (activity: ${activityEventCount}, plasalid-calls: ${plasalidCallCount})`,
+      `tool_use lines fed:              ${TOOL_USES} (activity: ${activityEventCount}, oled-calls: ${oledCallCount})`,
     );
     console.log(`TICKs dispatched:                ${totalTicks} over ${elapsedMs}ms`);
     console.log(`visible updates from TICK:       ${tickRenderCount} (cadence bound: <= ${bound})`);

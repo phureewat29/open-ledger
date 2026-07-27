@@ -1,8 +1,8 @@
 /**
  * Spawns `claude -p --output-format stream-json --include-partial-messages
  * --verbose` and turns its NDJSON event stream into what the demo UI needs:
- * activity lines ("> plasalid ..." / "> Read ..." / "> Write ...") per
- * tool_use, coalesced live-streaming answer text, skill/plasalid-call usage
+ * activity lines ("> oled ..." / "> Read ..." / "> Write ...") per
+ * tool_use, coalesced live-streaming answer text, skill/oled-call usage
  * signals, and the turn's final answer/duration.
  *
  * Event shapes observed from a real run (claude_code_version 2.1.211):
@@ -45,7 +45,7 @@ export interface ClaudeTurnOptions {
   continueSession: boolean;
   cwd: string;
   env: NodeJS.ProcessEnv;
-  /** e.g. "Bash(plasalid:*),Read,Write,Skill" */
+  /** e.g. "Bash(oled:*),Read,Write,Skill" */
   allowedTools: string;
   /** SIGTERM (then SIGKILL after 5s) the turn if it runs past this many
    *  seconds. Always supplied by the caller (see the demo's --turn-timeout). */
@@ -59,8 +59,8 @@ export type ClaudeStreamEvent =
   | { kind: "delta"; text: string }
   /** The agent invoked the Skill tool (skillName is best-effort, may be null). */
   | { kind: "skill"; skillName: string | null }
-  /** The agent ran a Bash tool_use whose command starts with `plasalid`. */
-  | { kind: "plasalid-call" };
+  /** The agent ran a Bash tool_use whose command starts with `oled`. */
+  | { kind: "oled-call" };
 
 export interface ClaudeTurnResult {
   ok: boolean;
@@ -193,10 +193,10 @@ export function createStreamParser(onEvent: (event: ClaudeStreamEvent) => void):
               const b = block as { name?: unknown; input?: unknown };
               if (b.name === "Bash") {
                 // Derive the command string once, then feed it to BOTH the
-                // activity line and the plasalid-call signal.
+                // activity line and the oled-call signal.
                 const command = stringField(b.input, "command");
                 onEvent({ kind: "activity", line: `> ${truncate(command, ACTIVITY_LINE_MAX)}` });
-                if (command.trim().startsWith("plasalid")) onEvent({ kind: "plasalid-call" });
+                if (command.trim().startsWith("oled")) onEvent({ kind: "oled-call" });
                 continue;
               }
               const activityLine = activityLineForNonBashToolUse(b.name, b.input);
@@ -253,7 +253,7 @@ export function createStreamParser(onEvent: (event: ClaudeStreamEvent) => void):
 }
 
 /**
- * Run one `claude -p` turn, streaming activity/delta/skill/plasalid-call
+ * Run one `claude -p` turn, streaming activity/delta/skill/oled-call
  * events to `onEvent` as they arrive, resolving once the process exits (or
  * is killed for timing out) with the turn's outcome.
  */

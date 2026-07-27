@@ -43,7 +43,7 @@ async function addVaultEntry(pattern: string, _opts: AddVaultEntryOpts): Promise
   const password = await readSecretFromStdin();
   if (!password) {
     fail("INPUT_REQUIRED", "no password on stdin", {
-      hint: "pipe the password via --password-stdin, e.g. `printf %s 'secret' | plasalid vault add <pattern> --password-stdin`",
+      hint: "pipe the password via --password-stdin, e.g. `printf %s 'secret' | oled vault add <pattern> --password-stdin`",
     });
   }
 

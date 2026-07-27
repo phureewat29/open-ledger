@@ -64,14 +64,14 @@ export interface TurnData {
   answer: string;
   status: "running" | "ok" | "fail";
   startedAt: number;
-  plasalidCalls: number;
+  oledCalls: number;
   durationMs?: number;
   stderrTail: string[];
 }
 
 /** Header text pinned as the first scrollback item (rendered bold cyan). Kept in
  *  state so it sits above all history rather than below it. */
-export const HEADER_TEXT = "🐶 corgi-claude — plasalid x claude -p";
+export const HEADER_TEXT = "🐶 corgi-claude — OpenLedger x claude -p";
 
 export type ScrollbackKind = "header" | "step" | "turn" | "info";
 
@@ -125,7 +125,7 @@ export type UiAction =
   | { type: "TURN_ACTIVITY"; turn: number; line: string }
   | { type: "TURN_ANSWER"; turn: number; text: string }
   | { type: "TURN_STDERR"; turn: number; lines: string[] }
-  | { type: "TURN_DONE"; turn: number; ok: boolean; durationMs?: number; plasalidCalls: number }
+  | { type: "TURN_DONE"; turn: number; ok: boolean; durationMs?: number; oledCalls: number }
   | { type: "INFO"; line: string }
   /** The single render clock. `pendingDelta`/`pendingDeltaTurn` carry any
    *  text buffered since the last TICK (see App's `pendingDeltaRef`) and are
@@ -184,7 +184,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
           answer: "",
           status: "running",
           startedAt: action.at,
-          plasalidCalls: 0,
+          oledCalls: 0,
           stderrTail: [],
         },
       };
@@ -203,7 +203,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
         ...state.activeTurn,
         status: action.ok ? "ok" : "fail",
         durationMs: action.durationMs,
-        plasalidCalls: action.plasalidCalls,
+        oledCalls: action.oledCalls,
       };
       // Pin the turn, then flush any info buffered during it so those lines land
       // below the panel rather than above it.

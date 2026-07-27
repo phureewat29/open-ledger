@@ -11,13 +11,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildEnv,
-  buildPlasalid,
+  buildOpenLedger,
   checkClaudeCli,
   createWorkspace,
   installSkill,
   parseNdjson,
   placeStatement,
-  runPlasalid,
+  runOpenLedger,
   vaultAddPassword,
   writeBinShim,
   type WorkspacePaths,
@@ -30,7 +30,7 @@ const REPO_ROOT = resolve(SCRIPT_DIR, "..", "..", "..");
 const STATEMENT_SOURCE = resolve(SCRIPT_DIR, "..", "fixtures", "card-statement-2026-05.pdf");
 const STATEMENT_PASSWORD = "password";
 const VAULT_PATTERN = "^card-statement";
-const DEMO_TOOLS = "Bash(plasalid:*),Read,Write,Skill";
+const DEMO_TOOLS = "Bash(oled:*),Read,Write,Skill";
 
 const TURN_PROMPTS = [
   "ingest my new statements, then give me a quick summary of what you found",
@@ -118,9 +118,9 @@ export async function runDemo(
   const preSteps: PreStep[] = [
     {
       id: STEP_IDS.build,
-      label: "build plasalid",
+      label: "build open-ledger",
       run: async () => {
-        const res = await buildPlasalid(REPO_ROOT);
+        const res = await buildOpenLedger(REPO_ROOT);
         return { ok: res.ok, detail: res.ok ? undefined : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
       },
     },
@@ -162,7 +162,7 @@ export async function runDemo(
       id: STEP_IDS.statusCheck,
       label: "status check",
       run: async () => {
-        const res = await runPlasalid(["status", "--json"], env, ws!.cwd);
+        const res = await runOpenLedger(["status", "--json"], env, ws!.cwd);
         return { ok: res.ok, detail: res.ok ? undefined : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
       },
     },
@@ -175,7 +175,7 @@ export async function runDemo(
 
   if (opts.skipClaude) {
     const plumbingOk = await step(STEP_IDS.plumbing, "ingest list plumbing check", async () => {
-      const res = await runPlasalid(["ingest", "list", "--json"], env, wsReady.cwd);
+      const res = await runOpenLedger(["ingest", "list", "--json"], env, wsReady.cwd);
       if (!res.ok) return { ok: false, detail: `exit ${res.code}: ${truncateDetail(res.stderr)}` };
 
       const objs = parseNdjson(res.stdout);
@@ -207,7 +207,7 @@ export async function runDemo(
     const prompt = TURN_PROMPTS[i];
     report.turnStart(turn, TURN_PROMPTS.length, prompt);
 
-    let plasalidCalls = 0;
+    let oledCalls = 0;
     let skillLoaded = false;
     const result = await runClaudeTurn(
       {
@@ -222,7 +222,7 @@ export async function runDemo(
         if (event.kind === "activity") report.turnActivity(turn, event.line);
         else if (event.kind === "delta") report.turnDelta(turn, event.text);
         else if (event.kind === "skill") skillLoaded = true;
-        else if (event.kind === "plasalid-call") plasalidCalls += 1;
+        else if (event.kind === "oled-call") oledCalls += 1;
       },
     );
 
@@ -233,12 +233,12 @@ export async function runDemo(
     if (turn === 1) {
       report.info(`skill loaded: ${skillLoaded ? "yes" : "no"}`);
     }
-    report.turnDone(turn, result.ok, { durationMs: result.durationMs, plasalidCalls });
+    report.turnDone(turn, result.ok, { durationMs: result.durationMs, oledCalls });
     if (!result.ok) return { pass: false, paths: wsReady };
   }
 
   const assertionsOk = await step(STEP_IDS.assertions, "final assertions", async () => {
-    const res = await runPlasalid(["status", "--json"], env, wsReady.cwd);
+    const res = await runOpenLedger(["status", "--json"], env, wsReady.cwd);
     if (!res.ok) return { ok: false, detail: `exit ${res.code}: ${truncateDetail(res.stderr)}` };
 
     const [status] = parseNdjson(res.stdout);

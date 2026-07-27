@@ -1,20 +1,20 @@
 import * as z from "zod";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { tryExecute, type Result } from "../core/result.js";
-import { artifactsOf, type PlasalidArtifacts } from "../plasalid/artifacts.js";
-import type { PlasalidRunner } from "../plasalid/command.js";
-import { parseNdjson } from "../plasalid/ndjson.js";
+import { artifactsOf, type OpenLedgerArtifacts } from "../open-ledger/artifacts.js";
+import type { OpenLedgerRunner } from "../open-ledger/command.js";
+import { parseNdjson } from "../open-ledger/ndjson.js";
 import type { CommitCounters, RejectionType, ToolObservation } from "../report/events.js";
 
 /**
- * The model's whole surface: the plasalid CLI, and nothing else. Anything the
+ * The model's whole surface: the oled CLI, and nothing else. Anything the
  * model needs — reading a statement, committing a batch — it must get through a
- * real plasalid command, so the run scores the product's own surface rather than
+ * real oled command, so the run scores the product's own surface rather than
  * a convenience this example invented. Bad arguments come back as a message the
  * model can act on: a tool never throws and never ends the run.
  *
  * A tool reports facts, never verdicts: the observation carries the subcommand,
- * the arguments, the exit code and plasalid's hint, and the scorecard classifies
+ * the arguments, the exit code and oled's hint, and the scorecard classifies
  * from those. A refused call still hands back a ToolResult, because a refusal is
  * a result the model must read, not an error to propagate.
  */
@@ -25,7 +25,7 @@ export interface ToolResult {
   /** What the report records. */
   observation: ToolObservation;
   /** Files the command reported producing, for the host to carry back. */
-  artifacts: PlasalidArtifacts | null;
+  artifacts: OpenLedgerArtifacts | null;
 }
 
 export interface Tool {
@@ -47,13 +47,13 @@ const MAX_RESULT_ECHO = 2_000;
 // Shell operators would let one tool call become several commands.
 const SHELL_METACHARACTERS = /[|&;<>`$]/;
 
-// plasalid dispatches on at most `noun verb`.
+// oled dispatches on at most `noun verb`.
 const MAX_SUBCOMMAND_WORDS = 2;
 
 // The one subcommand that reads a batch of rows from stdin.
 const COMMIT_SUBCOMMAND = "ingest commit";
 
-const PLASALID_ARGS = z.object({
+const OLED_ARGS = z.object({
   args: z.string().min(1),
   stdin: z.string().optional(),
 });
@@ -77,7 +77,7 @@ function numberAt(row: Record<string, unknown>, key: string): number {
   return typeof value === "number" ? value : 0;
 }
 
-/** plasalid writes `{"error":{…,"hint":"…"}}` on stderr in --json mode. */
+/** oled writes `{"error":{…,"hint":"…"}}` on stderr in --json mode. */
 function hintOf(stderr: string): string | null {
   for (const row of parseNdjson(stderr)) {
     const error = row.error;
@@ -115,7 +115,7 @@ function subcommandOf(argv: string[], fallback: string): string {
 function toolResult(
   content: string,
   observation: Omit<ToolObservation, "result">,
-  artifacts: PlasalidArtifacts | null,
+  artifacts: OpenLedgerArtifacts | null,
 ): ToolResult {
   return {
     content,
@@ -187,9 +187,9 @@ function tokenize(input: string): Result<string[]> {
   return { ok: true, value: tokens };
 }
 
-/** Tolerates a leading `plasalid` and guarantees --json, so NDJSON is never optional. */
+/** Tolerates a leading `oled` and guarantees --json, so NDJSON is never optional. */
 function normalizeArgv(tokens: string[]): string[] {
-  const argv = tokens[0] === "plasalid" ? tokens.slice(1) : tokens;
+  const argv = tokens[0] === "oled" ? tokens.slice(1) : tokens;
   return argv.includes("--json") ? argv : [...argv, "--json"];
 }
 
@@ -204,8 +204,8 @@ interface RunSpec {
 /** The failure arm carries the refusal itself: the model reads it as the answer. */
 type StagedRun = { ok: true; value: RunSpec } | { ok: false; refusal: ToolResult };
 
-async function runArgv(runner: PlasalidRunner, spec: RunSpec): Promise<ToolResult> {
-  const command = `plasalid ${spec.argv.join(" ")}`;
+async function runArgv(runner: OpenLedgerRunner, spec: RunSpec): Promise<ToolResult> {
+  const command = `oled ${spec.argv.join(" ")}`;
   const base = {
     tool: spec.tool,
     subcommand: subcommandOf(spec.argv, spec.tool),
@@ -255,7 +255,7 @@ async function runArgv(runner: PlasalidRunner, spec: RunSpec): Promise<ToolResul
 }
 
 const REFUSED_SHELL =
-  "refused: args cannot contain | & ; < > ` or $. Run one plasalid command per call and send a batch through the `stdin` field instead of a pipe.";
+  "refused: args cannot contain | & ; < > ` or $. Run one oled command per call and send a batch through the `stdin` field instead of a pipe.";
 
 function countRows(ndjson: string): number {
   return ndjson.split("\n").filter((line) => line.trim().length > 0).length;
@@ -275,16 +275,16 @@ function batchRows(argv: string[], stdin: string | undefined): number | null {
 
 function prepareRun(rawArgs: string): StagedRun {
   const spec = {
-    tool: "plasalid",
-    subcommand: "plasalid",
+    tool: "oled",
+    subcommand: "oled",
     args: truncate(rawArgs, MAX_ARGS_ECHO),
-    command: "plasalid",
+    command: "oled",
   };
-  const parsed = parseArgs(PLASALID_ARGS, rawArgs);
+  const parsed = parseArgs(OLED_ARGS, rawArgs);
   if (!parsed.ok) return { ok: false, refusal: refuse("bad_tool_args", spec, parsed.error) };
 
   const args = truncate(parsed.value.args, MAX_ARGS_ECHO);
-  const called = { ...spec, args, command: `plasalid ${args}` };
+  const called = { ...spec, args, command: `oled ${args}` };
   if (SHELL_METACHARACTERS.test(parsed.value.args)) {
     return { ok: false, refusal: refuse("refused_shell", called, REFUSED_SHELL) };
   }
@@ -296,7 +296,7 @@ function prepareRun(rawArgs: string): StagedRun {
   return {
     ok: true,
     value: {
-      tool: "plasalid",
+      tool: "oled",
       args,
       argv,
       rows: batchRows(argv, parsed.value.stdin),
@@ -305,22 +305,22 @@ function prepareRun(rawArgs: string): StagedRun {
   };
 }
 
-function createPlasalidTool(plasalid: PlasalidRunner): Tool {
+function createOledTool(oled: OpenLedgerRunner): Tool {
   return {
-    name: "plasalid",
+    name: "oled",
     description:
-      "Run one plasalid command. `args` is the argument string after `plasalid` (--json is added for you). Optional `stdin` is piped to the command's standard input. No shell operators.",
-    parameters: jsonSchema(PLASALID_ARGS),
+      "Run one oled command. `args` is the argument string after `oled` (--json is added for you). Optional `stdin` is piped to the command's standard input. No shell operators.",
+    parameters: jsonSchema(OLED_ARGS),
     async invoke(rawArgs) {
       const prepared = prepareRun(rawArgs);
       if (!prepared.ok) return prepared.refusal;
-      return runArgv(plasalid, prepared.value);
+      return runArgv(oled, prepared.value);
     },
   };
 }
 
-export function createTools(plasalid: PlasalidRunner): Tool[] {
-  return [createPlasalidTool(plasalid)];
+export function createTools(oled: OpenLedgerRunner): Tool[] {
+  return [createOledTool(oled)];
 }
 
 export function toolSpecs(tools: Tool[]): ChatCompletionTool[] {

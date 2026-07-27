@@ -98,14 +98,14 @@ function skillPackCheck(): Check {
     candidates.push({
       host: host.id,
       scope: "project",
-      path: join(resolve(process.cwd(), host.projectDir), "plasalid", "VERSION"),
+      path: join(resolve(process.cwd(), host.projectDir), "open-ledger", "VERSION"),
     });
   }
   for (const host of SKILL_HOSTS) {
     candidates.push({
       host: host.id,
       scope: "global",
-      path: join(host.globalDir(), "plasalid", "VERSION"),
+      path: join(host.globalDir(), "open-ledger", "VERSION"),
     });
   }
 
@@ -119,7 +119,7 @@ function skillPackCheck(): Check {
     return {
       name: "skill_pack",
       ok: false,
-      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (plasalid setup --force) or upgrade the CLI (npm install -g plasalid@latest)`,
+      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g open-ledger@latest)`,
     };
   }
   return { name: "skill_pack", ok: true, detail: `installed ${installed} (${where})` };
