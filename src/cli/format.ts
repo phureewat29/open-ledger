@@ -54,6 +54,11 @@ const SCENARIO = [
   "Every entry is double-entry and stays on your machine.",
 ];
 
+const CONTRACT = [
+  "Exit codes: 0 ok · 1 error · 2 usage · 3 not ready · 4 input required · 5 not found · 6 invalid · 7 partial.",
+  "Errors are one stderr JSON object with a hint; read output masks PII as [USER]/[CARD], masks are not data.",
+];
+
 function section(label: string, lines: string[]): string {
   return [chalk.bold.yellow(label), ...lines.map((l) => `  ${l}`)].join("\n");
 }
@@ -90,6 +95,8 @@ export function helpScreen(
     section("Commands", commands.map((c) => row(c.name, c.desc))),
     "",
     section("Options", options.map((o) => row(o.name, o.desc))),
+    "",
+    section("Contract", CONTRACT),
     "",
     chalk.dim(DISCLAIMER),
   ].join("\n");

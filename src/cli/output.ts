@@ -230,7 +230,9 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   const raw = source.replace(/^\uFEFF/, "");
   const firstNonWs = raw.match(/\S/);
   if (!firstNonWs)
-    fail("USAGE", inputPath ? `no transaction data in ${inputPath}` : "no transaction data on stdin");
+    fail("USAGE", inputPath ? `no transaction data in ${inputPath}` : "no transaction data on stdin", {
+      hint: "pass NDJSON rows via --input <file> or pipe them on stdin",
+    });
 
   if (firstNonWs[0] === "[") {
     try {
@@ -287,7 +289,11 @@ function isNotReadyError(err: unknown): boolean {
  *  and src/lib/validate.ts's ValidationError to USAGE). */
 function toCliError(err: unknown): CliError {
   if (err instanceof CliError) return err;
-  if (err instanceof ValidationError) return new CliError("USAGE", err.message);
+  if (err instanceof ValidationError) {
+    return new CliError("USAGE", err.message, {
+      hint: "append --help to the command for its flags and usage",
+    });
+  }
   if (isNotReadyError(err)) {
     return new CliError("NOT_READY", (err as Error).message, {
       hint: "run `oled config --generate-key` to configure the harness",

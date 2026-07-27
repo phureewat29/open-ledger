@@ -134,7 +134,8 @@ export function registerQuestions(program: Command): void {
       [
         "",
         "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
-        "Typical flow: list --json, resolve each by kind (merge, recategorize, upsert), then answer or defer.",
+        "Typical flow: list --json, resolve each by kind, then answer (--also <id,id> closes siblings) or defer.",
+        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert; currency_mismatch -> re-post as linked legs through equity:conversion:<ccy>.",
         "Example: oled questions list --json",
       ].join("\n"),
     );

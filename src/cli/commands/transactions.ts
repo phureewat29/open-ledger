@@ -485,6 +485,7 @@ export function registerTransactions(program: Command): void {
         "",
         "Behavior: reads the ledger (list, show) and edits it (add, update, delete, recategorize, dedupe, merge).",
         "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add.",
+        "Direction, not sign: debit the account that grows, amount always positive. Card purchase: debit expense:<cat>, credit liability:credit_card:<x>. Bank spend: debit expense:<cat>, credit asset:bank:<x>. Salary: debit asset:bank:<x>, credit income:salary. A refund reverses the purchase's accounts; a card payment debits the liability and credits the bank; opening balances post against equity:opening-balance.",
         "Example: oled transactions list --account expense:food --json",
       ].join("\n"),
     );

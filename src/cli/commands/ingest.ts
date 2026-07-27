@@ -130,7 +130,9 @@ async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise
   }
 
   if (opts.format && opts.format !== "png" && opts.format !== "pdf") {
-    fail("USAGE", `--format must be "png" or "pdf" (got "${opts.format}")`);
+    fail("USAGE", `--format must be "png" or "pdf" (got "${opts.format}")`, {
+      hint: "use --format png for page images, --format pdf for the document",
+    });
   }
   const format = (opts.format ?? "pdf") as "png" | "pdf";
 
@@ -230,6 +232,7 @@ export function registerIngest(program: Command): void {
         "",
         "Behavior: the statement pipeline, list files, prepare pages to read, commit rows, mark done or failed.",
         "Typical flow: list, prepare <id>, read the returned document, then commit --file <sf:id> --input <batch>.",
+        "Locked PDFs exit 4: pass the password with --password-stdin, or store it once with vault add <pattern> --password-stdin. No PDF reader? prepare --format png returns page images to read.",
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     );
@@ -245,8 +248,8 @@ export function registerIngest(program: Command): void {
     .description("Prepare a file for ingestion; returns the statement's document path to Read")
     .option("--password-stdin", "read a password from stdin")
     .option("--force", "overwrite existing prepared output")
-    .addOption(new Option("--format <fmt>", "output format (png|pdf)").hideHelp())
-    .addOption(new Option("--dpi <n>", "rasterization resolution in DPI").hideHelp())
+    .option("--format <fmt>", "output format: pdf (default) or png page images")
+    .option("--dpi <n>", "rasterization DPI for --format png (default 200)")
     .addOption(
       new Option("--pages <spec>", "page range to prepare (1-based, e.g. all | 1-5,8)").hideHelp(),
     )
@@ -258,6 +261,17 @@ export function registerIngest(program: Command): void {
     .description("Commit extracted transactions (NDJSON/JSON array via --input file or stdin) into the ledger")
     .option("--file <id>", "default source file id for committed rows")
     .option("--input <path>", "read the batch from an NDJSON/JSON file instead of stdin")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: posts one batch of statement rows; each item resolves account hints, links merchants, and raises questions instead of failing.",
+        'Item: {"date":"YYYY-MM-DD","description":"...","debit_account":"expense:food","credit_account":"asset:bank:kbank","amount":135.00,"source_page":2,"row_index":0,"raw_descriptor":"<verbatim bank text>","merchant":{"canonical_name":"..."}}',
+        "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are hints (resolved exact, then fuzzy, then placeholder); set row_index + source_page and pass --file <sf:id> so a re-run is an idempotent duplicate:true no-op.",
+        "Compound rows (payslip, FX): replace debit/credit/amount with linked:[{debit_account,credit_account,amount},...] sharing one account; legs commit atomically under one group_id. Cross-currency rows become two linked legs through equity:conversion:<ccy>.",
+        "Output: one result per item, then a summary with batch_id/posted/duplicates/failed. Exit 7 = some rows failed; duplicate:true is a success.",
+      ].join("\n"),
+    )
     .action(runAction(commitIngest));
 
   ingest
