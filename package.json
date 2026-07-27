@@ -18,7 +18,7 @@
     "type": "git",
     "url": "git+https://github.com/phureewat29/open-ledger.git"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "author": "Phureewat A",
   "type": "module",
   "bin": {

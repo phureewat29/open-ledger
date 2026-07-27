@@ -26,7 +26,7 @@ You've tried many personal finance apps from the App Store. None of them fits wh
 
 AI fails when it has nowhere reliable to keep the numbers. OpenLedger gives it that place, a deterministic harness that holds every number in your own records.
 
-OpenLedger is a secure ledger that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
+OpenLedger is a secure bookkeeping that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
 
 Everything stays on your machine, the database is fully encrypted, and what the harness returns to your AI has PII redacted by default before it sends to AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
 
@@ -173,6 +173,4 @@ npm link # makes 'oled' available globally
 
 ## License
 
-OpenLedger uses the [Apache License 2.0 with the Commons Clause](./LICENSE).
-
-You're free to use, copy, modify, distribute, and fork it. The Commons Clause adds one restriction: **you may not Sell the Software**, meaning you may not provide a paid product or service whose value derives entirely or substantially from OpenLedger's functionality (including paid hosting or support). For commercial-resale rights, contact the copyright holder to negotiate a separate license.
+OpenLedger is licensed under the [Apache License 2.0](./LICENSE).
