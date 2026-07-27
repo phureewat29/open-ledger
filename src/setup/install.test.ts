@@ -40,26 +40,19 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
     expect(fm.version).toBeUndefined();
   });
 
-  it("teaches the transaction model: direction table, row_index, and linked splits", () => {
+  it("defers usage guidance to the CLI's own help", () => {
     const skill = skillMd();
-    // The direction table header (Debit account / Credit account columns).
-    expect(skill).toContain("Debit account");
-    expect(skill).toContain("Credit account");
-    // Idempotency contract + compound form.
-    expect(skill).toContain("row_index");
-    expect(skill).toContain("linked");
+    expect(skill).toContain("oled <noun> --help");
+    expect(skill).toContain("--json");
   });
 
-  it("carries the 'When you are blocked' playbook and current command names", () => {
+  it("carries the no-shell operating mode (human as terminal)", () => {
     const skill = skillMd();
-    // The blocked-environment playbook, keyed off the transcript failures.
-    expect(skill).toContain("When you are blocked");
-    // The salient PDF-rasterizer fallback (F3/F6) must name --dpi.
-    expect(skill).toContain("--dpi");
-    // Manual entry uses the `transactions` noun...
-    expect(skill).toContain("transactions add");
-    // ...and there is no legacy `record` command reference left behind.
-    expect(skill).not.toContain("record ");
+    expect(skill).toContain("one command per message");
+  });
+
+  it("keeps banned vocabulary out", () => {
+    expect(skillMd()).not.toContain("record ");
   });
 
   it("carries the Setup bootstrap section (install + first-run for a bare environment)", () => {
