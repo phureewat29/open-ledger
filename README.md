@@ -47,11 +47,11 @@ The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host 
 2. Paste into your AI chat:
 
    ```
-   Download https://raw.githubusercontent.com/phureewat29/open-ledger/main/skills/SKILL.md
-   and follow it as your instructions whenever I ask about my finances.
-   I have oled installed. Set up my ledger with me: one command at a time,
-   and I'll paste back the output.
+   Fetch https://raw.githubusercontent.com/phureewat29/open-ledger/main/skills/SKILL.md
+   and follow it. oled is installed; help me set up my ledger.
    ```
+
+   If your chat app cannot fetch URLs, paste the skill itself: `oled setup --print | pbcopy` copies it; drop it into the first message or the app's custom instructions.
 
 Your AI walks you through the rest.
 
