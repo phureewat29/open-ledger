@@ -25,7 +25,6 @@ export function groupedRows(money: LedgerMoney): number {
 }
 
 export interface LedgerProbe {
-  reachable: boolean;
   filesIngested: number;
   /** Files `ingest list` still shows as pending, i.e. never closed with `ingest done`. */
   filesPending: number;
@@ -43,8 +42,6 @@ export interface LedgerProbe {
    * wherever it was posted from.
    */
   money: LedgerMoney;
-  /** true when more rows exist than the 500-row list ceiling returned. */
-  listTruncated: boolean;
 }
 
 const STATUS = z.object({
@@ -228,7 +225,6 @@ export async function probeLedger(runner: OpenLedgerRunner): Promise<Result<Ledg
   return {
     ok: true,
     value: {
-      reachable: true,
       filesIngested: countOf(fileSummary, "ingested"),
       filesPending: countOf(fileSummary, "pending"),
       postedRows: report.value.counts?.transactions ?? 0,
@@ -238,7 +234,6 @@ export async function probeLedger(runner: OpenLedgerRunner): Promise<Result<Ledg
       questionsDeferred: report.value.questions?.deferred ?? 0,
       netWorth: report.value.net_worth?.net_worth ?? 0,
       money: tallyMoney(rows),
-      listTruncated: summaryOf(listed.value).has_more === true,
     },
   };
 }

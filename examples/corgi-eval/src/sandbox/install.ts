@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
-import { execCapture } from "../open-ledger/command.js";
+import { execCapture } from "../oled/command.js";
 
 /**
  * Installs OpenLedger the way a user would: pack the repo into a tarball, then

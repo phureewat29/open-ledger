@@ -10,8 +10,8 @@ import {
   buildSystemPrompt,
   ENVIRONMENT_ADAPTER,
 } from "./scenario.js";
-import { createOpenLedgerRunner } from "./open-ledger/command.js";
-import { probeLedger, type LedgerProbe } from "./open-ledger/ledger.js";
+import { createOpenLedgerRunner } from "./oled/command.js";
+import { probeLedger, type LedgerProbe } from "./oled/ledger.js";
 import { installPackedCli, type InstalledCli } from "./sandbox/install.js";
 import {
   createWorkspace,

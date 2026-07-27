@@ -81,7 +81,6 @@ export function execCapture(
 }
 
 export interface OpenLedgerRunner {
-  readonly bin: string;
   run(argv: string[], opts?: { stdin?: string }): Promise<CommandResult>;
 }
 
@@ -92,7 +91,6 @@ export function createOpenLedgerRunner(args: {
   timeoutMs: number;
 }): OpenLedgerRunner {
   return {
-    bin: args.bin,
     run: (argv, opts = {}) =>
       execCapture(args.bin, argv, {
         cwd: args.cwd,
