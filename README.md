@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-    A local harness where your AI turns scattered statements into a private, deterministic ledger, then builds whatever financial app you ask for.
+    A harness that turns scattered financial statements into a private, deterministic ledger for your AI.
 </p>
 
 <p align="center">
@@ -19,15 +19,15 @@
 
 <br />
 
-You've tried many personal finance apps. None of them fits what you need, because each is someone else's idea of your money. So you asked AI to build the one that would, and it failed you too. It made up numbers, mangled your data, and never quite understood what you wanted.
+You've tried many personal finance apps from the App Store. None of them fits what you need, because each is someone else's idea of your money and lifestyle. So you asked AI to build the one that would, and it failed you too. It halucinate the numbers, mangled your data, and never quite understood what you wanted.
 
-The missing piece was never a smarter AI. It's a financial harness your AI can't get wrong: deterministic, private. Plasalid is built for that.
+AI fails when it has nowhere reliable to keep the numbers. Plasalid gives it that place, a deterministic harness that holds every number in your own records.
 
-Plasalid is a secure ledger that serves as a harness for your AI. The data source is what you already receive: the monthly statements from your banks and credit cards. Your AI reads each statement and posts what it finds; the harness keeps the books double-entry, so nothing gets in unless it balances. Where the AI would have guessed, the harness makes it ask.
+Plasalid is a secure ledger that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
 
-Everything stays on your machine: the database is encrypted, and whatever the AI reads back has PII masked by default. No bank logins, no cloud, no one else's servers.
+Everything stays on your machine, the database is fully encrypted, and what the harness returns to your AI has PII redacted by default before it sends to AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
 
-By using this harness, your AI can build the app you never found: a budget tracker, a subscription auditor, a retirement planner, a personal CFO. You describe it; the foundation is already there.
+By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is yours to reimagine, and everything you build reads from the same ledger, so you can keep adding without starting over.
 
 ## Use Plasalid with your AI
 
