@@ -1,12 +1,5 @@
-/**
- * The demo's orchestration core: the ordered build -> workspace -> skill ->
- * vault -> status sequence, the optional skip-claude plumbing check, and the
- * three-turn `claude -p` conversation with final assertions.
- *
- * This module has no UI knowledge. It reports progress purely through the
- * `Reporter` contract, so the ink (TTY) and plain (piped) renderers drive the
- * exact same sequence and only differ in how the callbacks are rendered.
- */
+// No renderer knowledge: progress goes out only through the `Reporter` contract.
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,12 +7,19 @@ import {
   buildOpenLedger,
   checkClaudeCli,
   createWorkspace,
+  DETAIL_MAX,
+  exitStatus,
+  failureDetail,
   installSkill,
+  numberField,
   parseNdjson,
   placeStatement,
   runOpenLedger,
+  stringField,
+  truncate,
   vaultAddPassword,
   writeBinShim,
+  type StepResult,
   type WorkspacePaths,
 } from "./workspace.js";
 import { runClaudeTurn } from "./claude-stream.js";
@@ -30,7 +30,7 @@ const REPO_ROOT = resolve(SCRIPT_DIR, "..", "..", "..");
 const STATEMENT_SOURCE = resolve(SCRIPT_DIR, "..", "fixtures", "card-statement-2026-05.pdf");
 const STATEMENT_PASSWORD = "password";
 const VAULT_PATTERN = "^card-statement";
-const DEMO_TOOLS = "Bash(oled:*),Read,Write,Skill";
+const DEMO_TOOLS = "Bash(oled:*),Read,Write,Glob,Grep,TodoWrite,Skill";
 
 const TURN_PROMPTS = [
   "ingest my new statements, then give me a quick summary of what you found",
@@ -38,169 +38,172 @@ const TURN_PROMPTS = [
   "how much did I spend this billed period, what were my top merchants, and what should I watch next month?",
 ];
 
-/** Stable ids for each reported step. Referenced by the plain reporter's
- *  blank-line special case (see makePlainReporter) so it isn't a magic string. */
-export const STEP_IDS = {
-  build: "build",
-  workspace: "workspace",
-  placeStatement: "place-statement",
-  installSkill: "install-skill",
-  vaultAdd: "vault-add",
-  statusCheck: "status-check",
-  plumbing: "plumbing",
-  preflight: "preflight",
-  assertions: "assertions",
-} as const;
-
 export interface DemoOptions {
   skipClaude: boolean;
   turnTimeoutSec: number;
 }
 
-export interface DemoOutcome {
+interface DemoOutcome {
   pass: boolean;
   paths: WorkspacePaths | null;
 }
 
-/** First non-blank line of a subprocess's stderr, truncated for display. */
-function truncateDetail(s: string, max = 200): string {
-  const line = (s.split("\n").find((l) => l.trim().length > 0) ?? "").trim();
-  return line.length > max ? `${line.slice(0, Math.max(0, max - 3))}...` : line;
+/**
+ * `doctor`'s own `ok` covers the hard checks only, so a failure report names
+ * every check that is not ok rather than guessing which one sank the run.
+ */
+function failedChecks(payload: Record<string, unknown> | undefined): string[] {
+  const checks = payload?.checks;
+  if (!Array.isArray(checks)) return [];
+  return checks
+    .filter((c) => (c as { ok?: unknown })?.ok !== true)
+    .map((c) => {
+      const detail = stringField(c, "detail");
+      return `${stringField(c, "name") || "(unnamed)"}${detail ? `: ${detail}` : ""}`;
+    });
 }
 
-/** Safe nested-number lookup into a parsed JSON value (never throws). */
-function numberField(obj: unknown, ...path: string[]): number {
-  let cur: unknown = obj;
-  for (const key of path) {
-    if (!cur || typeof cur !== "object") return 0;
-    cur = (cur as Record<string, unknown>)[key];
+/** The real readiness gate: `status` always exits 0, while `doctor` reports
+ *  whether the db opens, the schema is present and the PDF reader loads. */
+async function doctorReady(env: NodeJS.ProcessEnv, cwd: string): Promise<StepResult> {
+  const res = await runOpenLedger(["doctor", "--json"], env, cwd);
+  const [payload] = parseNdjson(res.stdout);
+  if (res.ok && payload?.ok === true) return { ok: true, detail: "environment ready" };
+
+  const failing = failedChecks(payload);
+  if (failing.length === 0) return { ok: false, detail: failureDetail(res) };
+  return { ok: false, detail: truncate(`not ready - ${failing.join("; ")}`, DETAIL_MAX) };
+}
+
+async function discoversStatement(env: NodeJS.ProcessEnv, cwd: string): Promise<StepResult> {
+  const res = await runOpenLedger(["ingest", "list", "--json"], env, cwd);
+  if (!res.ok) return exitStatus(res);
+
+  const summary = parseNdjson(res.stdout).find((o) => o.type === "summary");
+  if (!summary) return { ok: false, detail: "no summary line in ingest list --json output" };
+
+  const newCount = numberField(summary, "new");
+  if (newCount < 1) {
+    return { ok: false, detail: `expected summary.new >= 1, got ${JSON.stringify(summary.new)}` };
   }
-  return typeof cur === "number" ? cur : 0;
-}
-
-interface PreStep {
-  id: string;
-  label: string;
-  run: () => Promise<{ ok: boolean; detail?: string }>;
+  return { ok: true, detail: `${newCount} new file(s) awaiting ingest` };
 }
 
 /**
- * Runs the full demo sequence, reporting progress through `report`, and
- * returns whether it passed. `onWorkspaceReady` fires once the workspace
- * exists, so callers can register cleanup before the long claude turns start.
+ * The contract every turn depends on: a vault-locked PDF with a text layer
+ * prepares into one document whose pages carry 1-based `--- page N ---` markers.
+ * No password is passed, deliberately — the stored vault entry has to open it,
+ * which is the only route the agent itself ever has.
  */
+async function preparesTextDocument(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  statementPath: string,
+): Promise<StepResult> {
+  const res = await runOpenLedger(["ingest", "prepare", statementPath, "--json"], env, cwd);
+  if (!res.ok) return exitStatus(res);
+
+  const [payload] = parseNdjson(res.stdout);
+  const kind = stringField(payload, "kind");
+  const source = stringField(payload, "source");
+  const pageCount = numberField(payload, "page_count");
+  if (kind !== "text" || source !== "text-layer" || pageCount < 1) {
+    return {
+      ok: false,
+      detail: `expected kind=text source=text-layer page_count>=1, got kind=${kind} source=${source} page_count=${pageCount}`,
+    };
+  }
+
+  const document = stringField(payload, "document");
+  if (!existsSync(document)) return { ok: false, detail: `document not on disk: ${document || "(absent)"}` };
+  if (!readFileSync(document, "utf8").includes("--- page 1 ---")) {
+    return { ok: false, detail: `no '--- page 1 ---' marker in ${document}` };
+  }
+  return { ok: true, detail: `${pageCount} pages of text at ${document}` };
+}
+
+async function assertLedgerFilled(env: NodeJS.ProcessEnv, cwd: string): Promise<StepResult> {
+  const res = await runOpenLedger(["status", "--json"], env, cwd);
+  if (!res.ok) return exitStatus(res);
+
+  const [status] = parseNdjson(res.stdout);
+  const ingested = numberField(status, "files", "ingested");
+  const transactions = numberField(status, "counts", "transactions");
+  if (!(ingested >= 1 && transactions > 0)) {
+    return {
+      ok: false,
+      detail: `expected files.ingested >= 1 and counts.transactions > 0, got ingested=${ingested} transactions=${transactions}`,
+    };
+  }
+  // Open questions are informational: the agent may legitimately defer some.
+  const open = numberField(status, "questions", "open");
+  return {
+    ok: true,
+    detail: `files.ingested=${ingested}, counts.transactions=${transactions}, questions.open=${open}`,
+  };
+}
+
+/** `onWorkspaceReady` fires once the workspace exists, so callers can register cleanup before the long claude turns start. */
 export async function runDemo(
   opts: DemoOptions,
   report: Reporter,
   onWorkspaceReady: (paths: WorkspacePaths) => void,
 ): Promise<DemoOutcome> {
-  const step = async (
-    id: string,
-    label: string,
-    fn: () => Promise<{ ok: boolean; detail?: string }>,
-  ): Promise<boolean> => {
-    report.stepStart(id, label);
-    let result: { ok: boolean; detail?: string };
+  const step = async (label: string, fn: () => Promise<StepResult>): Promise<boolean> => {
+    let result: StepResult;
     try {
       result = await fn();
     } catch (err) {
       result = { ok: false, detail: err instanceof Error ? err.message : String(err) };
     }
-    report.stepDone(id, label, result.ok, result.detail);
+    report.step(label, result.ok, result.detail);
     return result.ok;
   };
 
-  // ws/env come from the workspace step; safe since later steps only run
-  // after it succeeds.
-  let ws: WorkspacePaths | null = null;
-  let env: NodeJS.ProcessEnv = process.env;
+  const builtOk = await step("build open-ledger", async () => exitStatus(await buildOpenLedger(REPO_ROOT)));
+  if (!builtOk) return { pass: false, paths: null };
 
-  const preSteps: PreStep[] = [
-    {
-      id: STEP_IDS.build,
-      label: "build open-ledger",
-      run: async () => {
-        const res = await buildOpenLedger(REPO_ROOT);
-        return { ok: res.ok, detail: res.ok ? undefined : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
-      },
-    },
-    {
-      id: STEP_IDS.workspace,
-      label: "create workspace",
-      run: async () => {
-        // One can't-fail step: create the workspace, register it for
-        // cleanup, then write the bin shim and build the isolation env.
-        ws = createWorkspace();
-        onWorkspaceReady(ws);
-        writeBinShim(ws, REPO_ROOT);
-        env = buildEnv(ws);
-        return { ok: true, detail: ws.root };
-      },
-    },
-    {
-      id: STEP_IDS.placeStatement,
-      label: "place statement",
-      run: async () => ({ ok: true, detail: placeStatement(ws!, STATEMENT_SOURCE) }),
-    },
-    {
-      id: STEP_IDS.installSkill,
-      label: "install skill",
-      run: async () => {
-        const res = await installSkill(ws!, env);
-        return { ok: res.ok, detail: res.ok ? ws!.skillDir : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
-      },
-    },
-    {
-      id: STEP_IDS.vaultAdd,
-      label: "vault add password",
-      run: async () => {
-        const res = await vaultAddPassword(VAULT_PATTERN, STATEMENT_PASSWORD, env, ws!.cwd);
-        return { ok: res.ok, detail: res.ok ? undefined : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
-      },
-    },
-    {
-      id: STEP_IDS.statusCheck,
-      label: "status check",
-      run: async () => {
-        const res = await runOpenLedger(["status", "--json"], env, ws!.cwd);
-        return { ok: res.ok, detail: res.ok ? undefined : `exit ${res.code}: ${truncateDetail(res.stderr)}` };
-      },
-    },
-  ];
+  // Creating the workspace and copying the fixture either work or throw; there
+  // is no failure to report, so they are announced rather than run as steps.
+  const ws = createWorkspace();
+  onWorkspaceReady(ws);
+  writeBinShim(ws, REPO_ROOT);
+  const env = buildEnv(ws);
+  report.step("create workspace", true, ws.root);
 
-  for (const s of preSteps) {
-    if (!(await step(s.id, s.label, s.run))) return { pass: false, paths: ws };
-  }
-  const wsReady: WorkspacePaths = ws!; // guaranteed set by the workspace step above
+  const statementPath = placeStatement(ws, STATEMENT_SOURCE);
+  report.step("place statement", true, statementPath);
+
+  const skillOk = await step("install skill", () => installSkill(env, ws.cwd));
+  if (!skillOk) return { pass: false, paths: ws };
+
+  const vaultOk = await step("vault add password", async () =>
+    exitStatus(await vaultAddPassword(VAULT_PATTERN, STATEMENT_PASSWORD, env, ws.cwd)),
+  );
+  if (!vaultOk) return { pass: false, paths: ws };
+
+  const readyOk = await step("doctor readiness gate", () => doctorReady(env, ws.cwd));
+  if (!readyOk) return { pass: false, paths: ws };
 
   if (opts.skipClaude) {
-    const plumbingOk = await step(STEP_IDS.plumbing, "ingest list plumbing check", async () => {
-      const res = await runOpenLedger(["ingest", "list", "--json"], env, wsReady.cwd);
-      if (!res.ok) return { ok: false, detail: `exit ${res.code}: ${truncateDetail(res.stderr)}` };
+    const listOk = await step("ingest list plumbing check", () => discoversStatement(env, ws.cwd));
+    if (!listOk) return { pass: false, paths: ws };
 
-      const objs = parseNdjson(res.stdout);
-      const summary = objs.find((o) => o.type === "summary");
-      if (!summary) return { ok: false, detail: "no summary line in ingest list --json output" };
-
-      const newCount = summary.new;
-      if (!(typeof newCount === "number" && newCount >= 1)) {
-        return { ok: false, detail: `expected summary.new >= 1, got ${JSON.stringify(newCount)}` };
-      }
-      return { ok: true, detail: `${newCount} new file(s) awaiting ingest` };
-    });
-    return { pass: plumbingOk, paths: wsReady };
+    const prepareOk = await step("ingest prepare smoke", () =>
+      preparesTextDocument(env, ws.cwd, statementPath),
+    );
+    return { pass: prepareOk, paths: ws };
   }
 
-  // Fail fast with a friendly message if `claude` isn't installed/authenticated,
-  // instead of a raw ENOENT once the first turn's spawn() runs.
-  const preflightOk = await step(STEP_IDS.preflight, "check claude CLI", async () => {
+  // Fail fast with a friendly message instead of a raw ENOENT from the first turn's spawn().
+  const preflightOk = await step("check claude CLI", async () => {
     const ok = checkClaudeCli(env);
     return {
       ok,
       detail: ok ? undefined : "claude CLI not found or not working - install Claude Code and authenticate",
     };
   });
-  if (!preflightOk) return { pass: false, paths: wsReady };
+  if (!preflightOk) return { pass: false, paths: ws };
 
   for (let i = 0; i < TURN_PROMPTS.length; i++) {
     const turn = i + 1;
@@ -213,48 +216,29 @@ export async function runDemo(
       {
         prompt,
         continueSession: turn > 1,
-        cwd: wsReady.cwd,
+        cwd: ws.cwd,
         env,
         allowedTools: DEMO_TOOLS,
         turnTimeoutSec: opts.turnTimeoutSec,
       },
       (event) => {
-        if (event.kind === "activity") report.turnActivity(turn, event.line);
-        else if (event.kind === "delta") report.turnDelta(turn, event.text);
+        if (event.kind === "activity") report.turnActivity(event.line);
         else if (event.kind === "skill") skillLoaded = true;
         else if (event.kind === "oled-call") oledCalls += 1;
       },
     );
 
     if (result.stderrTail && result.stderrTail.length > 0) {
-      report.turnStderr(turn, result.stderrTail);
+      report.turnStderr(result.stderrTail);
     }
-    report.turnAnswer(turn, result.answer || "(no answer text)");
+    report.turnAnswer(result.answer || "(no answer text)");
     if (turn === 1) {
       report.info(`skill loaded: ${skillLoaded ? "yes" : "no"}`);
     }
-    report.turnDone(turn, result.ok, { durationMs: result.durationMs, oledCalls });
-    if (!result.ok) return { pass: false, paths: wsReady };
+    report.turnDone(result.ok, result.durationMs, oledCalls);
+    if (!result.ok) return { pass: false, paths: ws };
   }
 
-  const assertionsOk = await step(STEP_IDS.assertions, "final assertions", async () => {
-    const res = await runOpenLedger(["status", "--json"], env, wsReady.cwd);
-    if (!res.ok) return { ok: false, detail: `exit ${res.code}: ${truncateDetail(res.stderr)}` };
-
-    const [status] = parseNdjson(res.stdout);
-    const ingested = numberField(status, "files", "ingested");
-    const transactions = numberField(status, "counts", "transactions");
-    if (!(ingested >= 1 && transactions > 0)) {
-      return {
-        ok: false,
-        detail: `expected files.ingested >= 1 and counts.transactions > 0, got ingested=${ingested} transactions=${transactions}`,
-      };
-    }
-
-    const openQuestions = numberField(status, "questions", "open");
-    report.info(`${openQuestions} open question(s) after the demo (informational)`);
-    return { ok: true, detail: `files.ingested=${ingested}, counts.transactions=${transactions}` };
-  });
-
-  return { pass: assertionsOk, paths: wsReady };
+  const assertionsOk = await step("final assertions", () => assertLedgerFilled(env, ws.cwd));
+  return { pass: assertionsOk, paths: ws };
 }

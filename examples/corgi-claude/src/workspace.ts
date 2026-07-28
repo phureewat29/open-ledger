@@ -1,4 +1,3 @@
-/** Workspace setup/teardown for the corgi-claude demo. */
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -11,28 +10,24 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** How much of a command's output a one-line step detail may carry. */
+export const DETAIL_MAX = 200;
+
+const CLAUDE_VERSION_TIMEOUT_MS = 5000;
+
 export interface WorkspacePaths {
-  /** Workspace root (a fresh mkdtemp directory). */
   root: string;
-  /** Redirected HOME/USERPROFILE - keeps ~/.oled (and ~/.claude) isolated. */
+  /** Redirected HOME/USERPROFILE; keeps ~/.oled and ~/.claude isolated. */
   home: string;
-  /** OLED_DATA_DIR - where statements get placed for discovery. */
   data: string;
-  /** Working directory the demo (and `claude`) run from. */
   cwd: string;
-  /** Holds the `oled` bin shim, put on PATH. */
   bin: string;
-  /** OLED_CACHE_DIR - scratch space for prepared/decrypted documents. */
+  /** Under cwd so the agent reads prepared documents without leaving its workspace. */
   cache: string;
-  /** OLED_DB_PATH - sqlite db file (does not need to pre-exist). */
   dbPath: string;
-  /** Where `oled setup` installs the skill pack (.claude under cwd).
-   *  Created by setup, not pre-made by createWorkspace. */
-  skillDir: string;
 }
 
-/** Create a fresh workspace directory tree (mktemp-style). Pure filesystem
- *  setup - no env/PATH side effects (see buildEnv / writeBinShim). */
+/** Creates the directory tree only; env/PATH setup happens in buildEnv/writeBinShim. */
 export function createWorkspace(): WorkspacePaths {
   const root = mkdtempSync(join(tmpdir(), "corgi-claude-"));
   const cwd = join(root, "cwd");
@@ -42,20 +37,15 @@ export function createWorkspace(): WorkspacePaths {
     data: join(root, "data"),
     cwd,
     bin: join(root, "bin"),
-    cache: join(root, "cache"),
+    cache: join(cwd, "cache"),
     dbPath: join(root, "db.sqlite"),
-    skillDir: join(cwd, ".claude"),
   };
-  mkdirSync(paths.home, { recursive: true });
-  mkdirSync(paths.data, { recursive: true });
-  mkdirSync(paths.cwd, { recursive: true });
-  mkdirSync(paths.bin, { recursive: true });
-  mkdirSync(paths.cache, { recursive: true });
+  for (const dir of [paths.home, paths.data, paths.cwd, paths.bin, paths.cache]) {
+    mkdirSync(dir, { recursive: true });
+  }
   return paths;
 }
 
-/** Write an `oled` shim into the workspace bin dir that execs this
- *  checkout's freshly-built dist/cli/index.js. */
 export function writeBinShim(paths: WorkspacePaths, repoRoot: string): void {
   const shimPath = join(paths.bin, "oled");
   const distEntry = join(repoRoot, "dist", "cli", "index.js");
@@ -64,16 +54,15 @@ export function writeBinShim(paths: WorkspacePaths, repoRoot: string): void {
   chmodSync(shimPath, 0o755);
 }
 
-/** Build the isolation env: HOME/USERPROFILE, OLED_* paths, a blank
- *  encryption key (plain db, reproducible), NO_COLOR, and PATH prefixed with
- *  the workspace bin dir so `oled` resolves to the shim above. */
-export function buildEnv(
-  paths: WorkspacePaths,
-  base: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+/**
+ * Blank encryption key keeps the db reproducible; PATH is prefixed so `oled`
+ * resolves to the shim. Every OLED_* the harness reads is set here, blank
+ * included: an operator's exported OCR endpoint would otherwise reach the demo.
+ */
+export function buildEnv(paths: WorkspacePaths): NodeJS.ProcessEnv {
   return {
-    ...base,
-    PATH: `${paths.bin}${base.PATH ? `:${base.PATH}` : ""}`,
+    ...process.env,
+    PATH: `${paths.bin}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
     HOME: paths.home,
     USERPROFILE: paths.home,
     OLED_DIR: join(paths.home, ".oled"),
@@ -81,13 +70,14 @@ export function buildEnv(
     OLED_DATA_DIR: paths.data,
     OLED_CACHE_DIR: paths.cache,
     OLED_DB_ENCRYPTION_KEY: "",
+    OLED_OCR_BASE_URL: "",
+    OLED_OCR_MODEL: "",
+    OLED_OCR_API_KEY: "",
     NO_COLOR: "1",
   };
 }
 
-/** Copy the bundled card statement into the workspace data dir
- *  (data/corgi-bank/), same relative layout `oled ingest list` expects to
- *  discover. Returns the destination path. */
+/** Uses the relative layout `oled ingest list` expects to discover statements. */
 export function placeStatement(
   paths: WorkspacePaths,
   sourcePdfPath: string,
@@ -99,16 +89,20 @@ export function placeStatement(
   return dest;
 }
 
-export interface RunResult {
+interface RunResult {
   ok: boolean;
   code: number | null;
   stdout: string;
   stderr: string;
 }
 
-/** Spawn a command, capture stdout/stderr in full (no streaming) and resolve
- *  once it exits. Shared by every non-interactive step below. */
-export function runCommand(
+/** A step outcome: nothing branches on the failure kind, it is only reported. */
+export interface StepResult {
+  ok: boolean;
+  detail?: string;
+}
+
+function runCommand(
   command: string,
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
@@ -142,56 +136,64 @@ export function runCommand(
   });
 }
 
-/** `npm run build` at the repo root - builds dist/cli/index.js for the bin
- *  shim to exec. */
+/** Collapses whitespace so a multi-line command or error fits one report line. */
+export function truncate(s: string, max: number): string {
+  const oneLine = s.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, Math.max(0, max - 3))}...` : oneLine;
+}
+
+/** Detail line for a failed `oled` run: the exit code plus the head of stderr. */
+export function failureDetail(res: RunResult): string {
+  return `exit ${res.code}: ${truncate(res.stderr, DETAIL_MAX)}`;
+}
+
+/** For steps whose whole assertion is the exit code. */
+export function exitStatus(res: RunResult): StepResult {
+  return { ok: res.ok, detail: res.ok ? undefined : failureDetail(res) };
+}
+
+/** Builds dist/cli/index.js, which the bin shim (writeBinShim) execs. */
 export function buildOpenLedger(repoRoot: string): Promise<RunResult> {
   return runCommand("npm", ["run", "build"], { cwd: repoRoot });
 }
 
-/** Run an `oled` subcommand through the workspace bin shim (resolved via
- *  the isolation env's PATH). */
 export function runOpenLedger(
   args: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
+  input?: string,
 ): Promise<RunResult> {
-  return runCommand("oled", args, { cwd, env });
+  return runCommand("oled", args, { cwd, env, input });
 }
 
-/** Installs the OpenLedger skill pack into `paths.skillDir` (via `oled
- *  setup`) so `claude` can discover the harness. */
-export function installSkill(
-  paths: WorkspacePaths,
+/** `--host claude` lands the pack at `<cwd>/.claude/skills/open-ledger`, where
+ *  `claude` discovers it; the reported path is the one setup says it wrote. */
+export async function installSkill(
   env: NodeJS.ProcessEnv,
-): Promise<RunResult> {
-  return runOpenLedger(
-    ["setup", "--dir", paths.skillDir, "--json"],
-    env,
-    paths.cwd,
-  );
+  cwd: string,
+): Promise<StepResult> {
+  const res = await runOpenLedger(["setup", "--host", "claude", "--json"], env, cwd);
+  if (!res.ok) return exitStatus(res);
+
+  const [payload] = parseNdjson(res.stdout);
+  const installed = payload?.installed;
+  const path = Array.isArray(installed) ? stringField(installed[0], "path") : "";
+  if (!path) return { ok: false, detail: `no installed path in ${truncate(res.stdout, DETAIL_MAX)}` };
+  return { ok: true, detail: path };
 }
 
-/** `oled vault add <pattern> --password-stdin --json`, piping the
- *  password over stdin (never as an argv value). */
+/** `oled vault add <pattern> --json`, piping the password over stdin (never as
+ *  an argv value). */
 export function vaultAddPassword(
   pattern: string,
   password: string,
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): Promise<RunResult> {
-  return runCommand(
-    "oled",
-    ["vault", "add", pattern, "--password-stdin", "--json"],
-    {
-      cwd,
-      env,
-      input: password,
-    },
-  );
+  return runOpenLedger(["vault", "add", pattern, "--json"], env, cwd, password);
 }
 
-/** Parse NDJSON stdout into per-line objects, ignoring blank lines. Invalid
- *  lines are skipped defensively rather than throwing. */
+/** Invalid lines are skipped rather than throwing. */
 export function parseNdjson(stdout: string): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const line of stdout.split("\n")) {
@@ -200,27 +202,45 @@ export function parseNdjson(stdout: string): Record<string, unknown>[] {
     try {
       out.push(JSON.parse(trimmed));
     } catch {
-      // ignore malformed/partial lines
+      // ignore
     }
   }
   return out;
 }
 
+function walk(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+/** "" for a missing or non-string field; never throws. */
+export function stringField(obj: unknown, ...path: string[]): string {
+  const v = walk(obj, path);
+  return typeof v === "string" ? v : "";
+}
+
+/** 0 for a missing or non-number field; never throws. */
+export function numberField(obj: unknown, ...path: string[]): number {
+  const v = walk(obj, path);
+  return typeof v === "number" ? v : 0;
+}
+
 /** Best-effort check that `claude` resolves and runs (installed, on PATH),
  *  so the demo fails with a friendly message instead of a raw ENOENT later. */
-export function checkClaudeCli(
-  env: NodeJS.ProcessEnv,
-  timeoutMs = 5000,
-): boolean {
+export function checkClaudeCli(env: NodeJS.ProcessEnv): boolean {
   const res = spawnSync("claude", ["--version"], {
     env,
-    timeout: timeoutMs,
+    timeout: CLAUDE_VERSION_TIMEOUT_MS,
     stdio: "ignore",
   });
   return res.error == null && res.status === 0;
 }
 
-/** Remove the workspace directory tree. Safe to call more than once. */
+/** Safe to call more than once. */
 export function cleanupWorkspace(paths: WorkspacePaths): void {
   rmSync(paths.root, { recursive: true, force: true });
 }

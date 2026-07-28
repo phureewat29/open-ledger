@@ -1,19 +1,13 @@
-/**
- * CLI argument parsing for the corgi-claude demo: --skip-claude,
- * --keep-workspace, --turn-timeout <seconds>, and -h/--help. Pure - no I/O and
- * no process access; main() reads process.argv and acts on the result.
- */
+// Pure - no I/O, no process access. main() reads process.argv and acts on the result.
 
-/** Default per-turn timeout (seconds) when --turn-timeout isn't passed. Lives
- *  here because it's a CLI default; claude-stream always receives an explicit
- *  value (see runClaudeTurn's required turnTimeoutSec). */
-export const DEFAULT_TURN_TIMEOUT_SEC = 900;
+// claude-stream always requires an explicit timeout value (see runClaudeTurn).
+const DEFAULT_TURN_TIMEOUT_SEC = 900;
 
 export const USAGE = `usage: npm start -- [--skip-claude] [--keep-workspace] [--turn-timeout <seconds>]
 
   --skip-claude      skip the live "claude -p" turns; only check that the
-                     ingest pipeline discovers the statement (no claude CLI
-                     required)
+                     ingest pipeline discovers the statement and prepares it
+                     into readable text (no claude CLI required)
   --keep-workspace   do not delete the isolated workspace on exit; prints
                      its path instead
   --turn-timeout <seconds>
@@ -23,7 +17,7 @@ export const USAGE = `usage: npm start -- [--skip-claude] [--keep-workspace] [--
   -h, --help         show this help text
 `;
 
-export interface CliArgs {
+interface CliArgs {
   skipClaude: boolean;
   keepWorkspace: boolean;
   turnTimeoutSec: number;
@@ -52,10 +46,10 @@ export function parseArgs(argv: string[]): CliArgs {
       const parsed = raw === undefined ? Number.NaN : Number(raw);
       if (!Number.isFinite(parsed) || parsed <= 0) {
         args.unknown.push(raw === undefined ? arg : `${arg} ${raw}`);
-        if (raw !== undefined) i++; // consume the bad value so it isn't also flagged on its own
+        if (raw !== undefined) i++; // consume the bad value so it isn't flagged again
       } else {
         args.turnTimeoutSec = parsed;
-        i++; // consume the value
+        i++;
       }
     } else {
       args.unknown.push(arg);

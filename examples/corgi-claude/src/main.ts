@@ -1,9 +1,9 @@
 /**
  * corgi-claude demo entry point.
  *
- * An external `claude` CLI agent works end to end with OpenLedger over a real,
- * password-protected Thai credit-card statement, using only the documented
- * `oled` CLI surface. See README.md for the full story.
+ * An external `claude` CLI agent works end to end with OpenLedger over a
+ * synthetic, password-protected credit-card statement, using only the
+ * documented `oled` CLI surface. See README.md for the full story.
  *
  * Usage:
  *   npm start --                          full demo (requires the `claude` CLI)
@@ -11,30 +11,22 @@
  *   npm start -- --keep-workspace         leave the isolated workspace on disk
  *   npm start -- --turn-timeout <seconds> per-turn timeout (default 900)
  *
- * TTY stdout gets the live ink dashboard (ui.tsx); piped/non-TTY stdout gets
- * flat, sequential plain-text lines (reporters.ts). Both run the same runDemo
- * orchestration (orchestrate.ts) - only how Reporter callbacks render differs.
- * This file just parses args, picks the renderer, and wires cleanup.
+ * Output is flat, sequential plain text (reporters.ts) whether stdout is a
+ * terminal or a pipe. This file just parses args, wires cleanup, and hands off
+ * to the orchestration (orchestrate.ts).
  */
 import { parseArgs, USAGE } from "./args.js";
 import { runPlain } from "./reporters.js";
-import { runTty } from "./ui.js";
 import { cleanupWorkspace, type WorkspacePaths } from "./workspace.js";
 import type { DemoOptions } from "./orchestrate.js";
 
-interface WorkspaceGuard {
-  /** Register the run's workspace so it's cleaned up on exit (unless kept).
-   *  Passed to runDemo as onWorkspaceReady; fires once the dir exists. */
-  register(paths: WorkspacePaths): void;
-  keepWorkspace: boolean;
-}
-
 /**
- * Owns workspace cleanup: installs exit/SIGINT/SIGTERM handlers once, removes
- * the registered workspace on exit unless --keep-workspace was passed, and
- * prints the kept path on a signal. Nothing to clean until register() runs.
+ * Installs exit/SIGINT/SIGTERM handlers once and returns the hook that arms
+ * them: there is nothing to clean up until the workspace exists. On exit the
+ * registered workspace is removed unless --keep-workspace was passed, in which
+ * case a signal prints the kept path instead.
  */
-function createWorkspaceGuard(keepWorkspace: boolean): WorkspaceGuard {
+function createWorkspaceGuard(keepWorkspace: boolean): (paths: WorkspacePaths) => void {
   let paths: WorkspacePaths | null = null;
   let cleanedUp = false;
 
@@ -54,11 +46,8 @@ function createWorkspaceGuard(keepWorkspace: boolean): WorkspaceGuard {
     });
   }
 
-  return {
-    register(p) {
-      paths = p;
-    },
-    keepWorkspace,
+  return (p) => {
+    paths = p;
   };
 }
 
@@ -75,13 +64,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const guard = createWorkspaceGuard(args.keepWorkspace);
+  const onWorkspaceReady = createWorkspaceGuard(args.keepWorkspace);
   const opts: DemoOptions = { skipClaude: args.skipClaude, turnTimeoutSec: args.turnTimeoutSec };
-
-  const code = process.stdout.isTTY
-    ? await runTty(opts, guard.register, guard.keepWorkspace)
-    : await runPlain(opts, guard.register, guard.keepWorkspace);
-  process.exitCode = code;
+  process.exitCode = await runPlain(opts, onWorkspaceReady, args.keepWorkspace);
 }
 
 main().catch((err) => {

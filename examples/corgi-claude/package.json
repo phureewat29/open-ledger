@@ -5,19 +5,15 @@
   "description": "Standalone agentic demo with OpenLedger, run end to end by an external Claude Code CLI.",
   "type": "module",
   "scripts": {
-    "start": "tsx src/demo.tsx",
-    "verify": "tsx src/verify-render-clock.ts"
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && tsx src/verify.ts"
   },
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "ink": "^5.0.0",
-    "react": "^18.0.0"
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/react": "^18.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.5.0"
   }
