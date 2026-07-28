@@ -6,28 +6,18 @@ import type { Command } from "commander";
 import { buildProgram, COMMANDS } from "./program.js";
 
 /**
- * Drift-prevention test: no subprocesses, pure import + string parsing. Keeps
- * the program tree, README's "## Commands" section, SKILL.md, and the help
- * screen's COMMANDS array from silently diverging as commands or flags change.
- *
- * buildProgram() only constructs the commander tree (no argv parsing, no
- * action run), so calling it here is side-effect free.
+ * buildProgram() only builds the commander tree — no argv parsing, no action
+ * run — so calling it here is side-effect free.
  */
 
-// docs-consistency.test.ts lives in src/cli/ -> repo root is two levels up.
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const README = readFileSync(resolve(repoRoot, "README.md"), "utf8");
 const SKILL = readFileSync(resolve(repoRoot, "skills", "SKILL.md"), "utf8");
 
 function topLevelNames(program: Command): string[] {
-  /**
-   * Aliases (e.g. `data`'s `open`) live on the same Command instance, not
-   * a separate program.commands entry — no alias filtering needed here.
-   */
   return program.commands.map((c) => c.name());
 }
 
-/** Pull the fenced code block out of README's "## Commands" section. */
 function readmeCommandsBlock(readme: string): string {
   const startIdx = readme.indexOf("\n## Commands\n");
   if (startIdx === -1) throw new Error('README.md is missing a "## Commands" section');
@@ -39,11 +29,6 @@ function readmeCommandsBlock(readme: string): string {
   return fenceMatch[1];
 }
 
-/**
- * Extracts the noun named on each `oled <noun> ...` README line. The bare
- * `oled` line documents the no-arg default action (an alias for `status`),
- * mapped explicitly rather than left unmatched.
- */
 function extractReadmeCommandNames(readme: string): Set<string> {
   const block = readmeCommandsBlock(readme);
   const names = new Set<string>();
@@ -61,7 +46,6 @@ function extractReadmeCommandNames(readme: string): Set<string> {
   return names;
 }
 
-/** All `` `oled ...` `` backtick spans anywhere in a markdown string. */
 function extractOledCodeSpans(md: string): string[] {
   const spans: string[] = [];
   const re = /`([^`]+)`/g;
@@ -72,7 +56,6 @@ function extractOledCodeSpans(md: string): string[] {
   return spans;
 }
 
-/** True once brackets/pipes are stripped from the token's edges and what's left starts with `--`. */
 function isFlagToken(token: string): boolean {
   return /^[[\]|]*--/.test(token);
 }
@@ -82,18 +65,13 @@ function isArgToken(token: string): boolean {
   return token.includes("<");
 }
 
-/**
- * The concrete command noun a span names — the first token after `oled`,
- * when it's a real command word. A bare `oled`, a root flag, or a generic
- * `oled <noun> --help` template names no command and returns undefined.
- */
+/** The command noun a span names; undefined for a bare `oled`, a root flag, or a template placeholder. */
 function commandNounOf(span: string): string | undefined {
   const noun = span.trim().split(/\s+/)[1];
   if (!noun || isFlagToken(noun) || isArgToken(noun)) return undefined;
   return noun;
 }
 
-/** Set of concrete command nouns mentioned across a markdown doc's oled spans. */
 function extractSpanNouns(md: string): Set<string> {
   const nouns = new Set<string>();
   for (const span of extractOledCodeSpans(md)) {
@@ -116,8 +94,7 @@ function firstSubToken(span: string): string | undefined {
 
 /**
  * Resolves the command a doc code-span like `oled transactions recategorize
- * --set-account <id> ...` refers to: the noun command, drilled into a subcommand
- * when the span names one.
+ * --set-account <id> ...` refers to, drilling into a subcommand when named.
  */
 function resolveTargetCommand(program: Command, span: string): Command | undefined {
   const nounName = commandNounOf(span);
@@ -147,9 +124,8 @@ function extractFlagTokens(span: string): string[] {
 describe("docs consistency (no subprocesses)", () => {
   it("program construction has no side effects (importing/building never touches argv)", () => {
     /**
-     * If buildProgram() parsed argv or ran an action at import time, this
-     * bare call under vitest (which has its own argv) would throw or hang.
-     * Reaching this assertion is the proof it doesn't.
+     * A parsed-argv or action-run side effect at import time would throw or
+     * hang here (vitest has its own argv) — reaching this assertion is the proof.
      */
     expect(() => buildProgram()).not.toThrow();
   });

@@ -13,16 +13,12 @@ export function formatInt(n: number): string {
 }
 
 /** Left-pad a key/value label to `width`, optionally bold (padding first so the ANSI codes don't count toward the width). */
-export function padLabel(label: string, width: number, opts: { bold?: boolean } = {}): string {
+function padLabel(label: string, width: number, opts: { bold?: boolean } = {}): string {
   const padded = label.padEnd(width);
   return opts.bold ? chalk.bold(padded) : padded;
 }
 
-/**
- * Print flat key/value rows for human output: aligned two-column in a TTY
- * (labels bold when `bold`), tab-separated when piped. Never emits JSON — the
- * caller owns the `--json` path.
- */
+/** Human output only (TTY: aligned two-column, piped: tab-separated) — never emits JSON; the caller owns --json. */
 export function printKeyValues(
   mode: OutputMode,
   rows: [string, string | number][],

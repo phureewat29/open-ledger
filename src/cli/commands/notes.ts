@@ -50,8 +50,8 @@ async function addNote(opts: Record<string, unknown>): Promise<void> {
   emitList(saved ? [saved] : [], NOTE_COLUMNS);
 }
 
-/** Positional `<id>` args aren't commander opts; parsed through the same spec
- *  API with an ad hoc raw object so the coercion message stays consistent. */
+// Positional `<id>` args aren't commander opts; parsed through the same spec
+// API with an ad hoc raw object so the coercion message stays consistent.
 const NOTE_ID_SPEC = z.object({ id: num() });
 const NOTE_ID_LABELS = { id: "note id" };
 

@@ -1,10 +1,10 @@
-import { Command, Help } from "commander";
+import { Command, Help, type CommanderError } from "commander";
 import { createRequire } from "module";
-import { config } from "../config.js";
+// Side-effect import: loads .env and resolves the config singleton first.
+import "../config.js";
 import { helpScreen } from "./format.js";
-import { runAction } from "./output.js";
+import { fail, jsonRequested, runAction } from "./output.js";
 
-// Harness command modules. Each registers its own noun + subcommand tree.
 import { registerStatus, showStatus } from "./commands/status.js";
 import { registerDoctor } from "./commands/doctor.js";
 import { registerSetup } from "./commands/setup.js";
@@ -19,7 +19,7 @@ import { registerQuestions } from "./commands/questions.js";
 import { registerReport } from "./commands/report.js";
 import { registerNotes } from "./commands/notes.js";
 import { registerDatasets } from "./commands/datasets.js";
-import { registerData } from "./commands/data.js";
+import { registerOpen } from "./commands/open.js";
 
 export const COMMANDS = [
   { name: "status", desc: "Status: config, database, ledger counts, net worth (default)" },
@@ -29,14 +29,14 @@ export const COMMANDS = [
   { name: "ingest", desc: "Ingest pipeline: list / prepare / commit / done / fail" },
   { name: "files", desc: "Browse ingested files (list / show / drop)" },
   { name: "vault", desc: "Manage file-password patterns for encrypted statements" },
-  { name: "transactions", desc: "Transactions: list / show / add / update / delete / recategorize / dedupe" },
+  { name: "transactions", desc: "Transactions: list / show / add / update / delete / recategorize / dedupe / merge" },
   { name: "accounts", desc: "Manage the chart of accounts" },
   { name: "merchants", desc: "Manage merchants and their default accounts" },
   { name: "questions", desc: "List, answer, and defer open questions" },
   { name: "report", desc: "Income, expenses, and net" },
   { name: "notes", desc: "Manage freeform notes" },
   { name: "datasets", desc: "Reference datasets" },
-  { name: "data", desc: "Open the data folder in file explorer (alias: open)" },
+  { name: "open", desc: "Open the data folder in file explorer" },
 ];
 
 const GLOBAL_OPTIONS = [
@@ -44,8 +44,42 @@ const GLOBAL_OPTIONS = [
   { name: "--no-color", desc: "Disable ANSI color output" },
 ];
 
-/** Builds the full commander program. Pure construction — never parses argv
- *  or executes an action; callers own `.parse()` / `.parseAsync()`. */
+/** `oled ingest list` for a leaf, `oled` for the root: the command whose help answers the error. */
+function commandPath(cmd: Command): string {
+  const names: string[] = [];
+  for (let c: Command | null = cmd; c; c = c.parent) names.unshift(c.name());
+  return names.join(" ");
+}
+
+/**
+ * Parse failures never reach runAction, so they are mapped onto the same error
+ * contract here — USAGE, with the erroring command's own help as the hint.
+ * --help and --version already printed and keep their exit code.
+ */
+function parseFailureHandler(cmd: Command): (err: CommanderError) => void {
+  return (err) => {
+    if (err.exitCode === 0) return;
+    // A noun reached without a verb: commander printed the noun's help screen,
+    // which is the answer for a human. --json promised one error line instead.
+    if (err.code === "commander.help") {
+      if (!jsonRequested()) return;
+      fail("USAGE", `${commandPath(cmd)} needs a subcommand`, {
+        hint: `one of: ${cmd.commands.map((sub) => sub.name()).join(", ")}`,
+      });
+    }
+    // The root takes no positional argument, so a stray one is a mistyped command.
+    if (err.code === "commander.excessArguments" && !cmd.parent) {
+      fail("USAGE", `unknown command '${cmd.args[0]}'`, {
+        hint: "run `oled --help` for the list of commands",
+      });
+    }
+    fail("USAGE", err.message.replace(/^error:\s*/, ""), {
+      hint: `run \`${commandPath(cmd)} --help\` for its flags and usage`,
+    });
+  };
+}
+
+/** Builds the full commander program: pure construction — callers own `.parse()` / `.parseAsync()`. */
 export function buildProgram(): Command {
   const require = createRequire(import.meta.url);
   const { version } = require("../../package.json");
@@ -61,15 +95,11 @@ export function buildProgram(): Command {
     .description("The Harness Layer for Personal Finance")
     .version(version)
     .addHelpCommand(false)
-    .showHelpAfterError("Run `oled --help` for the list of commands.")
-    // Bare `oled` reports harness status (same implementation as `status`).
-    .action(
-      runAction(async () => {
-        await showStatus();
-      }),
-    );
+    // Bare `oled` reports harness status — the same action as `status`, which
+    // redacts by default; `oled status --no-redact` is the way to opt out.
+    .action(runAction(showStatus));
 
-  registerData(program);
+  registerOpen(program);
   registerStatus(program);
   registerDoctor(program);
   registerSetup(program);
@@ -85,15 +115,26 @@ export function buildProgram(): Command {
   registerNotes(program);
   registerDatasets(program);
 
-  // On every command so --json/--no-color work before or after the subcommand
-  // name; getOutputMode() OR-walks the chain to find them wherever they land.
-  function addGlobalOptions(cmd: Command): void {
+  // --json/--no-color on every command so they work before or after the
+  // subcommand name (getOutputMode() OR-walks the chain to find them), and an
+  // exit override per command so a parse failure names its own help.
+  function configureEveryLevel(cmd: Command): void {
     cmd
       .option("--json", "Emit NDJSON (machine-readable) instead of human output")
-      .option("--no-color", "Disable ANSI color output");
-    for (const sub of cmd.commands) addGlobalOptions(sub);
+      .option("--no-color", "Disable ANSI color output")
+      .exitOverride(parseFailureHandler(cmd))
+      // Commander writes its own plain-text error line, and a help screen for a
+      // verbless noun, before exiting; under --json the CliError contract is the
+      // only thing allowed on stderr.
+      .configureOutput({
+        outputError: () => {},
+        writeErr: (str) => {
+          if (!jsonRequested()) process.stderr.write(str);
+        },
+      });
+    for (const sub of cmd.commands) configureEveryLevel(sub);
   }
-  addGlobalOptions(program);
+  configureEveryLevel(program);
 
   program.configureHelp({
     // configureHelp is inherited by subcommands, so guard explicitly: only the
@@ -104,6 +145,5 @@ export function buildProgram(): Command {
         : Help.prototype.formatHelp.call(helper, cmd, helper),
   });
 
-  void config; // keep config import live so dotenv loads
   return program;
 }

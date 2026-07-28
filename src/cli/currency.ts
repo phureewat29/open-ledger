@@ -1,8 +1,9 @@
 import { config } from "../config.js";
 
-// No local locale/currency defaults: buildConfig() resolves these with `||`
-// over its non-empty defaults, so config.displayLocale/displayCurrency are
-// never empty. The single last-resort constants live in config.ts.
+/**
+ * buildConfig() resolves these with `||` over its own non-empty defaults, so
+ * config.displayLocale/displayCurrency are never empty; last-resort constants live in config.ts.
+ */
 export function getDisplayLocale(): string {
   return config.displayLocale;
 }

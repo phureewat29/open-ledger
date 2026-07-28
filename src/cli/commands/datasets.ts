@@ -28,8 +28,7 @@ const DEFAULTS_COLUMNS: Column<DatasetRow>[] = [
   { header: "Currency", value: (r) => String(r.currency ?? "") },
 ];
 
-// Human/plain columns per dataset (JSON emits the raw row regardless). Falls back
-// to the generic country column so an unmapped dataset still renders something.
+// Falls back to the generic country column so an unmapped dataset still renders something.
 const COLUMNS_BY_DATASET: Record<string, Column<DatasetRow>[]> = {
   institutions: INSTITUTION_COLUMNS,
   defaults: DEFAULTS_COLUMNS,
@@ -42,11 +41,6 @@ interface DatasetsOpts {
   kind?: string;
 }
 
-/**
- * One command, no subcommands: bare `datasets` lists the shipped datasets;
- * `datasets <name>` shows that dataset's rows, filtered by --country/--kind.
- * Filters without a name are a usage error (nothing to filter).
- */
 function datasets(name: string | undefined, opts: DatasetsOpts): void {
   if (name === undefined) {
     if (opts.country || opts.kind) {

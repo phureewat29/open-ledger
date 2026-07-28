@@ -10,12 +10,9 @@ import {
 import { openDb } from "../db.js";
 
 /**
- * `files`: browse ingested files, inspect one with its transaction/question
- * counts, and drop one (cascade-removing its rows).
+ * Erased type query: derives the file row shape from the lazily-imported
+ * query, without pulling the db module onto the startup path.
  */
-
-// Erased type query: derives the file row shape from the (lazily imported)
-// query without pulling the db module onto the startup path.
 type FileRow = ReturnType<typeof import("../../db/queries/files.js").listFiles>[number];
 
 const FILE_COLUMNS: Column<FileRow>[] = [
@@ -26,16 +23,25 @@ const FILE_COLUMNS: Column<FileRow>[] = [
   { header: "Path", value: (r) => r.path },
 ];
 
+/** files.status enum; `new` belongs to `ingest list`, not here — filtering by it here would silently match nothing. */
+const FILE_STATUSES = ["pending", "ingested", "failed"] as const;
+type FileStatus = (typeof FILE_STATUSES)[number];
+
 interface ListFilesOpts {
   status?: string;
 }
 
 async function listFiles(opts: ListFilesOpts): Promise<void> {
+  // Checked up front — an unrecognized status would otherwise silently return zero rows.
+  const { status } = opts;
+  if (status !== undefined && !FILE_STATUSES.includes(status as FileStatus)) {
+    fail("USAGE", `--status must be one of ${FILE_STATUSES.join("|")}, got "${status}"`);
+  }
+
   const db = await openDb();
   const { listFiles: queryFiles } = await import("../../db/queries/files.js");
-  let rows = queryFiles(db);
-  if (opts.status) rows = rows.filter((r) => r.status === opts.status);
-  emitList(rows, FILE_COLUMNS);
+  const rows = queryFiles(db);
+  emitList(status ? rows.filter((r) => r.status === status) : rows, FILE_COLUMNS);
 }
 
 async function showFile(id: string): Promise<void> {
@@ -64,10 +70,16 @@ async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
   const { deleteFile } = await import("../../db/queries/files.js");
   const res = deleteFile(db, id);
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
+
+  // The extracted text describes a row that no longer exists, and nothing can
+  // reach it once the row is gone — same purge `ingest done`/`fail` do.
+  const { cleanCache } = await import("../../ingest/prepare.js");
+  const { removed } = cleanCache(id);
   emitObject({
     file_id: id,
     removed_transactions: res.removedTransactions,
     removed_questions: res.removedQuestions,
+    cache_removed: removed,
   });
 }
 
@@ -77,7 +89,7 @@ export function registerFiles(program: Command): void {
   files
     .command("list")
     .description("List ingested files")
-    .option("--status <status>", "filter by status (new|pending|ingested|failed)")
+    .option("--status <status>", `filter by status (${FILE_STATUSES.join("|")})`)
     .action(runAction(listFiles));
 
   files

@@ -21,8 +21,7 @@ function hostIds(): string {
 }
 
 async function setupSkill(opts: SetupOpts): Promise<void> {
-  // --print dumps the checked-in SKILL.md so a human/agent can inspect it
-  // without touching the filesystem. It is markdown, not NDJSON, even under --json.
+  // --print dumps SKILL.md as raw markdown (not NDJSON) even when --json is set.
   if (opts.print) {
     const md = skillMd();
     process.stdout.write(md);

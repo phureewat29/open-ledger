@@ -6,17 +6,9 @@ import { ValidationError } from "../lib/validate.js";
 import { errorMessage } from "../lib/result.js";
 
 /**
- * Shared output + error layer for the deterministic CLI harness.
- *
- * Output modes (resolved once per action, from flags + stdout TTY):
- *   --json           → NDJSON: emit() per record, emitSummary() to close a
- *                      stream; single-result commands call emit() once.
- *   TTY, no --json   → aligned human tables (chalk).
- *   piped, no --json → tab-separated plain text, zero ANSI.
- *
- * runAction() resolves and caches the mode before the action runs. emit/
- * emitSummary read it and no-op outside --json, so a stray call from a
- * command rendering its own human layout can't corrupt that output.
+ * emit()/emitSummary() no-op outside --json, so a stray call from a command's
+ * human layout can't corrupt it. A single-result command should use
+ * emitObject() instead, which renders in every mode.
  */
 
 export const EXIT = {
@@ -30,9 +22,9 @@ export const EXIT = {
   PARTIAL: 7,
 } as const;
 
-type ExitCode = keyof typeof EXIT;
+export type ExitCode = keyof typeof EXIT;
 
-export class CliError extends Error {
+class CliError extends Error {
   readonly code: ExitCode;
   readonly hint?: string;
   readonly details?: unknown;
@@ -49,7 +41,7 @@ export class CliError extends Error {
   }
 }
 
-/** Throw a CliError. Never returns, so callers can use it as a value guard. */
+/** Never returns, so callers can use it as a value guard. */
 export function fail(
   code: ExitCode,
   message: string,
@@ -63,16 +55,13 @@ export interface OutputMode {
   json: boolean;
   /** color is suppressed (--no-color, NO_COLOR env, non-TTY, or --json). */
   noColor: boolean;
-  /** stdout is a TTY. */
   tty: boolean;
-  /** apply chalk: TTY && !json && color not suppressed. */
   color: boolean;
 }
 
 /**
- * ORs the boolean flags across the whole ancestor chain: commander leaves a
- * global flag on whichever command level declared/consumed it, so walking up
- * finds it regardless of where in the chain it was passed.
+ * ORs flags across the whole ancestor chain: commander leaves a global flag
+ * on whichever level declared/consumed it, so walking up finds it regardless.
  */
 function resolveMode(cmd?: Command): OutputMode {
   let json = false;
@@ -92,7 +81,6 @@ function resolveMode(cmd?: Command): OutputMode {
 
 let current: OutputMode | null = null;
 
-/** Resolve, cache, and return the mode for a command (called by runAction). */
 function getOutputMode(cmd?: Command): OutputMode {
   current = resolveMode(cmd);
   return current;
@@ -104,16 +92,28 @@ export function currentMode(): OutputMode {
   return current;
 }
 
-function writeLine(stream: NodeJS.WriteStream, obj: unknown): void {
-  stream.write(JSON.stringify(obj) + "\n");
+/**
+ * libsql attaches `_metadata: { duration }` to every `.get()` row, so any
+ * command that spreads a row into its payload would publish it. Stripped once
+ * here at the boundary rather than at 39 query sites. Top level only: `.all()`
+ * rows carry no `_metadata`, so nested arrays never need it.
+ */
+function stripMetadata<T>(value: T): T {
+  if (value === null || typeof value !== "object" || !("_metadata" in value)) return value;
+  const rest = { ...(value as Record<string, unknown>) };
+  delete rest._metadata;
+  return rest as T;
 }
 
-/** One NDJSON object — a single result, or one record in a streamed list. No-op outside --json. */
+function writeLine(stream: NodeJS.WriteStream, obj: unknown): void {
+  stream.write(JSON.stringify(stripMetadata(obj)) + "\n");
+}
+
 export function emit(obj: unknown): void {
   if (currentMode().json) writeLine(process.stdout, obj);
 }
 
-/** Terminal `{"type":"summary",...}` for a streaming command. No-op outside --json. */
+/** Terminal `{"type":"summary",...}` for a streaming command. */
 export function emitSummary(fields: Record<string, unknown> = {}): void {
   if (currentMode().json) writeLine(process.stdout, { type: "summary", ...fields });
 }
@@ -124,12 +124,6 @@ export interface Column<T = unknown> {
   align?: "left" | "right";
 }
 
-/**
- * Render a list of rows in whatever the current mode is:
- *   --json → one NDJSON object per raw row (full fidelity; columns are ignored)
- *   TTY    → aligned table (chalk headers when color is enabled)
- *   piped  → tab-separated cells, one row per line, no ANSI
- */
 export function emitList<T>(rows: T[], columns: Column<T>[]): void {
   const m = currentMode();
   if (m.json) {
@@ -143,14 +137,14 @@ export function emitList<T>(rows: T[], columns: Column<T>[]): void {
   renderPlain(rows, columns);
 }
 
-/** JSON → one NDJSON object; human/plain → tab-separated key/value lines
- *  (ANSI-free, so it stays stable when piped). */
+/** Human/plain output is tab-separated key/value lines, ANSI-free so it stays stable when piped. */
 export function emitObject(obj: Record<string, unknown>): void {
+  const row = stripMetadata(obj);
   if (currentMode().json) {
-    emit(obj);
+    emit(row);
     return;
   }
-  for (const [k, v] of Object.entries(obj)) {
+  for (const [k, v] of Object.entries(row)) {
     const s = v !== null && typeof v === "object" ? JSON.stringify(v) : String(v);
     process.stdout.write(`${k}\t${s}\n`);
   }
@@ -183,7 +177,6 @@ function renderTable<T>(rows: T[], columns: Column<T>[], color: boolean): void {
   process.stdout.write(out.join("\n") + "\n");
 }
 
-/** Guard a destructive command on an explicit --yes. */
 export function requireYes(opts: { yes?: boolean }, what: string): void {
   if (!opts.yes) {
     fail("INPUT_REQUIRED", `${what} needs confirmation`, {
@@ -192,7 +185,7 @@ export function requireYes(opts: { yes?: boolean }, what: string): void {
   }
 }
 
-/** Read all of stdin (empty string when stdin is a TTY / no pipe). */
+/** Empty string when stdin is a TTY (no pipe). */
 export async function readStdinToEnd(): Promise<string> {
   if (process.stdin.isTTY) return "";
   const chunks: Buffer[] = [];
@@ -202,18 +195,13 @@ export async function readStdinToEnd(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Read a secret from stdin, trimming a single trailing newline (CRLF-aware). */
+/** Trims a single trailing newline, CRLF-aware. */
 export async function readSecretFromStdin(): Promise<string> {
   const raw = await readStdinToEnd();
   return raw.replace(/\r?\n$/, "");
 }
 
-/**
- * Reads a batch of JSON rows from stdin or a file, auto-detecting a JSON
- * array (first non-ws char is `[`) vs NDJSON. Parse failures raise CliError
- * USAGE with the offending 1-based line number. `inputPath` lets agents pass
- * a file instead of piping through a shell. Row validation is the caller's job.
- */
+/** Auto-detects a JSON array (first non-ws char is `[`) vs NDJSON. Row validation is the caller's job. */
 export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   let source: string;
   if (inputPath) {
@@ -261,9 +249,6 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   return out;
 }
 
-/** Narrow an unknown batch item (from `readStdinBatch`) to a plain JSON
- *  object, or null if it isn't one. Shared by every batch-loop command
- *  (`ingest commit`, `accounts create --input`, …). */
 export function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -285,8 +270,6 @@ function isNotReadyError(err: unknown): boolean {
   return NOT_READY_PATTERNS.some((p) => msg.includes(p));
 }
 
-/** Normalise any thrown value into a CliError (mapping DB-open failures to NOT_READY,
- *  and src/lib/validate.ts's ValidationError to USAGE). */
 function toCliError(err: unknown): CliError {
   if (err instanceof CliError) return err;
   if (err instanceof ValidationError) {
@@ -302,9 +285,7 @@ function toCliError(err: unknown): CliError {
   return new CliError("GENERIC", errorMessage(err));
 }
 
-/** Shared not-found/invalid mapper for domain errors thrown as plain `Error`s:
- *  a "not found" message (or one matching `extraNotFound`) maps to NOT_FOUND,
- *  everything else maps to INVALID. */
+/** Domain errors are thrown as plain `Error`s, so they're matched by message, not type. */
 export function mapNotFoundError(err: unknown, extraNotFound?: RegExp): never {
   const message = errorMessage(err);
   if (/not found/i.test(message) || (extraNotFound && extraNotFound.test(message))) {
@@ -331,10 +312,22 @@ function reportError(err: unknown): number {
 }
 
 /**
- * Wraps a commander `.action()` handler: resolves the output mode from the
- * command (commander's last positional arg), then maps a thrown error to its
- * exit code. Sets `process.exitCode` rather than calling `process.exit` so
- * buffered stdout/stderr flush before the process ends.
+ * At the parse boundary commander aborts before any action runs, so nothing
+ * resolved the mode and `--json` may still be unparsed — argv is the only
+ * signal left.
+ */
+export function jsonRequested(): boolean {
+  return process.argv.includes("--json");
+}
+
+export function reportParseError(err: unknown): void {
+  current = { json: jsonRequested(), noColor: true, tty: !!process.stdout.isTTY, color: false };
+  process.exitCode = reportError(err);
+}
+
+/**
+ * The command is commander's last positional arg. Sets `process.exitCode` rather
+ * than calling `process.exit` so buffered stdout/stderr flush before the process ends.
  */
 export function runAction<A extends unknown[]>(
   fn: (...args: A) => unknown | Promise<unknown>,

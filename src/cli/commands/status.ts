@@ -60,17 +60,14 @@ async function buildReport(): Promise<StatusReport> {
 
   // Deferred so non-db commands skip the libsql cost at startup.
   const { getNetWorth } = await import("../../accounts/balances.js");
-  const { countAccounts } = await import("../../accounts/accounts.js");
+  const { countAccounts } = await import("../../db/queries/accounts.js");
   const { countTransactions } = await import("../../db/queries/transactions.js");
   const { countFiles } = await import("../../db/queries/files.js");
   const { countQuestions } = await import("../../db/queries/questions.js");
   const { countMerchants } = await import("../../db/queries/merchants.js");
   const { countNotes } = await import("../../db/queries/notes.js");
 
-  // The only reachability probe is opening the db: an unconfigured/wrong-key/
-  // unreadable db degrades to not-ready here. Counts run AFTER, outside the
-  // probe, so a bug in a query surfaces as a real error (via runAction) rather
-  // than masquerading as an unreachable database.
+  // Opening the db is the only reachability check; a failing count query must not read as not-ready.
   const opened = await tryExecute(() => openDb());
   if (!opened.ok) {
     report.db.error = opened.error;
@@ -94,13 +91,14 @@ async function buildReport(): Promise<StatusReport> {
   return report;
 }
 
-// Free-text / path fields in a StatusReport that can leak the user's name or
-// home directory. Counts, booleans, and net-worth numbers are left verbatim.
+// Fields that can leak the username or home dir ("error" can embed the db path).
 const STATUS_REDACT_FIELDS = ["config_path", "data_dir", "path", "error", "user_name"] as const;
 
+/** Redaction is on unless `--no-redact` explicitly turned it off, so bare `oled`
+ *  (which has no such flag) masks the same fields `oled status` does. */
 export async function showStatus(opts: { redact?: boolean } = {}): Promise<void> {
   let report = await buildReport();
-  if (opts.redact) {
+  if (opts.redact !== false) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
     report = applyRedaction(report, true, STATUS_REDACT_FIELDS);
   }
@@ -193,6 +191,10 @@ function renderTty(r: StatusReport, color: boolean): void {
     ],
     ["Key", r.db.key_fingerprint ? dim(r.db.key_fingerprint) : dim("not set")],
   ]);
+
+  // status always exits 0, so an unreachable db needs a pointer to the surface
+  // that diagnoses it.
+  if (!r.db.reachable) process.stdout.write(dim("  run `oled doctor` for details") + "\n\n");
 
   if (r.counts) {
     section("Ledger", [

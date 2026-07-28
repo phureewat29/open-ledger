@@ -1,5 +1,13 @@
 import type { Command } from "commander";
-import { emit, emitList, fail, mapNotFoundError, requireYes, runAction, type Column } from "../output.js";
+import {
+  emitList,
+  emitObject,
+  fail,
+  mapNotFoundError,
+  requireYes,
+  runAction,
+  type Column,
+} from "../output.js";
 import { openDb } from "../db.js";
 import {
   listMerchants as queryMerchants,
@@ -12,13 +20,12 @@ import {
   type MerchantRow,
   type MerchantUpsertInput,
 } from "../../db/queries/merchants.js";
-import { findAccountById } from "../../accounts/accounts.js";
+import { findAccountById } from "../../db/queries/accounts.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
 import { parseInput, str, bool } from "../../lib/validate.js";
 
-// `canonical_name` is the only free-text field; ids and the default-account
-// link are structured data left verbatim.
+// `canonical_name` is the only free-text field; ids and the default-account link are structured data left verbatim.
 const MERCHANT_REDACT_FIELDS = ["canonical_name"] as const;
 
 const MERCHANT_COLUMNS: Column<MerchantRow & { alias_count: number }>[] = [
@@ -45,10 +52,10 @@ async function resolveMerchant(opts: Record<string, unknown>): Promise<void> {
   const db = await openDb();
   const match = findMerchantByAlias(db, parsed.descriptor);
   if (!match) {
-    emit({ found: false });
+    emitObject({ found: false });
     return;
   }
-  emit({
+  emitObject({
     found: true,
     merchant_id: match.merchant.id,
     canonical_name: match.merchant.canonical_name,
@@ -71,8 +78,7 @@ async function upsertMerchant(opts: Record<string, unknown>): Promise<void> {
   const input: MerchantUpsertInput = { canonical_name: parsed.name };
   if (parsed.alias) input.alias = parsed.alias;
   if (parsed.default_account) input.default_account_id = parsed.default_account;
-  const merchant = upsertMerchantRow(db, input);
-  emit(merchant);
+  emitObject({ ...upsertMerchantRow(db, input) });
 }
 
 const SET_DEFAULT_SPEC = z.object({
@@ -95,7 +101,7 @@ async function setMerchantDefault(opts: Record<string, unknown>): Promise<void> 
   if (parsed.clear) {
     const result = clearMerchantDefaultAccount(db, parsed.merchant);
     if (!result) fail("NOT_FOUND", `merchant "${parsed.merchant}" not found`);
-    emit({ merchant_id: parsed.merchant, before: result.before, after: null });
+    emitObject({ merchant_id: parsed.merchant, before: result.before, after: null });
     return;
   }
 
@@ -103,7 +109,7 @@ async function setMerchantDefault(opts: Record<string, unknown>): Promise<void> 
     fail("NOT_FOUND", `account "${parsed.account}" not found`);
   }
   const result = setMerchantDefaultAccount(db, parsed.merchant, parsed.account!);
-  emit({ merchant_id: parsed.merchant, ...result });
+  emitObject({ merchant_id: parsed.merchant, ...result });
 }
 
 const MERGE_MERCHANTS_SPEC = z.object({
@@ -127,7 +133,7 @@ async function mergeMerchants(opts: MergeMerchantsOpts): Promise<void> {
   } catch (err) {
     mapNotFoundError(err);
   }
-  emit({ from: parsed.from, to: parsed.to, ...result });
+  emitObject({ from: parsed.from, to: parsed.to, ...result });
 }
 
 export function registerMerchants(program: Command): void {

@@ -4,6 +4,7 @@ import {
   currentMode,
   emit,
   emitList,
+  emitObject,
   emitSummary,
   fail,
   mapNotFoundError,
@@ -33,7 +34,7 @@ import {
   findDuplicateTransactions,
   type DuplicateTransactionRow,
 } from "../../db/queries/transactions-dedup.js";
-import { findAccountById } from "../../accounts/accounts.js";
+import { findAccountById } from "../../db/queries/accounts.js";
 import type { MerchantUpsertInput } from "../../db/queries/merchants.js";
 import {
   commitTransaction,
@@ -51,8 +52,7 @@ import { todayIso } from "../../lib/date.js";
 import * as z from "zod";
 import { parseInput, str, num, json } from "../../lib/validate.js";
 
-// `transactions`: list/show/add/update/delete/recategorize/dedupe over the
-// TigerBeetle-style table. Amounts are minor units in the DB, decimals here (the CLI boundary).
+// Amounts are minor units in the DB; this module converts to/from decimals at the CLI boundary.
 
 // Free-text fields on a transaction that may carry PII. Ids, amount, currency, and
 // dates are structured data the agent needs verbatim and are left intact.
@@ -64,7 +64,6 @@ const TRANSACTION_REDACT_FIELDS = [
   "credit_account_name",
 ] as const;
 
-/** A transaction row with its stored minor-unit amount converted to a decimal. */
 type TransactionView = Omit<TransactionRow, "amount"> & { amount: number };
 
 function presentTransaction(row: TransactionRow): TransactionView {
@@ -158,19 +157,9 @@ async function showTransaction(id: string, opts: { redact?: boolean }): Promise<
 
   const view: Record<string, unknown> = presentTransaction(detail);
   if (detail.group) view.group = detail.group.map(presentTransaction);
-  emit(applyRedaction(view, !!opts.redact, TRANSACTION_REDACT_FIELDS));
+  emitObject(applyRedaction(view, !!opts.redact, TRANSACTION_REDACT_FIELDS));
 }
 
-function accountsLabel(
-  debitName: string | null,
-  debitId: string,
-  creditName: string | null,
-  creditId: string,
-): string {
-  return `${debitName ?? debitId} -> ${creditName ?? creditId}`;
-}
-
-// Presentation rows: minor-unit amounts converted to decimals at the CLI boundary.
 type DuplicateRow = Omit<DuplicateTransactionRow, "amount"> & {
   amount: number;
   group: number;
@@ -183,7 +172,11 @@ const DUPLICATE_COLUMNS: Column<DuplicateRow>[] = [
   { header: "Amount", value: (r) => r.amount.toFixed(2), align: "right" },
   { header: "Currency", value: (r) => r.currency },
   { header: "Description", value: (r) => r.description },
-  { header: "Accounts", value: (r) => accountsLabel(r.debit_account_name, r.debit_account_id, r.credit_account_name, r.credit_account_id) },
+  {
+    header: "Accounts",
+    value: (r) =>
+      `${r.debit_account_name ?? r.debit_account_id} -> ${r.credit_account_name ?? r.credit_account_id}`,
+  },
   { header: "Source File ID", value: (r) => r.source_file_id ?? "" },
   { header: "Merchant ID", value: (r) => r.merchant_id ?? "" },
 ];
@@ -236,10 +229,10 @@ async function mergeTransactions(opts: MergeTransactionsOpts): Promise<void> {
   }
 
   if (result.alreadyVoid) {
-    emit({ from: parsed.from, to: parsed.to, voided: false, already_void: true });
+    emitObject({ from: parsed.from, to: parsed.to, voided: false, already_void: true });
     return;
   }
-  emit({ from: parsed.from, to: parsed.to, voided: true });
+  emitObject({ from: parsed.from, to: parsed.to, voided: true });
 }
 
 interface AddTransactionOpts {
@@ -265,9 +258,8 @@ const ADD_TRANSACTION_FLAGS_OPTS = {
   aliases: { debit_account_id: ["debitAccount"], credit_account_id: ["creditAccount"] },
 };
 
-// Loose on required fields (debit/credit default to "", amount passes through
-// unchecked): the strict/resolve checks in `addTransaction` stay the authority
-// for exit codes and messages.
+// Deliberately loose (debit/credit default to "", amount passes through
+// unchecked) — addTransaction's strict/resolve checks own exit codes and messages.
 const ADD_TRANSACTION_STDIN_SPEC = z.object({
   date: str().default(""),
   description: str().optional(),
@@ -286,7 +278,7 @@ const ADD_TRANSACTION_STDIN_ALIASES = {
   credit_account_id: ["credit_account"],
 };
 
-// Builds a raw (decimal-amount) transaction from flags or stdin JSON; does not validate accounts.
+// Decimal amount, no account validation — that's the caller's job.
 async function buildRawTransaction(opts: AddTransactionOpts): Promise<RawTransactionInput> {
   const anyFlag =
     opts.debitAccount !== undefined || opts.creditAccount !== undefined || opts.amount !== undefined;
@@ -333,8 +325,7 @@ async function buildRawTransaction(opts: AddTransactionOpts): Promise<RawTransac
   return {
     ...parsed,
     description: parsed.description ?? parsed.merchant?.canonical_name ?? "Manual entry",
-    // amount's number check is owned by the strict/resolve validators below, so it
-    // passes through un-coerced (keeping their exit codes and messages).
+    // Un-coerced by design: record.amount, not parsed.amount — the validators below own the number check.
     amount: record.amount as number,
   };
 }
@@ -353,7 +344,7 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
     }
     fail("INVALID", outcome.message);
   }
-  emit({
+  emitObject({
     transaction_id: outcome.transactionId,
     duplicate: outcome.duplicate,
     raised_questions: outcome.raisedQuestions,
@@ -376,17 +367,17 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   const credit = findAccountById(db, raw.credit_account_id);
   if (!credit) fail("NOT_FOUND", `account "${raw.credit_account_id}" not found`, { hint: accountHint });
 
-  // Ledger-design §5 currency rule, applied inline: derive currency from the
-  // pre-resolved accounts and reject a cross-currency move. The canonical
-  // `currency_mismatch` home is commitTransaction (the addViaResolve path above);
-  // this path stays separate on purpose — it requires both accounts to pre-exist,
-  // raises no questions, and emits a self-contained message. Only the shared
-  // hint (CURRENCY_MISMATCH_HINT) is single-sourced.
+  /**
+   * Ledger-design §5 currency rule, applied inline: this strict path requires
+   * both accounts to pre-exist and raises no questions, so it can't delegate to
+   * commitTransaction's currency_mismatch path — only CURRENCY_MISMATCH_HINT is shared.
+   */
   const currency = debit.currency || getDisplayCurrency();
-  if ((credit.currency || getDisplayCurrency()) !== currency) {
+  const creditCurrency = credit.currency || getDisplayCurrency();
+  if (creditCurrency !== currency) {
     fail(
       "INVALID",
-      `debit ${debit.id} is ${currency}, credit ${credit.id} is ${credit.currency}; a single transaction can't cross currencies`,
+      `debit ${debit.id} is ${currency}, credit ${credit.id} is ${creditCurrency}; a single transaction can't cross currencies`,
       { hint: CURRENCY_MISMATCH_HINT },
     );
   }
@@ -409,7 +400,7 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   } catch (err) {
     fail("INVALID", (err as Error).message);
   }
-  emit({ transaction_id: result.id, duplicate: result.duplicate });
+  emitObject({ transaction_id: result.id, duplicate: result.duplicate });
 }
 
 async function addTransaction(opts: AddTransactionOpts): Promise<void> {
@@ -436,14 +427,14 @@ async function updateTransaction(id: string, opts: Record<string, unknown>): Pro
   const db = await openDb();
   const changes = updateTransactionMeta(db, id, fields);
   if (changes === 0) fail("NOT_FOUND", `transaction "${id}" not found`);
-  emit({ transaction_id: id, updated: true });
+  emitObject({ transaction_id: id, updated: true });
 }
 
 async function deleteTransaction(id: string, opts: { yes?: boolean }): Promise<void> {
   requireYes(opts, "deleting this transaction");
   const db = await openDb();
   if (!deleteTransactionRow(db, id)) fail("NOT_FOUND", `transaction "${id}" not found`);
-  emit({ transaction_id: id, deleted: true });
+  emitObject({ transaction_id: id, deleted: true });
 }
 
 const RECATEGORIZE_SPEC = z.object({
@@ -468,7 +459,7 @@ async function recategorizeTransactions(opts: Record<string, unknown>): Promise<
   } catch (err) {
     fail("INVALID", (err as Error).message);
   }
-  emit({
+  emitObject({
     affected: result.affected,
     skipped_self_transaction: result.skipped_self_transaction,
     sample_transaction_ids: result.sample_transaction_ids,
@@ -478,7 +469,7 @@ async function recategorizeTransactions(opts: Record<string, unknown>): Promise<
 export function registerTransactions(program: Command): void {
   const transactions = program
     .command("transactions")
-    .description("Transactions: list / show / add / update / delete / recategorize / dedupe")
+    .description("Transactions: list / show / add / update / delete / recategorize / dedupe / merge")
     .addHelpText(
       "after",
       [
@@ -498,7 +489,7 @@ export function registerTransactions(program: Command): void {
     .option("--to <date>", "filter to date")
     .option("--query <text>", "filter by search text")
     .option("--amount <decimal>", "filter by exact amount (decimal)")
-    .option("--currency <code>", "currency for --amount (default THB)")
+    .option("--currency <code>", "currency for --amount (defaults to the configured display currency)")
     .option("--limit <n>", "max rows (default 50, max 500)")
     .option("--group", "fold linked transactions into their group clusters")
     .option("--no-redact", "skip PII redaction (on by default)")

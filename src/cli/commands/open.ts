@@ -14,10 +14,7 @@ function openerCommand(): string | null {
   }
 }
 
-/**
- * Spawns the OS file-manager opener, detached. Never rejects: resolves with
- * an error message on spawn failure (e.g. missing binary), else undefined.
- */
+// Never rejects: resolves with an error message on spawn failure, else undefined.
 function spawnOpener(cmd: string, dataDir: string): Promise<string | undefined> {
   return new Promise((resolvePromise) => {
     const child = spawn(cmd, [dataDir], { stdio: "ignore", detached: true });
@@ -27,11 +24,7 @@ function spawnOpener(cmd: string, dataDir: string): Promise<string | undefined> 
   });
 }
 
-/**
- * Opens the data folder in the OS file explorer. `--json` emits
- * `{"path": <dataDir>}` (plus `spawn_error` on failure); piped emits a bare
- * path. An opener failure is reported, never thrown — the path is still useful.
- */
+// The path is reported even when the opener fails — it is still useful on its own.
 async function openDataDir(): Promise<void> {
   const dataDir = getDataDir();
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
@@ -62,11 +55,9 @@ async function openDataDir(): Promise<void> {
   }
 }
 
-export function registerData(program: Command): void {
-  // `data` opens the OS file explorer at the data dir; a thin, db-free command.
+export function registerOpen(program: Command): void {
   program
-    .command("data")
-    .alias("open")
+    .command("open")
     .description("Open the data folder in file explorer")
     .action(runAction(openDataDir));
 }

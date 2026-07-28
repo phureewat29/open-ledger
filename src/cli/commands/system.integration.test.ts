@@ -1,33 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Database from "libsql";
 import { migrate } from "../../db/schema.js";
 import { createAccount } from "../../accounts/accounts.js";
 import { insertTransaction } from "../../db/queries/transactions.js";
 import { recordQuestion } from "../../db/queries/questions.js";
-import { createSandbox, type Sandbox } from "../../lib/sandbox.js";
-
-/**
- * Repo root is three levels up from src/cli/commands/. Covers questions,
- * report, notes, config, and doctor via spawned CLI processes.
- */
-const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
-const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
+import {
+  createSandbox,
+  makeRunCli,
+  parseNdjson,
+  parseOne,
+  type CliRunner,
+  type Sandbox,
+} from "../../../fixtures/sandbox.js";
 
 let sandbox: Sandbox;
 let dbPath: string;
+let runCli: CliRunner;
 
 beforeAll(() => {
   sandbox = createSandbox("oled-system-it-");
+  runCli = makeRunCli(sandbox);
   dbPath = sandbox.dbPath;
 
   // Minimal config.json so `doctor`'s config_exists check is true and `config show` resolves.
@@ -47,48 +41,6 @@ beforeAll(() => {
 afterAll(() => {
   sandbox.cleanup();
 });
-
-function runCli(
-  args: string[],
-  opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
-): Promise<CliResult> {
-  return new Promise((resolvePromise) => {
-    const child = execFile(
-      "npx",
-      ["tsx", cliEntry, ...args],
-      {
-        cwd: opts.cwd ?? sandbox.root,
-        env: opts.env ?? sandbox.env,
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        const code =
-          error && typeof (error as { code?: unknown }).code === "number"
-            ? (error as { code: number }).code
-            : error
-              ? 1
-              : 0;
-        resolvePromise({ stdout: stdout ?? "", stderr: stderr ?? "", code });
-      },
-    );
-    child.stdin?.end();
-  });
-}
-
-function parseOne(stdout: string): any {
-  const lines = stdout.trim().split("\n").filter(Boolean);
-  expect(lines).toHaveLength(1);
-  return JSON.parse(lines[0]);
-}
-
-function parseNdjson(stdout: string): any[] {
-  return stdout
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
 
 describe("system CLI integration (subprocess)", () => {
   it(
@@ -122,7 +74,6 @@ describe("system CLI integration (subprocess)", () => {
         expect(setupResult.dbEncryptionKey).toMatchObject({ set: true });
         expect(setupResult.dbEncryptionKey.fingerprint).toMatch(/^sha256:[0-9a-f]{8}$/);
         expect(setupResult.created).toMatchObject({ db: setupDbPath, data_dir: setupDataDir });
-        // The raw 64-hex-char generated key must never appear on stdout.
         expect(/[0-9a-f]{64}/i.test(setup.stdout)).toBe(false);
 
         const show = await runCli(["config", "show", "--json"], { env: isolated.env, cwd: isolated.root });
@@ -184,18 +135,147 @@ describe("system CLI integration (subprocess)", () => {
         expect(rekey.code).toBe(6);
         const err = JSON.parse(rekey.stderr.trim());
         expect(err.error.code).toBe("E_INVALID");
-        expect(err.error.hint).toBeDefined();
+        // The refusal must name the keyless case: there is no key to "change".
+        expect(err.error.message).toContain("encrypting it now");
+        expect(err.error.hint).toContain("--generate-key");
 
-        // Nothing was persisted: the harness still opens the plain db, and
-        // status reports configured (a db is in place; no first-run needed).
+        // Refused before saveConfig, so no key was ever written down: without
+        // this, the plain db would fail every later open with a wrong key.
+        expect(existsSync(join(isolated.home, ".oled", "config.json"))).toBe(false);
+
+        // `configured` means a db is in place, not that the rekey succeeded.
         const status = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(status.code).toBe(0);
         const report = parseOne(status.stdout);
         expect(report.db.reachable).toBe(true);
+        expect(report.db.encrypted).toBe(false);
         expect(report.configured).toBe(true);
       } finally {
         isolated.cleanup();
       }
+    },
+    30000,
+  );
+
+  it(
+    "commander parse failures land on the JSON error contract, not commander's plain text",
+    async () => {
+      const cases = [
+        {
+          args: ["ingest", "list", "--nope"],
+          message: "unknown option '--nope'",
+          hint: "run `oled ingest list --help` for its flags and usage",
+        },
+        {
+          // The root takes no argument, so a mistyped command arrives as an excess one.
+          args: ["bogus"],
+          message: "unknown command 'bogus'",
+          hint: "run `oled --help` for the list of commands",
+        },
+        {
+          args: ["ingest", "bogus"],
+          message: "unknown command 'bogus'",
+          hint: "run `oled ingest --help` for its flags and usage",
+        },
+        {
+          args: ["transactions", "show"],
+          message: "missing required argument 'id'",
+          hint: "run `oled transactions show --help` for its flags and usage",
+        },
+        {
+          // A noun reached without a verb: commander answers with the noun's
+          // help screen on stderr, which is not a line the contract allows.
+          args: ["vault"],
+          message: "oled vault needs a subcommand",
+          hint: "one of: add, list, rm",
+        },
+      ];
+
+      const runs = await Promise.all(cases.map((c) => runCli([...c.args, "--json"])));
+      runs.forEach((run, i) => {
+        const label = cases[i].args.join(" ");
+        expect(run.code, label).toBe(2);
+        expect(run.stdout, label).toBe("");
+        const err = parseOne(run.stderr).error;
+        expect(err, label).toMatchObject({
+          code: "E_USAGE",
+          message: cases[i].message,
+          hint: cases[i].hint,
+        });
+      });
+    },
+    30000,
+  );
+
+  it(
+    "parse failures stay readable without --json, and --help/--version keep exit 0",
+    async () => {
+      const [text, noun, help, version] = await Promise.all([
+        runCli(["ingest", "list", "--nope"]),
+        runCli(["vault"]),
+        runCli(["--help"]),
+        runCli(["--version"]),
+      ]);
+
+      expect(text.code).toBe(2);
+      expect(text.stderr).toBe(
+        "error: unknown option '--nope'\nhint: run `oled ingest list --help` for its flags and usage\n",
+      );
+
+      // Help-first: a verbless noun still answers with its help screen, unchanged.
+      expect(noun.code).toBe(1);
+      expect(noun.stdout).toBe("");
+      expect(noun.stderr).toContain("Usage: oled vault");
+
+      expect(help.code).toBe(0);
+      expect(help.stdout).toContain("Usage");
+      expect(version.code).toBe(0);
+      expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    },
+    30000,
+  );
+
+  it(
+    "config: an ocr model persists without a url, and the preset stays out of the surface",
+    async () => {
+      const isolated = createSandbox("oled-system-ocr-cfg-it-");
+      const env = { env: isolated.env, cwd: isolated.root };
+      try {
+        const model = await runCli(
+          ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--ocr-model", "test-ocr-model", "--json"],
+          env,
+        );
+        expect(model.code).toBe(0);
+        expect(parseOne(model.stdout)).toMatchObject({
+          ocrBaseUrl: "",
+          ocrModel: "test-ocr-model",
+        });
+
+        const show = await runCli(["config", "show", "--json"], env);
+        expect(show.code).toBe(0);
+        const shown = parseOne(show.stdout);
+        expect(shown).toMatchObject({ ocrModel: "test-ocr-model" });
+        // The model is the only OCR knob; the preset it selects is internal.
+        expect(shown).not.toHaveProperty("ocrPreset");
+      } finally {
+        isolated.cleanup();
+      }
+    },
+    30000,
+  );
+
+  it(
+    "config show fingerprints an env-supplied OCR api key rather than echoing it (there is no flag for it)",
+    async () => {
+      const show = await runCli(["config", "show", "--json"], {
+        env: { ...sandbox.env, OLED_OCR_API_KEY: "sk-ocr-plaintext" },
+      });
+      expect(show.code).toBe(0);
+      expect(parseOne(show.stdout).ocrApiKey).toMatchObject({
+        set: true,
+        fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{8}$/),
+      });
+      expect(show.stdout).not.toContain("sk-ocr-plaintext");
     },
     30000,
   );

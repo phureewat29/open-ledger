@@ -19,23 +19,23 @@ import { openDb } from "../db.js";
 import { errorMessage } from "../../lib/result.js";
 import {
   createAccount as createAccountRow,
-  renameAccount,
   mergeAccounts as mergeAccountRows,
   deleteAccount as deleteAccountRow,
-  updateAccountMetadata,
-  findAccountById,
 } from "../../accounts/accounts.js";
 import {
   getAccountBalances,
   getRollupBalance,
   adjustAccountBalance,
+  type AccountBalanceMinor,
 } from "../../accounts/balances.js";
 import {
+  findAccountById,
+  renameAccount,
+  updateAccountMetadata,
   TOP_LEVEL_TYPES,
   type AccountType,
-  type AccountBalanceMinor,
   type CreateAccountInput,
-} from "../../accounts/types.js";
+} from "../../db/queries/accounts.js";
 import { findAccountsByFuzzyName, type FuzzyAccountMatch } from "../../accounts/matching.js";
 import { ensureAccountAncestors } from "../../accounts/resolve.js";
 import { fromMinorUnits } from "../../lib/money.js";
@@ -43,16 +43,10 @@ import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
 import { parseInput, safeParse, str, num, int, json } from "../../lib/validate.js";
 
-// The account display `name` is the only free-text field; id/parent_id/type/
-// currency and the numeric balances are structured data left verbatim.
+// Only `name` is free text; id/parent_id/type/currency and balances are structured, left verbatim.
 const ACCOUNT_REDACT_FIELDS = ["name"] as const;
 
-/** An account balance with its minor-unit sums presented as decimals (the CLI
- *  boundary), and the internal `balance_minor` dropped. */
-type PresentedAccount = Omit<
-  AccountBalanceMinor,
-  "balance_minor" | "debits_posted" | "credits_posted"
-> & { debits_posted: number; credits_posted: number };
+type PresentedAccount = Omit<AccountBalanceMinor, "balance_minor">;
 
 function presentAccount(a: AccountBalanceMinor): PresentedAccount {
   const { balance_minor: _bm, debits_posted, credits_posted, ...rest } = a;
@@ -107,11 +101,7 @@ function buildAccountTree(
       roots.push(r);
     }
   }
-  // Roll up in one post-order pass instead of a per-node subtree query: sum each
-  // subtree's balance_minor by currency, then convert per currency in ascending
-  // order and add. Subtrees are single-type by the hierarchy invariant, so this
-  // reproduces getRollupBalance's GROUP BY (type, currency) ->
-  // fromMinorUnits-per-group -> cross-group sum, with no float-order drift.
+  // Per-currency sums convert in sorted order to match getRollupBalance, so the two can't drift.
   const build = (row: AccountBalanceMinor): { node: AccountTreeNode; sums: Map<string, number> } => {
     const sums = new Map<string, number>();
     const children = (childrenMap.get(row.id) ?? []).map((childRow) => {
@@ -160,9 +150,7 @@ function renderTreePlain(nodes: AccountTreeNode[]): void {
   if (out.length) process.stdout.write(out.join("\n") + "\n");
 }
 
-/** Validates `--type` against the known top-level account types up front,
- *  matching the wording zod produces for `accounts create --type` (see
- *  CREATE_ACCOUNT_SPEC below) so an invalid filter fails the same way. */
+// Fails an invalid --type with the same wording zod produces for `accounts create --type`.
 function parseAccountTypeFilter(type: string | undefined): AccountType | undefined {
   if (type === undefined) return undefined;
   if (!TOP_LEVEL_TYPES.includes(type as AccountType)) {
@@ -217,7 +205,7 @@ async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise
   const children = balances
     .filter((b) => b.parent_id === id)
     .map((b) => ({ id: b.id, name: b.name, type: b.type, balance: b.balance }));
-  emit(
+  emitObject(
     applyRedaction(
       {
         ...account,
@@ -259,13 +247,9 @@ interface CreateOneAccountResult {
   account_number_masked?: string | null;
 }
 
-/**
- * Shared by the single-flag action and the `--input` batch loop. Auto-creates
- * missing ancestors from the id's colon segments when no explicit parent was
- * given (skipped for an unrecognized type, so `createAccountRow` reports a clean
- * INVALID instead of failing deeper in the ancestor walk). Throws on failure,
- * including the `ACCOUNT_EXISTS`-coded duplicate.
- */
+/** Auto-creates missing ancestors from the id's colon segments when no parent was
+ *  given; skipped for an unrecognized type so `createAccountRow` reports a clean
+ *  INVALID. Throws on failure, including the `ACCOUNT_EXISTS`-coded duplicate. */
 function createOneAccount(
   db: Database.Database,
   parsed: z.infer<typeof CREATE_ACCOUNT_SPEC>,
@@ -296,16 +280,13 @@ function createOneAccount(
   createAccountRow(db, input);
 
   const result: CreateOneAccountResult = { id: input.id, created_parents: createdParents };
-  // Only echo the masked number back when the caller actually provided one —
-  // read the stored value (post-normalization) rather than re-deriving it.
+  // Echo the stored (post-normalization) value rather than re-deriving it.
   if (parsed.account_number_masked !== undefined) {
     result.account_number_masked = findAccountById(db, input.id)?.account_number_masked ?? null;
   }
   return result;
 }
 
-/** The `account_number_masked` result key, present only when the caller
- *  actually provided one (shared shape between single and batch results). */
 function maskedResultField(result: CreateOneAccountResult): Record<string, unknown> {
   return result.account_number_masked !== undefined
     ? { account_number_masked: result.account_number_masked }
@@ -321,7 +302,7 @@ async function createSingleAccount(opts: Record<string, unknown>): Promise<void>
   } catch (err) {
     mapNotFoundError(err, /does not exist/i);
   }
-  emit({
+  emitObject({
     id: result.id,
     created: true,
     created_parents: result.created_parents,
@@ -329,15 +310,12 @@ async function createSingleAccount(opts: Record<string, unknown>): Promise<void>
   });
 }
 
-// The only non-per-account options `accounts create` accepts (json/color are
-// global flags); anything else alongside --input means mixed batch/single-flag usage.
+// json/color are global flags, not per-account options.
 const NON_ACCOUNT_FLAG_KEYS = new Set(["input", "json", "color"]);
 
-/**
- * Mirrors `ingest commit`'s batch shape: one result row per item, a summary
- * row, exit PARTIAL(7) on any failure. `ACCOUNT_EXISTS` counts as an
- * idempotent success (`duplicate: true`) so re-running a batch is a no-op.
- */
+/** `ingest commit`'s batch shape: one result row per item, a summary row, exit
+ *  PARTIAL(7) on any failure. `ACCOUNT_EXISTS` counts as an idempotent success
+ *  (`duplicate: true`) so re-running a batch is a no-op. */
 async function createAccountsBatch(inputPath: string | undefined): Promise<void> {
   const items = await readStdinBatch(inputPath);
   if (items.length === 0) fail("USAGE", "no account data provided");
@@ -395,7 +373,6 @@ async function createAccountsBatch(inputPath: string | undefined): Promise<void>
     process.stdout.write(`\n${created} created, ${duplicates} duplicate(s), ${failed} failed\n`);
   }
 
-  // Exit 7 only for genuine failures — duplicates are a successful no-op.
   if (failed > 0) process.exitCode = EXIT.PARTIAL;
 }
 
@@ -431,7 +408,7 @@ async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
   } catch (err) {
     mapNotFoundError(err, /does not exist/i);
   }
-  emit({
+  emitObject({
     from: parsed.from,
     to: parsed.to,
     moved: result.moved,
@@ -448,7 +425,7 @@ async function deleteAccount(id: string, opts: { yes?: boolean }): Promise<void>
   } catch (err) {
     mapNotFoundError(err, /does not exist/i);
   }
-  emit({ id, deleted: true });
+  emitObject({ id, deleted: true });
 }
 
 const ADJUST_ACCOUNT_SPEC = z.object({
@@ -472,7 +449,7 @@ async function adjustAccount(id: string, opts: Record<string, unknown>): Promise
   } catch (err) {
     mapNotFoundError(err, /does not exist/i);
   }
-  emit({ transaction_id: result.transactionId, delta: result.delta });
+  emitObject({ transaction_id: result.transactionId, delta: result.delta });
 }
 
 const MATCH_ACCOUNTS_SPEC = z.object({
@@ -530,7 +507,7 @@ async function updateAccount(id: string, opts: Record<string, unknown>): Promise
     Object.assign(result, metaResult);
   }
 
-  emit(result);
+  emitObject(result);
 }
 
 export function registerAccounts(program: Command): void {
