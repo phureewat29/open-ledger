@@ -23,9 +23,8 @@ interface FindDuplicateTransactionsOptions {
 }
 
 /**
- * Groups candidates by same amount + directional account pair within
- * `toleranceDays`. Rows sharing a non-null group_id never match each other
- * (a salary's legs aren't duplicates). Returns components of size >= 2.
+ * Rows sharing a non-null group_id never match each other (a salary's legs aren't
+ * duplicates); returns components of size >= 2.
  */
 export function findDuplicateTransactions(
   db: Database.Database,
@@ -65,7 +64,6 @@ export function findDuplicateTransactions(
   return groups;
 }
 
-// Links two rows in a bucket when dates are within tolerance and they don't share a non-null group_id.
 function proximityComponents(
   bucket: DuplicateTransactionRow[],
   toleranceDays: number,

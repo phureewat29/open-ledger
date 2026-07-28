@@ -6,10 +6,9 @@ import {
 } from "../db/queries/transactions-dedup.js";
 
 /**
- * Within each duplicate group, keeps the earliest transaction and deletes any
- * later member matching it exactly on merchant, source file, date, and
- * amount (integer minor units, so `===` needs no float rounding). The group
- * finder already excludes linked legs from matching each other.
+ * Within each group, keeps the earliest transaction and deletes exact
+ * matches on merchant, file, date, and amount (integer minor units, no
+ * rounding needed). The group finder already excludes linked legs.
  */
 export function autoMergeStrictDuplicateTransactions(db: Database.Database): { merged: number } {
   let merged = 0;

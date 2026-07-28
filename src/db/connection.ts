@@ -22,9 +22,7 @@ function openDb(dbPath: string, encryptionKey?: string): Database.Database {
     db.pragma("journal_mode = WAL");
   } catch (err) {
     db.close();
-    // Remaps the low-level pragma failure into a NOT_READY-matching message
-    // (see NOT_READY_PATTERNS in cli/output.ts) while preserving the original
-    // cause for debugging.
+    // Remaps into a NOT_READY-matching message (see NOT_READY_PATTERNS in cli/output.ts).
     throw new Error(
       "Failed to open database. Wrong encryption key or corrupt database file. " +
       "If you changed your encryption key, restore from backup or delete ~/.oled/db.sqlite to start fresh.",

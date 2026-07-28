@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../db/schema.js";
-import { createAccount, findAccountById } from "../accounts/accounts.js";
+import { findAccountById } from "../db/queries/accounts.js";
+import { createAccount } from "../accounts/accounts.js";
 import { getAccountBalances } from "../accounts/balances.js";
 import { countTransactions, findTransactionById } from "../db/queries/transactions.js";
 import { deriveTransactionId, deriveGroupId } from "../lib/ids.js";
@@ -12,11 +12,9 @@ import {
   type TransactionCommitContext,
   type RawTransactionInput,
 } from "./commit.js";
+import { freshDb } from "../../fixtures/db.js";
 
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedAccountsAndFile(db: Database.Database): void {
   db.prepare(
     `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','hashABC','application/pdf','ingested')`,
   ).run();
@@ -30,7 +28,6 @@ function freshDb(): Database.Database {
   createAccount(db, { id: "expense:tax", name: "Tax", type: "expense", parent_id: "expense" });
   createAccount(db, { id: "expense:tax:withholding", name: "Withholding", type: "expense", parent_id: "expense:tax" });
   createAccount(db, { id: "expense:social-security", name: "Social Security", type: "expense", parent_id: "expense" });
-  return db;
 }
 
 const CTX: TransactionCommitContext = {
@@ -55,7 +52,7 @@ function raw(over: Partial<RawTransactionInput> = {}): RawTransactionInput {
 
 describe("commitTransaction", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedAccountsAndFile); });
 
   it("happy path: converts decimal to minor units, derives id, raises no questions", () => {
     const out = commitTransaction(db, CTX, raw());
@@ -197,8 +194,6 @@ describe("commitTransaction", () => {
     if (!out.ok) return;
 
     const row = findTransactionById(db, out.transactionId)!;
-    // The debit side was NOT collapsed onto the credit account: it landed on
-    // a freshly created placeholder using the original requested id.
     expect(row.debit_account_id).toBe("asset:bank:ttb");
     expect(row.credit_account_id).toBe("liability:credit_card:ttb");
 
@@ -209,11 +204,8 @@ describe("commitTransaction", () => {
   });
 
   it("keeps the dirty_input failure when debit and credit collapse with no fuzzy match involved", () => {
-    /**
-     * "bogus" and "also-bogus" aren't prefixed with a known account type, so
-     * both fall through fuzzy match straight to expense:uncategorized — a
-     * genuine collision, not a fuzzy one.
-     */
+    // "bogus"/"also-bogus" have no known account-type prefix, so both fall straight to
+    // expense:uncategorized — a genuine collision, not a fuzzy one.
     const out = commitTransaction(
       db,
       CTX,
@@ -228,7 +220,7 @@ describe("commitTransaction", () => {
 
 describe("commitLinkedTransactions", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedAccountsAndFile); });
 
   it("commits the salary example atomically with a shared group and gross income", () => {
     const out = commitLinkedTransactions(

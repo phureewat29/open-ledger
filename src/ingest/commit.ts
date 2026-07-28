@@ -6,6 +6,7 @@ import {
   type AccountHint,
   type ResolvedMerchant,
 } from "../accounts/resolve.js";
+import { findAccountCurrency } from "../db/queries/accounts.js";
 import {
   insertTransaction,
   insertLinkedTransactions,
@@ -20,29 +21,19 @@ import { recordQuestion } from "../db/queries/questions.js";
 import type { MerchantUpsertInput } from "../db/queries/merchants.js";
 
 /**
- * Ledger-design §5: both legs of a single transaction must share a currency
- * (derived from the accounts, never trusted from input); the fix for a
- * cross-currency move is a linked conversion pair. This is the canonical
- * CLI-facing hint for a `currency_mismatch`, shared by `transactions add`'s
- * strict and `--resolve` paths so the §5 guidance has a single home.
+ * Ledger-design §5: both legs must share a currency (derived from the accounts,
+ * never trusted from input); a cross-currency move needs a linked conversion pair.
  */
 export const CURRENCY_MISMATCH_HINT =
   "add a linked conversion pair (one leg per currency, sharing a group)";
 
-/**
- * Commit context for the transaction pipeline. `fileHash` enables idempotent
- * transaction id derivation.
- */
 export interface TransactionCommitContext {
   readonly batchId: string | null;
   readonly fileId: string | null;
+  // Enables idempotent transaction id derivation.
   readonly fileHash?: string | null;
 }
 
-/**
- * Raw transaction as the ingest input produces it: a DECIMAL amount (converted
- * to minor units here) plus optional source coordinates for deterministic ids.
- */
 export interface RawTransactionInput {
   id?: string;
   group_id?: string | null;
@@ -54,10 +45,10 @@ export interface RawTransactionInput {
   source_file_id?: string | null;
   debit_account_id: string;
   credit_account_id: string;
-  /** DECIMAL in `currency`; converted to minor units during commit. */
+  // DECIMAL in `currency`; converted to minor units during commit.
   amount: number;
-  /** Agent-supplied hint. The currency DERIVED from the resolved accounts wins;
-   *  a conflict is reported via `currencyOverridden`. */
+  // Agent-supplied hint; the DERIVED currency from the resolved accounts
+  // wins, and a conflict is reported via `currencyOverridden`.
   currency?: string | null;
   code?: string | null;
   user_ref?: string | null;
@@ -139,9 +130,8 @@ function accountPairKey(a: string, b: string): string {
 }
 
 /**
- * Default hooks: turn pipeline events into `questions` rows, attaching each to
- * its `transaction_id` (or none, for pre-insert failures). Every raise() no-ops
- * when `ctx.batchId` is null.
+ * Every raise() no-ops when `ctx.batchId` is null; raised questions attach to
+ * `transaction_id`, or none for pre-insert failures.
  */
 export function defaultTransactionCommitHooks(
   db: Database.Database,
@@ -181,7 +171,8 @@ export function defaultTransactionCommitHooks(
       });
     },
 
-    // A well-formed placeholder path is unambiguous — auto-created silently, no question.
+    // Empty on purpose: a well-formed placeholder path is unambiguous, so it is
+    // recorded for the resolution summary but raises no question.
     onPlaceholderAccount: () => {},
 
     onUncategorizedFallback: (side, accountId, transactionId) =>
@@ -270,20 +261,12 @@ function validateRawTransaction(input: RawTransactionInput): ValidateTransaction
 }
 
 function accountCurrency(db: Database.Database, id: string): string {
-  const row = db.prepare(`SELECT currency FROM accounts WHERE id = ?`).get(id) as
-    | { currency: string }
-    | undefined;
-  return row?.currency || config.displayCurrency;
+  return findAccountCurrency(db, id) || config.displayCurrency;
 }
 
-/**
- * Resolve both postings, then guard against fuzzy over-collapse: the inputs are
- * distinct (validated upstream), so a collision where both sides land on one
- * account means fuzzy matching over-eagerly collapsed them — re-resolve the
- * fuzzy-matched side(s) with `skipFuzzy`. A collision with no fuzzy match on
- * either side is left as-is for the dirty_input backstop to catch. Resolving may
- * create placeholder accounts as a side effect.
- */
+/** Inputs are distinct (validated upstream), so both sides landing on one account
+ *  means fuzzy matching over-collapsed them: that side is re-resolved with `skipFuzzy`.
+ *  A non-fuzzy collision is left for the dirty_input backstop to catch. */
 function resolveTransactionAccounts(
   db: Database.Database,
   debitAccountId: string,
@@ -310,11 +293,8 @@ function resolveTransactionAccounts(
   return { debitId, creditId, hints };
 }
 
-/**
- * Currency is derived from the resolved accounts, never trusted from input. Both
- * legs must share it (ledger-design §5); a cross-currency move is reported as a
- * mismatch so the caller can drop it in favor of a linked conversion pair.
- */
+/** Currency comes from the resolved accounts, never from input (ledger-design §5).
+ *  A cross-currency pair is reported as a mismatch rather than merged. */
 function deriveTransactionCurrency(
   db: Database.Database,
   debitId: string,
@@ -334,12 +314,8 @@ function deriveTransactionCurrency(
   return { ok: true, currency: debitCur };
 }
 
-/**
- * Runs validate -> resolve accounts -> derive currency -> convert amount ->
- * resolve merchant -> compute id, without touching the transactions table.
- * Resolving accounts may create placeholder accounts as a side effect; on a
- * currency mismatch those side effects remain even though nothing is inserted.
- */
+/** Doesn't touch the transactions table, but resolving may create placeholder
+ *  accounts — on a currency mismatch those side effects remain with nothing inserted. */
 function prepareTransaction(
   db: Database.Database,
   ctx: TransactionCommitContext,
@@ -432,8 +408,7 @@ function applyTransactionHints(
   return raised;
 }
 
-/** Commits one transaction: prepare -> idempotent insert -> raise questions.
- *  A duplicate re-commit is a no-op (no questions, no balance change). */
+/** A duplicate re-commit is a no-op: no questions raised, no balance change. */
 export function commitTransaction(
   db: Database.Database,
   ctx: TransactionCommitContext,
@@ -490,7 +465,7 @@ export interface LinkedTransactionLeg {
   /** DECIMAL amount for this leg. */
   amount: number;
   currency?: string | null;
-  /** Optional per-leg description; falls back to the header description. */
+  /** Falls back to the header's description when omitted. */
   description?: string;
   code?: string | null;
   user_ref?: string | null;
@@ -522,12 +497,7 @@ function mergeHeaderLeg(
   };
 }
 
-/**
- * Commits several linked legs atomically under a shared group_id. All legs are
- * prepared first; if any fails, nothing is inserted and only its question is
- * raised. Otherwise every leg is inserted in one transaction, then questions
- * are raised per leg.
- */
+/** Atomic under one group_id: every leg is prepared first; if any fails, nothing is inserted. */
 export function commitLinkedTransactions(
   db: Database.Database,
   ctx: TransactionCommitContext,

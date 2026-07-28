@@ -3,7 +3,6 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypt
 const SECRET_KEY_SALT = "oled-secret-v1";
 const FORMAT_PREFIX = "gcm:";
 
-/** Generate a 32-byte hex string suitable for use as a libsql encryption key. */
 export function generateKey(): string {
   return randomBytes(32).toString("hex");
 }

@@ -1,15 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../db/schema.js";
 import { createAccount } from "../accounts/accounts.js";
 import { upsertMerchant } from "../db/queries/merchants.js";
 import { insertTransaction, countTransactions, type TransactionInput } from "../db/queries/transactions.js";
 import { autoMergeStrictDuplicateTransactions } from "./dedup.js";
+import { freshDb } from "../../fixtures/db.js";
 
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedAccountsAndFile(db: Database.Database): void {
   createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
   createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
@@ -17,7 +14,6 @@ function freshDb(): Database.Database {
   db.prepare(
     `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','h1','application/pdf','ingested')`,
   ).run();
-  return db;
 }
 
 function tf(over: Partial<TransactionInput>): TransactionInput {
@@ -35,7 +31,7 @@ function tf(over: Partial<TransactionInput>): TransactionInput {
 
 describe("autoMergeStrictDuplicateTransactions", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedAccountsAndFile); });
 
   it("merges exact duplicates sharing merchant/file/date/amount", () => {
     const merchant = upsertMerchant(db, { canonical_name: "Starbucks" });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../db/schema.js";
-import { createAccount, findAccountById } from "./accounts.js";
+import { findAccountById } from "../db/queries/accounts.js";
+import { createAccount } from "./accounts.js";
 import {
   getAccountBalances,
   getNetWorth,
@@ -10,11 +10,9 @@ import {
   adjustAccountBalance,
 } from "./balances.js";
 import { insertTransaction, type TransactionInput } from "../db/queries/transactions.js";
+import { freshDb } from "../../fixtures/db.js";
 
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedChartOfAccounts(db: Database.Database): void {
   createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
   createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
   createAccount(db, { id: "asset:bank", name: "KBank Savings", type: "asset", parent_id: "asset" });
@@ -24,7 +22,6 @@ function freshDb(): Database.Database {
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
   createAccount(db, { id: "expense:food:dining", name: "Dining", type: "expense", parent_id: "expense:food" });
   createAccount(db, { id: "expense:food:groceries", name: "Groceries", type: "expense", parent_id: "expense:food" });
-  return db;
 }
 
 function ins(db: Database.Database, over: Partial<TransactionInput> & Pick<TransactionInput, "debit_account_id" | "credit_account_id" | "amount">) {
@@ -38,10 +35,9 @@ function ins(db: Database.Database, over: Partial<TransactionInput> & Pick<Trans
 
 describe("getAccountBalances", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("derives minor-unit + decimal balances per the normal-balance rule", () => {
-    // 150.00 THB expense funded from cash.
     ins(db, { debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000 });
     const balances = getAccountBalances(db);
 
@@ -65,15 +61,13 @@ describe("getAccountBalances", () => {
 
   it("filters to self + direct children by idOrParent", () => {
     const rows = getAccountBalances(db, { idOrParent: "expense" });
-    // self and direct children only — grandchildren (expense:food:*) stay out.
     expect(rows.map((b) => b.id).sort()).toEqual(["expense", "expense:food"]);
   });
 });
 
 describe("getNetWorth", () => {
   it("sums assets minus liabilities", () => {
-    const db = freshDb();
-    // Salary lands in the bank: +1000 THB asset.
+    const db = freshDb(seedChartOfAccounts);
     ins(db, { debit_account_id: "asset:bank", credit_account_id: "income:salary", amount: 100000 });
     const nw = getNetWorth(db);
     expect(nw.assets).toBe(1000);
@@ -84,10 +78,9 @@ describe("getNetWorth", () => {
 
 describe("getPeriodTotals", () => {
   it("computes income (C-D) and expenses (D-C) over the range", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     ins(db, { debit_account_id: "asset:cash", credit_account_id: "income:salary", amount: 100000, date: "2026-05-10" });
     ins(db, { debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000, date: "2026-05-11" });
-    // Out-of-range transaction must not count.
     ins(db, { debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 99900, date: "2026-07-01" });
 
     const totals = getPeriodTotals(db, "2026-05-01", "2026-05-31");
@@ -98,7 +91,7 @@ describe("getPeriodTotals", () => {
 
 describe("getRollupBalance", () => {
   it("sums a subtree (root inclusive)", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     ins(db, { debit_account_id: "expense:food:dining", credit_account_id: "asset:cash", amount: 35000 });
     ins(db, { debit_account_id: "expense:food:groceries", credit_account_id: "asset:cash", amount: 60000 });
     expect(getRollupBalance(db, "expense:food")).toBe(950);
@@ -108,7 +101,7 @@ describe("getRollupBalance", () => {
 
 describe("adjustAccountBalance", () => {
   it("posts a balancing transaction against equity:adjustments", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     const res = adjustAccountBalance(db, {
       accountId: "asset:cash",
       targetAmount: 1500,
@@ -123,9 +116,8 @@ describe("adjustAccountBalance", () => {
   });
 
   it("is a no-op when already at target", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     ins(db, { debit_account_id: "asset:cash", credit_account_id: "income:salary", amount: 150000 });
-    // asset:cash is now +1500.
     const res = adjustAccountBalance(db, {
       accountId: "asset:cash",
       targetAmount: 1500,
@@ -135,7 +127,7 @@ describe("adjustAccountBalance", () => {
   });
 
   it("throws for an unknown account", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     expect(() =>
       adjustAccountBalance(db, { accountId: "asset:nope", targetAmount: 10, reason: "x" }),
     ).toThrow(/not found/);

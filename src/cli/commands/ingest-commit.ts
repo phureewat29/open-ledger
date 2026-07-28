@@ -14,28 +14,30 @@ import * as z from "zod";
 import { safeParse, str, num, json } from "../../lib/validate.js";
 import type { MerchantUpsertInput } from "../../db/queries/merchants.js";
 
-/**
- * `ingest commit`: reads an NDJSON/JSON batch from stdin (or --input) and
- * posts each row as a transaction (or linked group), reporting per-row
- * resolution detail (fuzzy-match vs. placeholder vs. exact) alongside ok/duplicate/failed.
- */
-
 interface CommitIngestOpts {
   file?: string;
   input?: string;
 }
 
-type SideHow = "exact" | "fuzzy_matched" | "placeholder_created" | "uncategorized_fallback";
+type SideHow =
+  | "exact"
+  | "fuzzy_matched"
+  | "placeholder_created"
+  | "uncategorized_fallback"
+  | "as_committed";
 
 type CommitEvent =
   | { kind: "placeholder"; side: TransactionSide; accountId: string }
   | { kind: "fuzzy"; side: TransactionSide; originalId: string; matchedId: string }
+  | { kind: "uncategorized"; side: TransactionSide; accountId: string }
   | { kind: "unknown_merchant"; attemptedId: string }
   | { kind: "dirty"; reason: string }
   | { kind: "currency_mismatch" };
 
-// Delegates to the default hooks (so questions still raise) while capturing a
-// typed event per callback, to build the per-side resolution report afterwards.
+// Resolution raises at most one event per side.
+type SideEvent = Extract<CommitEvent, { side: TransactionSide }>;
+
+// Delegates to the base hooks (so raise() still fires) while recording a typed event per side.
 function makeRecordingHooks(base: TransactionCommitHooks, events: CommitEvent[]): TransactionCommitHooks {
   return {
     onCommitted: (id) => base.onCommitted(id),
@@ -51,9 +53,10 @@ function makeRecordingHooks(base: TransactionCommitHooks, events: CommitEvent[])
       base.onPlaceholderAccount(side, accountId, id);
       events.push({ kind: "placeholder", side, accountId });
     },
-    // No event needed: classifySide infers uncategorized_fallback from the
-    // absence of a placeholder/fuzzy event plus the requested id not existing.
-    onUncategorizedFallback: (side, accountId, id) => base.onUncategorizedFallback(side, accountId, id),
+    onUncategorizedFallback: (side, accountId, id) => {
+      base.onUncategorizedFallback(side, accountId, id);
+      events.push({ kind: "uncategorized", side, accountId });
+    },
     onSimilarAccount: (side, originalId, matchedId, id) => {
       base.onSimilarAccount(side, originalId, matchedId, id);
       events.push({ kind: "fuzzy", side, originalId, matchedId });
@@ -65,27 +68,53 @@ function makeRecordingHooks(base: TransactionCommitHooks, events: CommitEvent[])
   };
 }
 
-// Derived from hook events + a post-commit existence check, NOT the stored row:
-// a duplicate re-commit fires no hooks, so a missing event still reads as "exact".
-function classifySide(
-  requested: string,
-  side: TransactionSide,
+interface SideResolution {
+  resolved: string;
+  how: SideHow;
+}
+
+// Maps the resolver's own vocabulary (via the hooks) to the reported one.
+const SIDE_RESOLUTIONS: {
+  [K in SideEvent["kind"]]: (event: Extract<SideEvent, { kind: K }>) => SideResolution;
+} = {
+  fuzzy: (event) => ({ resolved: event.matchedId, how: "fuzzy_matched" }),
+  placeholder: (event) => ({ resolved: event.accountId, how: "placeholder_created" }),
+  uncategorized: (event) => ({ resolved: event.accountId, how: "uncategorized_fallback" }),
+};
+
+// No event means the side resolved by exact match — every other route raises one.
+function classifySide(requested: string, side: TransactionSide, events: CommitEvent[]): SideResolution {
+  const event = events.find((e): e is SideEvent => "side" in e && e.side === side);
+  if (!event) return { resolved: requested, how: "exact" };
+  return SIDE_RESOLUTIONS[event.kind](event as never);
+}
+
+interface SideReport extends SideResolution {
+  side: TransactionSide;
+  requested: string;
+}
+
+// A duplicate re-commit fires no hooks and the stored row may have been recategorized
+// since, so report its stored accounts instead of re-deriving them.
+function reportSides(
+  deps: RowCommitDeps,
+  outcome: { transactionId: string; duplicate: boolean },
+  raw: RawTransactionInput,
   events: CommitEvent[],
-  accountExists: (id: string) => boolean,
-): { resolved: string; how: SideHow } {
-  const fuzzy = events.find(
-    (e): e is Extract<CommitEvent, { kind: "fuzzy" }> =>
-      e.kind === "fuzzy" && e.side === side && e.originalId === requested,
-  );
-  if (fuzzy) return { resolved: fuzzy.matchedId, how: "fuzzy_matched" };
-
-  const placeholder = events.find(
-    (e) => e.kind === "placeholder" && e.side === side && e.accountId === requested,
-  );
-  if (placeholder) return { resolved: requested, how: "placeholder_created" };
-
-  if (accountExists(requested)) return { resolved: requested, how: "exact" };
-  return { resolved: "expense:uncategorized", how: "uncategorized_fallback" };
+): SideReport[] {
+  const stored = outcome.duplicate
+    ? deps.findTransactionById(deps.db, outcome.transactionId)
+    : null;
+  if (stored) {
+    return [
+      { side: "debit", requested: raw.debit_account_id, resolved: stored.debit_account_id, how: "as_committed" },
+      { side: "credit", requested: raw.credit_account_id, resolved: stored.credit_account_id, how: "as_committed" },
+    ];
+  }
+  return [
+    { side: "debit", requested: raw.debit_account_id, ...classifySide(raw.debit_account_id, "debit", events) },
+    { side: "credit", requested: raw.credit_account_id, ...classifySide(raw.credit_account_id, "credit", events) },
+  ];
 }
 
 function classifyMerchant(
@@ -100,10 +129,8 @@ function classifyMerchant(
   return { how: "linked", merchant_id: mid ?? undefined };
 }
 
-// Loose by design: shape + defaults + aliasing only. `validateRawTransaction`
-// stays the authority on validity, so missing required fields default to ""
-// and surface there as `dirty_input`. `amount` is excluded so its raw type
-// reaches the validator's `typeof` check unconverted by `num()`.
+// validateRawTransaction is the validity authority: missing fields default to "" and surface as dirty_input.
+// amount is excluded so its raw type reaches the validator's typeof check, unconverted by num().
 const LINKED_HEADER_SPEC = z.object({
   date: str().default(""),
   description: str().default(""),
@@ -151,19 +178,15 @@ interface Counters {
   raisedTotal: number;
 }
 
-// Per-invocation collaborators resolved once (dynamic imports, db, derived
-// helpers) and shared by every row. Passed explicitly so the row committers
-// capture no loop-scoped state.
+// Passed explicitly (not closed over) so row committers capture no loop-scoped state.
 interface RowCommitDeps {
   db: Database.Database;
   commitTransaction: (typeof import("../../ingest/commit.js"))["commitTransaction"];
   commitLinkedTransactions: (typeof import("../../ingest/commit.js"))["commitLinkedTransactions"];
   findTransactionById: (typeof import("../../db/queries/transactions.js"))["findTransactionById"];
-  accountExists: (id: string) => boolean;
   counters: Counters;
 }
 
-// The per-row state built before the compound/standalone split.
 interface RowContext {
   record: Record<string, unknown>;
   index: number;
@@ -173,7 +196,7 @@ interface RowContext {
   hooks: TransactionCommitHooks;
 }
 
-// Derive the deterministic-id source hash from the files row, memoized per file.
+// file_hash feeds deterministic transaction-id derivation elsewhere; memoized per file id.
 function makeFileHashCache(
   db: Database.Database,
   findFileById: (typeof import("../../db/queries/files.js"))["findFileById"],
@@ -186,15 +209,28 @@ function makeFileHashCache(
   };
 }
 
-// A row rejected before the commit pipeline (bad JSON shape) reuses the per-row
-// failure shape so the PARTIAL contract holds. Counts the failure and returns
-// the record for the caller to push — never throws.
+// A pre-pipeline reject (bad JSON shape) never throws — it reuses the per-row failure shape.
 function failRow(counters: Counters, index: number, message: string): Record<string, unknown> {
-  counters.failed++;
-  return { type: "result", index, ok: false, reason: "dirty_input", message, raised_questions: 0 };
+  return failOutcome(counters, index, { reason: "dirty_input", message, raisedQuestions: 0 });
 }
 
-// Compound row: a header plus >=1 linked legs committed atomically under one group.
+function failOutcome(
+  counters: Counters,
+  index: number,
+  outcome: { reason: string; message: string; raisedQuestions: number },
+): Record<string, unknown> {
+  counters.failed++;
+  return {
+    type: "result",
+    index,
+    ok: false,
+    reason: outcome.reason,
+    message: outcome.message,
+    raised_questions: outcome.raisedQuestions,
+  };
+}
+
+// Header + >=1 linked legs, committed atomically as one group.
 function commitCompoundRow(
   deps: RowCommitDeps,
   row: RowContext,
@@ -225,18 +261,7 @@ function commitCompoundRow(
 
   const outcome = deps.commitLinkedTransactions(deps.db, row.ctx, header, legs, row.hooks);
   counters.raisedTotal += outcome.raisedQuestions;
-
-  if (!outcome.ok) {
-    counters.failed++;
-    return {
-      type: "result",
-      index: row.index,
-      ok: false,
-      reason: outcome.reason,
-      message: outcome.message,
-      raised_questions: outcome.raisedQuestions,
-    };
-  }
+  if (!outcome.ok) return failOutcome(counters, row.index, outcome);
 
   const allDuplicate = outcome.results.every((r) => r.duplicate);
   if (allDuplicate) counters.duplicates++;
@@ -256,7 +281,6 @@ function commitCompoundRow(
   };
 }
 
-// Standalone row: a single debit/credit transaction.
 function commitStandaloneRow(deps: RowCommitDeps, row: RowContext): Record<string, unknown> {
   const { counters } = deps;
   const parsed = safeParse(STANDALONE_SPEC, row.record, { aliases: LEG_ALIASES });
@@ -270,18 +294,7 @@ function commitStandaloneRow(deps: RowCommitDeps, row: RowContext): Record<strin
 
   const outcome = deps.commitTransaction(deps.db, row.ctx, raw, row.hooks);
   counters.raisedTotal += outcome.raisedQuestions;
-
-  if (!outcome.ok) {
-    counters.failed++;
-    return {
-      type: "result",
-      index: row.index,
-      ok: false,
-      reason: outcome.reason,
-      message: outcome.message,
-      raised_questions: outcome.raisedQuestions,
-    };
-  }
+  if (!outcome.ok) return failOutcome(counters, row.index, outcome);
 
   if (outcome.duplicate) counters.duplicates++;
   else counters.posted++;
@@ -296,18 +309,7 @@ function commitStandaloneRow(deps: RowCommitDeps, row: RowContext): Record<strin
     merchant: classifyMerchant(parsed.value, row.events, () =>
       deps.findTransactionById(deps.db, outcome.transactionId)?.merchant_id,
     ),
-    sides: [
-      {
-        side: "debit",
-        requested: raw.debit_account_id,
-        ...classifySide(raw.debit_account_id, "debit", row.events, deps.accountExists),
-      },
-      {
-        side: "credit",
-        requested: raw.credit_account_id,
-        ...classifySide(raw.credit_account_id, "credit", row.events, deps.accountExists),
-      },
-    ],
+    sides: reportSides(deps, outcome, raw, row.events),
   };
 }
 
@@ -320,9 +322,15 @@ export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
     "../../ingest/commit.js"
   );
   const { findTransactionById } = await import("../../db/queries/transactions.js");
-  const { findAccountById } = await import("../../accounts/accounts.js");
   const { findFileById } = await import("../../db/queries/files.js");
-  const accountExists = (id: string): boolean => !!findAccountById(db, id);
+
+  // An unknown --file id must fail before insert: a nulled file hash would break the
+  // deterministic transaction ids that dedup relies on.
+  if (opts.file && !findFileById(db, opts.file)) {
+    fail("NOT_FOUND", `no ingest entry: ${opts.file}`, {
+      hint: "run `oled ingest list --json` for the file ids, or drop --file to commit rows with no source file",
+    });
+  }
 
   // Must be non-null: raise() no-ops when batchId is null, silently dropping every question.
   const batchId = newBatchId();
@@ -334,7 +342,6 @@ export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
     commitTransaction,
     commitLinkedTransactions,
     findTransactionById,
-    accountExists,
     counters,
   };
 

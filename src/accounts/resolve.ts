@@ -1,14 +1,16 @@
 import type Database from "libsql";
 import {
   createAccount,
-  findAccountById,
   ensureStructuralAccount,
   ensureTopLevelRoot,
 } from "./accounts.js";
-import { TOP_LEVEL_TYPES, type AccountType } from "./types.js";
+import {
+  findAccountById,
+  TOP_LEVEL_TYPES,
+  type AccountType,
+} from "../db/queries/accounts.js";
+import { merchantExists } from "../db/queries/merchants.js";
 import { findAccountsByFuzzyName } from "./matching.js";
-
-// Shared account/merchant resolution used by the commit pipeline (`commit.ts`).
 
 export interface ResolvedMerchant {
   readonly merchantId: string | null;
@@ -25,33 +27,25 @@ export type AccountHint =
     };
 
 /**
- * Resolve a (possibly null) merchant id: returns it when the merchant exists,
- * or records it as an attempted-unknown so the caller can raise a question.
+ * A merchant id that doesn't exist is recorded as attempted-unknown, so the
+ * caller can raise a question.
  */
 export function resolveMerchantId(
   db: Database.Database,
   merchantId: string | null | undefined,
 ): ResolvedMerchant {
   if (!merchantId) return { merchantId: null, attemptedUnknownId: null };
-  const exists = db.prepare(`SELECT 1 FROM merchants WHERE id = ?`).get(merchantId);
-  if (exists) return { merchantId, attemptedUnknownId: null };
+  if (merchantExists(db, merchantId)) return { merchantId, attemptedUnknownId: null };
   return { merchantId: null, attemptedUnknownId: merchantId };
 }
 
 interface ResolveOnePostingOptions {
-  /** Skip fuzzy-match and go straight to placeholder/fallback. Used by the
-   *  commit pipeline's fuzzy-collapse guard to re-resolve a side without
-   *  repeating the fuzzy match that caused the collapse. */
+  /** Used by the commit pipeline's fuzzy-collapse guard, to re-resolve a
+   *  side without repeating the fuzzy match that caused the collapse. */
   skipFuzzy?: boolean;
 }
 
-/**
- * Resolves one account reference: exact match, then fuzzy (score >= 0.7,
- * unless `skipFuzzy`), then a placeholder for a well-formed multi-segment
- * path, else the `expense:uncategorized` fallback. `hint` is null on exact
- * match; `uncategorized_fallback` is the ambiguous case the commit pipeline
- * turns into a question.
- */
+/** `hint` is null on an exact match; `uncategorized_fallback` is the ambiguous case the commit pipeline turns into a question. */
 export function resolveOnePosting<T extends { account_id: string }>(
   db: Database.Database,
   posting: T,
@@ -96,12 +90,7 @@ function leafSegment(id: string): string {
   return segments[segments.length - 1] ?? id;
 }
 
-/**
- * Walks `segments` from the root down through index `upTo` (1-based),
- * creating any missing account with a humanized placeholder name. Returns
- * ids actually created, root-to-leaf. `ACCOUNT_EXISTS` races are swallowed
- * as a no-op; every other error propagates to the caller.
- */
+// `upTo` is 1-based. `ACCOUNT_EXISTS` races are swallowed as a no-op; every other error propagates.
 function walkAncestorChain(
   db: Database.Database,
   segments: string[],
@@ -137,12 +126,7 @@ interface PlaceholderResult {
   fellBack: boolean;
 }
 
-/**
- * Best-effort placeholder resolution: creates the account and every missing
- * ancestor when the id is a well-formed multi-segment path under a known
- * top-level type, else falls back to `expense:uncategorized`. Always returns
- * a usable id rather than surfacing an error.
- */
+// Never surfaces an error: always returns a usable id, falling back to `expense:uncategorized`.
 function ensurePlaceholderAccount(db: Database.Database, accountId: string): PlaceholderResult {
   const segments = accountId.split(":").filter(Boolean);
   if (segments.length < 2) return { accountId: ensureUncategorizedFallback(db), fellBack: true };
@@ -150,10 +134,7 @@ function ensurePlaceholderAccount(db: Database.Database, accountId: string): Pla
   const type = segments[0] as AccountType;
   if (!TOP_LEVEL_TYPES.includes(type)) return { accountId: ensureUncategorizedFallback(db), fellBack: true };
 
-  // Intentional swallow: any hierarchy failure (unknown type, malformed id, a
-  // create race) degrades to the uncategorized fallback per this function's
-  // contract — a usable id is always returned, never a surfaced error.
-  // `--resolve` relies on this to auto-create a placeholder silently.
+  // Any hierarchy failure here degrades to the fallback silently; `--resolve` depends on that.
   try {
     walkAncestorChain(db, segments, type, segments.length);
   } catch {
@@ -172,11 +153,10 @@ interface EnsureAccountAncestorsResult {
 }
 
 /**
- * For a multi-segment id about to be created (e.g. `asset:bank:ttb`), creates
- * any missing ancestor above the leaf. Used by `accounts create` so a deep id
- * doesn't require pre-creating every intermediate category. Unlike
- * `ensurePlaceholderAccount`, propagates hierarchy errors as-is (no
- * `expense:uncategorized` fallback) so the CLI can surface a real INVALID.
+ * Creates any missing ancestor above the leaf for a multi-segment id (e.g.
+ * `asset:bank:ttb`), so `accounts create` doesn't need every intermediate
+ * category pre-created. Unlike `ensurePlaceholderAccount`, propagates
+ * hierarchy errors as-is so the CLI can surface a real INVALID.
  */
 export function ensureAccountAncestors(
   db: Database.Database,

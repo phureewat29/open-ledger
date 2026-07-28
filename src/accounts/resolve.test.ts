@@ -1,23 +1,20 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../db/schema.js";
-import { createAccount, findAccountById } from "./accounts.js";
+import { findAccountById } from "../db/queries/accounts.js";
+import { createAccount } from "./accounts.js";
 import { resolveOnePosting } from "./resolve.js";
+import { freshDb } from "../../fixtures/db.js";
 
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedChartOfAccounts(db: Database.Database): void {
   createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
   createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
   createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
-  return db;
 }
 
 describe("resolveOnePosting", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("exact match: existing account, no hint", () => {
     const { posting, hint } = resolveOnePosting(db, { account_id: "expense:food" });
@@ -48,10 +45,7 @@ describe("resolveOnePosting", () => {
   });
 
   it("type-invalid hint (unknown top-level segment): uncategorized_fallback", () => {
-    /**
-     * Leaf "organic" is far enough from every seeded name to miss fuzzy match, so resolution
-     * reaches the placeholder stage — where "groceries" is not a known top-level type, so it falls back.
-     */
+    // "organic" misses fuzzy match; "groceries" isn't a known top-level type, so this falls back.
     const { posting, hint } = resolveOnePosting(db, { account_id: "groceries:organic" });
     expect(posting.account_id).toBe("expense:uncategorized");
     expect(hint).toEqual({ type: "uncategorized_fallback", accountId: "expense:uncategorized" });
@@ -59,11 +53,8 @@ describe("resolveOnePosting", () => {
   });
 
   it("ancestor-type-mismatch during the walk: uncategorized_fallback", () => {
-    /**
-     * Insert an ancestor whose type contradicts its colon-path prefix (bypassing
-     * createAccount's invariants), so the chain walk hits createAccount's parent-type
-     * mismatch, which resolution swallows into the uncategorized fallback.
-     */
+    // Raw INSERT creates a type-mismatched ancestor (bypassing createAccount's own
+    // invariants) so the walk hits the mismatch that resolution swallows.
     db.prepare(
       `INSERT INTO accounts (id, name, type, parent_id) VALUES ('expense:weird', 'Weird', 'asset', 'expense')`,
     ).run();

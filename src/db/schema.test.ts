@@ -192,7 +192,6 @@ describe("transactions table (TigerBeetle-core)", () => {
       (c) => c.name,
     );
     expect(cols).toContain("transaction_id");
-    // questions carries transaction_id, not transfer_id.
     expect(cols).not.toContain("transfer_id");
   });
 
@@ -214,7 +213,6 @@ describe("transactions table (TigerBeetle-core)", () => {
 });
 
 describe("foreign DB guard (non-destructive)", () => {
-  /** A version-0 database that is somebody else's: tables, rows, no ledger. */
   function foreignDb(): Database.Database {
     const db = freshDb();
     db.exec(`CREATE TABLE ledger_entries (id INTEGER PRIMARY KEY, memo TEXT NOT NULL)`);

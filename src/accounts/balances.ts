@@ -1,18 +1,29 @@
 import type Database from "libsql";
+import {
+  findAccountById,
+  getAccountSubtree,
+  type AccountRow,
+} from "../db/queries/accounts.js";
+import {
+  getAccountLegSums,
+  getLegSumsForAccounts,
+  getPeriodLegSums,
+  type AccountLegSumsOptions,
+} from "../db/queries/balances.js";
 import { insertTransaction } from "../db/queries/transactions.js";
 import { config } from "../config.js";
 import { fromMinorUnits, toMinorUnits } from "../lib/money.js";
 import { todayIso, ISO_DATE_RE } from "../lib/date.js";
-import {
-  type AccountType,
-  type AccountRow,
-  type AccountBalanceMinor,
-} from "./types.js";
-import {
-  findAccountById,
-  ensureStructuralAccount,
-  getAccountSubtree,
-} from "./accounts.js";
+import { ensureStructuralAccount } from "./accounts.js";
+
+export interface AccountBalanceMinor extends AccountRow {
+  /** Minor units. */
+  debits_posted: number;
+  /** Minor units. */
+  credits_posted: number;
+  balance_minor: number;
+  balance: number;
+}
 
 interface NetWorth {
   assets: number;
@@ -25,47 +36,16 @@ interface PeriodTotals {
   expenses: number;
 }
 
-// Balance derivations below share one normal-balance rule: asset/expense are
-// debit-normal, the rest credit-normal. Amounts are integer minor units;
-// decimal fields are derived per the account's own currency exponent.
-
-/** Debit + credit legs of every non-void transaction, one row per leg (`void_of`
- *  rows excluded so a merged mirror never double-counts). */
-const TRANSACTION_LEGS = `SELECT debit_account_id  AS acct, amount, date, 'D' AS side FROM transactions WHERE void_of IS NULL
-       UNION ALL
-       SELECT credit_account_id AS acct, amount, date, 'C' AS side FROM transactions WHERE void_of IS NULL`;
-
-/** Per-account balance from the `transactions` table (normal-balance rule above). */
+/**
+ * Shared normal-balance rule: asset/expense are debit-normal, the rest
+ * credit-normal. Leg sums are integer minor units; every decimal here comes
+ * from the account's currency exponent (`fromMinorUnits`).
+ */
 export function getAccountBalances(
   db: Database.Database,
-  opts: { type?: AccountType; idOrParent?: string } = {},
+  opts: AccountLegSumsOptions = {},
 ): AccountBalanceMinor[] {
-  const params: any[] = [];
-  const where: string[] = [];
-  if (opts.type) {
-    where.push("a.type = ?");
-    params.push(opts.type);
-  }
-  if (opts.idOrParent) {
-    where.push("(a.id = ? OR a.parent_id = ?)");
-    params.push(opts.idOrParent, opts.idOrParent);
-  }
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-  const rows = db
-    .prepare(
-      `SELECT a.*,
-              COALESCE(SUM(CASE WHEN t.side = 'D' THEN t.amount ELSE 0 END), 0) AS sum_debit,
-              COALESCE(SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE 0 END), 0) AS sum_credit
-         FROM accounts a
-         LEFT JOIN (${TRANSACTION_LEGS}) t ON t.acct = a.id
-         ${whereSql}
-         GROUP BY a.id
-         ORDER BY a.type, a.id`,
-    )
-    .all(...params) as (AccountRow & { sum_debit: number; sum_credit: number })[];
-
-  return rows.map((r) => {
+  return getAccountLegSums(db, opts).map((r) => {
     const debitNormal = r.type === "asset" || r.type === "expense";
     const balance_minor = debitNormal ? r.sum_debit - r.sum_credit : r.sum_credit - r.sum_debit;
     const { sum_debit, sum_credit, ...account } = r;
@@ -99,20 +79,9 @@ export function getPeriodTotals(
   from: string,
   to: string,
 ): PeriodTotals {
-  const rows = db
-    .prepare(
-      `SELECT a.type AS type, a.currency AS currency,
-              SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE -t.amount END) AS c_minus_d
-         FROM (${TRANSACTION_LEGS}) t
-         JOIN accounts a ON a.id = t.acct
-         WHERE t.date BETWEEN ? AND ? AND a.type IN ('income', 'expense')
-         GROUP BY a.type, a.currency`,
-    )
-    .all(from, to) as { type: AccountType; currency: string; c_minus_d: number }[];
-
   let income = 0;
   let expenses = 0;
-  for (const r of rows) {
+  for (const r of getPeriodLegSums(db, from, to)) {
     if (r.type === "income") income += fromMinorUnits(r.c_minus_d, r.currency);
     else if (r.type === "expense") expenses += fromMinorUnits(-r.c_minus_d, r.currency);
   }
@@ -123,23 +92,9 @@ export function getPeriodTotals(
 export function getRollupBalance(db: Database.Database, rootId: string): number {
   const subtree = getAccountSubtree(db, rootId);
   if (subtree.length === 0) return 0;
-  const ids = subtree.map((a) => a.id);
-  const placeholders = ids.map(() => "?").join(",");
-
-  const rows = db
-    .prepare(
-      `SELECT a.type AS type, a.currency AS currency,
-              COALESCE(SUM(CASE WHEN t.side = 'D' THEN t.amount ELSE 0 END), 0) AS sum_debit,
-              COALESCE(SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE 0 END), 0) AS sum_credit
-         FROM accounts a
-         LEFT JOIN (${TRANSACTION_LEGS}) t ON t.acct = a.id
-         WHERE a.id IN (${placeholders})
-         GROUP BY a.type, a.currency`,
-    )
-    .all(...ids) as { type: AccountType; currency: string; sum_debit: number; sum_credit: number }[];
 
   let total = 0;
-  for (const r of rows) {
+  for (const r of getLegSumsForAccounts(db, subtree.map((a) => a.id))) {
     const debitNormal = r.type === "asset" || r.type === "expense";
     const minor = debitNormal ? r.sum_debit - r.sum_credit : r.sum_credit - r.sum_debit;
     total += fromMinorUnits(minor, r.currency);
@@ -202,9 +157,7 @@ export function adjustAccountBalance(
 
   let transactionId = "";
   const tx = db.transaction((): void => {
-    if (!findAccountById(db, EQUITY_ADJUST_ID)) {
-      ensureStructuralAccount(db, "equity:adjustments");
-    }
+    ensureStructuralAccount(db, "equity:adjustments");
     transactionId = insertTransaction(db, {
       date,
       description: reason,

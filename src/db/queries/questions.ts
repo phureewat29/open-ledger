@@ -3,7 +3,6 @@ import { randomUUID } from "crypto";
 import { parseJsonOrNull } from "../../lib/json.js";
 
 interface QuestionTarget {
-  /** The transaction this question is about, when it targets a specific movement. */
   transaction_id?: string | null;
   account_id: string | null;
 }
@@ -41,11 +40,7 @@ interface ClosedQuestion {
   rule_key: string | null;
 }
 
-/**
- * Inserts a questions row and flips `has_question` on whichever target
- * (transaction / account) was named. The `cn:` id prefix is opaque —
- * nothing else parses it.
- */
+/** The `cn:` id prefix is opaque - nothing else parses it. */
 export function recordQuestion(db: Database.Database, input: RecordQuestionInput): string {
   const id = `cn:${randomUUID()}`;
   db.prepare(
@@ -71,8 +66,7 @@ export function recordQuestion(db: Database.Database, input: RecordQuestionInput
   return id;
 }
 
-/** Captures (prompt, kind, answer) and deletes the row outright, so callers
- *  can synthesize memory rules; null if the id doesn't exist. */
+/** Deletes the row outright (rather than marking it closed); null if the id doesn't exist. */
 export function closeQuestion(
   db: Database.Database,
   id: string,
@@ -110,10 +104,7 @@ function extractRuleKey(contextJson: string | null): string | null {
   return typeof parsed?.rule_key === "string" ? parsed.rule_key : null;
 }
 
-/**
- * Clear `has_question` on the named transaction / account if no other
- * questions still reference it. Safe to call after any resolution; idempotent.
- */
+// Safe to call after any resolution; idempotent.
 function maybeClearHasQuestionFlags(db: Database.Database, target: QuestionTarget): void {
   if (target.transaction_id) {
     const open = db
@@ -135,7 +126,6 @@ interface CountQuestionsScope {
   account_id?: string;
   kind?: string;
   batch_id?: string;
-  /** When true, count deferred rows too (default false: defer hides). */
   includeDeferred?: boolean;
 }
 
@@ -161,7 +151,6 @@ export function countQuestions(db: Database.Database, scope: CountQuestionsScope
 interface ListQuestionsOptions {
   limit?: number;
   batchId?: string;
-  /** When true, include deferred rows in the result (default false). */
   includeDeferred?: boolean;
 }
 
@@ -189,9 +178,8 @@ export function listQuestions(
 }
 
 /**
- * Defers a question for `days` days. `listQuestions`/`countQuestions` hide
- * deferred rows by default until the timestamp passes; pass `includeDeferred:
- * true` for an unfiltered view.
+ * `listQuestions`/`countQuestions` hide deferred rows by default until the
+ * timestamp passes; pass `includeDeferred: true` for an unfiltered view.
  */
 export function deferQuestion(
   db: Database.Database,

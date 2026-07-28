@@ -53,9 +53,8 @@ export function normalizeDescriptor(raw: string): string {
 }
 
 /**
- * Upserts by canonical_name, optionally upserting an alias and updating the
- * cached default_account_id. Idempotent. Meant to run inside the same DB
- * transaction as the write it serves, so a transaction never lands without its merchant.
+ * Meant to run inside the same DB transaction as the write it serves, so a
+ * transaction never lands without its merchant.
  */
 export function upsertMerchant(
   db: Database.Database,
@@ -116,11 +115,6 @@ interface MerchantWithDefault {
   default_account_id: string | null;
 }
 
-/**
- * Resolve a raw PDF descriptor to a known merchant via the alias table.
- * Returns null if no alias matches. The ingest pipeline uses this in its
- * pre-resolution pass so the LLM can skip re-categorizing already-seen merchants.
- */
 export function findMerchantByAlias(
   db: Database.Database,
   rawDescriptor: string,
@@ -160,6 +154,10 @@ export function listMerchants(
 export function countMerchants(db: Database.Database): number {
   const row = db.prepare(`SELECT COUNT(*) AS n FROM merchants`).get() as { n: number };
   return row.n;
+}
+
+export function merchantExists(db: Database.Database, id: string): boolean {
+  return !!db.prepare(`SELECT 1 FROM merchants WHERE id = ?`).get(id);
 }
 
 export function findMerchantById(
@@ -206,11 +204,7 @@ interface MergeMerchantsResult {
   adopted_default_account?: string;
 }
 
-/**
- * Re-points every transaction and alias from `fromId` to `toId`, adopts the
- * source's `default_account_id` if the destination has none, then deletes the
- * source. One transaction, so a partial merge never persists.
- */
+/** One transaction, so a partial merge never persists. */
 export function mergeMerchants(
   db: Database.Database,
   fromId: string,

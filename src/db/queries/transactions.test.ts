@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../schema.js";
 import { createAccount } from "../../accounts/accounts.js";
 import {
   getAccountBalances,
@@ -16,6 +15,7 @@ import {
   listTransactions,
   deleteTransaction,
   bulkRecategorize,
+  repointTransactions,
   voidTransactionAsMirror,
   countTransactions,
   countTransactionsBySourceFile,
@@ -23,18 +23,15 @@ import {
   type TransactionInput,
 } from "./transactions.js";
 import { findDuplicateTransactions } from "./transactions-dedup.js";
+import { freshDb } from "../../../fixtures/db.js";
 
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedChartOfAccounts(db: Database.Database): void {
   createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
   createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
   createAccount(db, { id: "asset:bank", name: "KBank Savings", type: "asset", parent_id: "asset" });
   createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
   createAccount(db, { id: "expense:transport", name: "Transport", type: "expense", parent_id: "expense" });
-  return db;
 }
 
 function tf(over: Partial<TransactionInput> = {}): TransactionInput {
@@ -80,7 +77,7 @@ describe("validateTransaction", () => {
 
 describe("insertTransaction", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("inserts once and reports duplicate on the same id", () => {
     expect(insertTransaction(db, tf({ id: "tx:fixed" }))).toEqual({ id: "tx:fixed", duplicate: false });
@@ -100,7 +97,7 @@ describe("insertTransaction", () => {
 
 describe("insertLinkedTransactions", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("shares one group id across every leg", () => {
     const res = insertLinkedTransactions(db, [
@@ -126,7 +123,7 @@ describe("insertLinkedTransactions", () => {
 
 describe("findTransactionById", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("returns null for a missing id", () => {
     expect(findTransactionById(db, "tx:nope")).toBeNull();
@@ -148,7 +145,7 @@ describe("findTransactionById", () => {
 describe("listTransactions", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:1", description: "Coffee", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000 }));
     insertTransaction(db, tf({ id: "tx:2", description: "Taxi", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 20000 }));
   });
@@ -183,7 +180,6 @@ describe("listTransactions", () => {
     const clusters = listTransactions(db, { group: true });
     const grouped = clusters.find((c) => c.group_id === linked.group_id);
     expect(grouped?.transactions.map((t) => t.id).sort()).toEqual(["tx:g1", "tx:g2"]);
-    // tx:1 and tx:2 have null group_id => each its own standalone cluster.
     const standalones = clusters.filter((c) => c.group_id === null).flatMap((c) => c.transactions.map((t) => t.id));
     expect(standalones).toContain("tx:1");
     expect(standalones).toContain("tx:2");
@@ -192,7 +188,7 @@ describe("listTransactions", () => {
 
 describe("deleteTransaction", () => {
   it("removes a row and reports success", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:1" }));
     expect(deleteTransaction(db, "tx:1")).toBe(true);
     expect(deleteTransaction(db, "tx:1")).toBe(false);
@@ -203,7 +199,7 @@ describe("deleteTransaction", () => {
 describe("bulkRecategorize", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:d", debit_account_id: "expense:food", credit_account_id: "asset:cash" }));
     insertTransaction(db, tf({ id: "tx:c", debit_account_id: "asset:cash", credit_account_id: "expense:food" }));
     insertTransaction(db, tf({ id: "tx:self", debit_account_id: "expense:food", credit_account_id: "expense:transport" }));
@@ -215,7 +211,6 @@ describe("bulkRecategorize", () => {
     expect(res.skipped_self_transaction).toBe(1);
     expect(findTransactionById(db, "tx:d")?.debit_account_id).toBe("expense:transport");
     expect(findTransactionById(db, "tx:c")?.credit_account_id).toBe("expense:transport");
-    // The self-transaction candidate is untouched.
     expect(findTransactionById(db, "tx:self")?.debit_account_id).toBe("expense:food");
     expect(findTransactionById(db, "tx:self")?.credit_account_id).toBe("expense:transport");
   });
@@ -235,15 +230,13 @@ describe("bulkRecategorize", () => {
 
 describe("findDuplicateTransactions", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("detects cross-group duplicates but excludes intra-group members", () => {
-    // Same amount + same directional pair + same date, but linked in one group.
     insertLinkedTransactions(db, [
       tf({ id: "tx:same1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 5000 }),
       tf({ id: "tx:same2", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 5000 }),
     ]);
-    // Two independent transactions that ARE duplicates.
     insertTransaction(db, tf({ id: "tx:dup1", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
     insertTransaction(db, tf({ id: "tx:dup2", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
 
@@ -258,7 +251,6 @@ describe("findDuplicateTransactions", () => {
     expect(findDuplicateTransactions(db)).toHaveLength(1);
 
     voidTransactionAsMirror(db, "tx:dupB", "tx:dupA");
-    // Only one non-void candidate remains, so the pair no longer reappears.
     expect(findDuplicateTransactions(db)).toHaveLength(0);
   });
 });
@@ -266,7 +258,7 @@ describe("findDuplicateTransactions", () => {
 describe("counts + updateTransactionMeta", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     db.prepare(
       `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','h1','application/pdf','ingested')`,
     ).run();
@@ -292,9 +284,9 @@ describe("counts + updateTransactionMeta", () => {
 describe("voidTransactionAsMirror", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:a", amount: 15000 }));
-    insertTransaction(db, tf({ id: "tx:b", amount: 15000 })); // exact mirror of tx:a
+    insertTransaction(db, tf({ id: "tx:b", amount: 15000 }));
   });
 
   it("voids from into to and records the surviving twin", () => {
@@ -329,8 +321,8 @@ describe("voidTransactionAsMirror", () => {
   });
 
   it("refuses merging into a voided row", () => {
-    voidTransactionAsMirror(db, "tx:b", "tx:a"); // tx:b is now void
-    insertTransaction(db, tf({ id: "tx:c", amount: 15000 })); // another mirror
+    voidTransactionAsMirror(db, "tx:b", "tx:a");
+    insertTransaction(db, tf({ id: "tx:c", amount: 15000 }));
     expect(() => voidTransactionAsMirror(db, "tx:c", "tx:b")).toThrow(/voided/);
   });
 });
@@ -338,9 +330,9 @@ describe("voidTransactionAsMirror", () => {
 describe("void excludes rows from balance derivation", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
-    insertTransaction(db, tf({ id: "tx:orig", amount: 15000 }));   // expense:food <- asset:cash, 150.00
-    insertTransaction(db, tf({ id: "tx:mirror", amount: 15000 })); // identical mirror
+    db = freshDb(seedChartOfAccounts);
+    insertTransaction(db, tf({ id: "tx:orig", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:mirror", amount: 15000 }));
   });
 
   const balanceOf = (id: string): number =>
@@ -366,13 +358,11 @@ describe("void excludes rows from balance derivation", () => {
 
 describe("void survives re-insert (ON CONFLICT)", () => {
   it("keeps void_of when the deterministic id is re-inserted", () => {
-    const db = freshDb();
+    const db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:orig", amount: 15000 }));
     insertTransaction(db, tf({ id: "tx:dup", amount: 15000 }));
     voidTransactionAsMirror(db, "tx:dup", "tx:orig");
 
-    // Re-ingesting the mirror's source file re-derives the same id; ON CONFLICT DO
-    // NOTHING must leave the void intact rather than resurrecting the mirror.
     const res = insertTransaction(db, tf({ id: "tx:dup", amount: 15000 }));
     expect(res.duplicate).toBe(true);
     const row = findTransactionById(db, "tx:dup")!;
@@ -383,7 +373,7 @@ describe("void survives re-insert (ON CONFLICT)", () => {
 describe("countTransactions with filters", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000 }));
     insertTransaction(db, tf({ id: "tx:2", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 20000 }));
     insertTransaction(db, tf({ id: "tx:3", debit_account_id: "expense:food", credit_account_id: "asset:bank", amount: 15000 }));
@@ -402,5 +392,30 @@ describe("countTransactions with filters", () => {
     ]) {
       expect(countTransactions(db, opts)).toBe(listTransactions(db, opts).length);
     }
+  });
+});
+
+describe("repointTransactions", () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = freshDb(seedChartOfAccounts);
+    createAccount(db, { id: "expense:food:dining", name: "Dining", type: "expense", parent_id: "expense:food" });
+  });
+
+  it("moves both columns and deletes would-be self-transactions", () => {
+    insertTransaction(db, tf({ id: "tx:1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 10000 }));
+    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "asset:cash", credit_account_id: "expense:food", amount: 10000 }));
+    insertTransaction(db, tf({ id: "tx:self", debit_account_id: "expense:food", credit_account_id: "expense:food:dining", amount: 10000 }));
+
+    const res = repointTransactions(db, "expense:food", "expense:food:dining");
+    expect(res.deletedSelfTransactions).toBe(1);
+    expect(res.moved).toBe(2);
+    expect(findTransactionById(db, "tx:1")?.debit_account_id).toBe("expense:food:dining");
+    expect(findTransactionById(db, "tx:2")?.credit_account_id).toBe("expense:food:dining");
+    expect(findTransactionById(db, "tx:self")).toBeNull();
+  });
+
+  it("refuses re-pointing an account to itself", () => {
+    expect(() => repointTransactions(db, "expense:food", "expense:food")).toThrow();
   });
 });

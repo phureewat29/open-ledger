@@ -1,16 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../schema.js";
 import { createAccount } from "../../accounts/accounts.js";
 import { recordQuestion, listQuestions, closeQuestion, countQuestions, deferQuestion } from "./questions.js";
+import { freshDb } from "../../../fixtures/db.js";
 
-function freshDb() {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedExpenseAccounts(db: Database.Database): void {
   createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
-  return db;
 }
 
 function insertFile(db: Database.Database, id: string): void {
@@ -22,7 +18,7 @@ function insertFile(db: Database.Database, id: string): void {
 describe("questions table", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedExpenseAccounts);
   });
 
   it("accepts arbitrary free-text kinds", () => {
@@ -67,7 +63,7 @@ describe("questions table", () => {
 describe("deferQuestion", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedExpenseAccounts);
   });
 
   it("hides a deferred row from listQuestions and countQuestions by default", () => {
@@ -94,7 +90,6 @@ describe("deferQuestion", () => {
     deferQuestion(db, id, 7);
     expect(listQuestions(db)).toHaveLength(0);
 
-    // Backdate the defer so it's already expired.
     db.prepare(`UPDATE questions SET deferred_until = datetime('now', '-1 day') WHERE id = ?`).run(id);
     expect(listQuestions(db)).toHaveLength(1);
     expect(countQuestions(db)).toBe(1);
@@ -107,7 +102,6 @@ describe("deferQuestion", () => {
   it("floors fractional days and clamps to >= 1", () => {
     const id = recordQuestion(db, { file_id: null, account_id: "expense:food", kind: "uncategorized", prompt: "x" });
     expect(deferQuestion(db, id, 0)).toBe(true);
-    // Read the timestamp back; should be roughly 1 day in the future, never in the past.
     const row = db.prepare(`SELECT deferred_until FROM questions WHERE id = ?`).get(id) as { deferred_until: string };
     expect(Date.parse(row.deferred_until)).toBeGreaterThan(Date.now() - 60_000);
   });

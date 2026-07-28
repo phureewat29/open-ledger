@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { migrate } from "../schema.js";
 import {
   upsertMerchant,
   findMerchantByAlias,
@@ -13,17 +12,14 @@ import {
 } from "./merchants.js";
 import { createAccount } from "../../accounts/accounts.js";
 import { insertTransaction, type TransactionInput } from "./transactions.js";
+import { freshDb } from "../../../fixtures/db.js";
 
-function freshDb() {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+function seedChartOfAccounts(db: Database.Database): void {
   createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
   createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
   createAccount(db, { id: "expense:food:dining", name: "Dining", type: "expense", parent_id: "expense:food" });
   createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
   createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
-  return db;
 }
 
 function tf(over: Partial<TransactionInput> = {}): TransactionInput {
@@ -61,7 +57,7 @@ describe("normalizeDescriptor", () => {
 
 describe("upsertMerchant", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("inserts a new merchant the first time", () => {
     const m = upsertMerchant(db, { canonical_name: "Starbucks" });
@@ -119,7 +115,7 @@ describe("upsertMerchant", () => {
 describe("findMerchantByAlias", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     upsertMerchant(db, {
       canonical_name: "Starbucks",
       alias: "STARBUCKS #1234 BANGKOK",
@@ -148,7 +144,7 @@ describe("findMerchantByAlias", () => {
 describe("setMerchantDefaultAccount + listMerchants + findMerchantById", () => {
   let db: Database.Database;
   beforeEach(() => {
-    db = freshDb();
+    db = freshDb(seedChartOfAccounts);
     upsertMerchant(db, { canonical_name: "Starbucks" });
     upsertMerchant(db, { canonical_name: "Amazon", default_account_id: "expense:food" });
   });
@@ -174,7 +170,7 @@ describe("setMerchantDefaultAccount + listMerchants + findMerchantById", () => {
 
 describe("clearMerchantDefaultAccount", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("clears the default and returns the prior value", () => {
     const m = upsertMerchant(db, {
@@ -200,7 +196,7 @@ describe("clearMerchantDefaultAccount", () => {
 
 describe("mergeMerchants", () => {
   let db: Database.Database;
-  beforeEach(() => { db = freshDb(); });
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
 
   it("re-points transactions, moves aliases, and deletes the source", () => {
     const from = upsertMerchant(db, { canonical_name: "Starbux", alias: "STARBUX #1" });

@@ -1,4 +1,5 @@
 import type Database from "libsql";
+import { accountExists } from "./accounts.js";
 import { upsertMerchant, type MerchantUpsertInput } from "./merchants.js";
 import { buildPatch, type PatchField } from "../../lib/patch.js";
 import { newGroupId, newTransactionId } from "../../lib/ids.js";
@@ -18,7 +19,6 @@ export interface TransactionInput {
   description: string;
   /** Pre-resolved merchant id. Overrides any `merchant` upsert when set. */
   merchant_id?: string | null;
-  /** Merchant to upsert when no `merchant_id` is supplied. */
   merchant?: MerchantUpsertInput | null;
   raw_descriptor?: string | null;
   source_file_id?: string | null;
@@ -64,7 +64,7 @@ interface TransactionDetail extends TransactionRow {
 
 export type ValidateTransactionResult = { ok: true } | { ok: false; reason: string };
 
-// Amount must already be an integer in minor units — this layer never sees decimals.
+/** Amount must already be an integer in minor units — this layer never sees decimals. */
 export function validateTransaction(input: TransactionInput): ValidateTransactionResult {
   if (!ISO_DATE_RE.test(input.date ?? "")) {
     return { ok: false, reason: "Transaction date must be an ISO date (YYYY-MM-DD)." };
@@ -212,7 +212,6 @@ export interface TransactionCluster {
   transactions: TransactionRow[];
 }
 
-/** The filterable subset of list options (grouping and the row limit aside). */
 type ListFilters = Pick<ListTransactionsOptions, "account" | "from" | "to" | "query" | "amount">;
 
 // Shared by listTransactions/countTransactions so a filtered count matches the list.
@@ -252,7 +251,7 @@ function buildListWhere(opts: ListFilters): { whereSql: string; params: any[] } 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 500;
 
-// Clamp to [1, 500] (default 50); shared with the CLI summary so the reported cap matches the rows returned.
+/** Shared with the CLI summary so the reported cap matches the rows returned. */
 export function clampListLimit(limit?: number): number {
   return Math.min(Math.max(limit ?? DEFAULT_LIST_LIMIT, 1), MAX_LIST_LIMIT);
 }
@@ -308,7 +307,7 @@ export function deleteTransaction(db: Database.Database, id: string): boolean {
 }
 
 export interface BulkRecategorizeFilter {
-  /** Required. Recategorize transactions touching this account (either side). */
+  /** Recategorize transactions touching this account (either side). */
   accountId: string;
 }
 
@@ -383,7 +382,44 @@ export function bulkRecategorize(
   return { affected, skipped_self_transaction: skipped, sample_transaction_ids: sample };
 }
 
-// Same filters as listTransactions, no limit; no opts counts every row (the case `status` uses).
+/**
+ * The re-point step of `mergeAccounts` (src/accounts/accounts.ts). Rows that
+ * would become a degenerate self-transaction (one side `fromId`, the other
+ * already `toId`) are deleted FIRST — the debit<>credit CHECK forbids that state
+ * even transiently — then the remainder is re-pointed. Does not touch the
+ * accounts table.
+ */
+export function repointTransactions(
+  db: Database.Database,
+  fromId: string,
+  toId: string,
+): { moved: number; deletedSelfTransactions: number } {
+  if (fromId === toId) throw new Error("Cannot re-point transactions to the same account.");
+
+  let moved = 0;
+  let deletedSelfTransactions = 0;
+  const tx = db.transaction((): void => {
+    deletedSelfTransactions = db
+      .prepare(
+        `DELETE FROM transactions
+          WHERE (debit_account_id = ? AND credit_account_id = ?)
+             OR (credit_account_id = ? AND debit_account_id = ?)`,
+      )
+      .run(fromId, toId, fromId, toId).changes;
+
+    const d = db
+      .prepare(`UPDATE transactions SET debit_account_id = ? WHERE debit_account_id = ?`)
+      .run(toId, fromId).changes;
+    const c = db
+      .prepare(`UPDATE transactions SET credit_account_id = ? WHERE credit_account_id = ?`)
+      .run(toId, fromId).changes;
+    moved = d + c;
+  });
+  tx();
+  return { moved, deletedSelfTransactions };
+}
+
+/** Same filters as listTransactions, no limit; no opts counts every row (the case `status` uses). */
 export function countTransactions(db: Database.Database, opts: ListFilters = {}): number {
   const { whereSql, params } = buildListWhere(opts);
   return (
@@ -399,8 +435,7 @@ export function countTransactionsBySourceFile(db: Database.Database, fileId: str
   ).n;
 }
 
-/** True when any transaction references `accountId` on either its debit or credit
- *  side. Used as the "account still in use" guard before deleting an account. */
+/** The "account still in use" guard before deleting an account. */
 export function accountHasTransactions(db: Database.Database, accountId: string): boolean {
   return !!db
     .prepare(
@@ -484,8 +519,4 @@ export function voidTransactionAsMirror(
 
   db.prepare(`UPDATE transactions SET void_of = ? WHERE id = ?`).run(toId, fromId);
   return { alreadyVoid: false };
-}
-
-function accountExists(db: Database.Database, id: string): boolean {
-  return !!db.prepare(`SELECT 1 FROM accounts WHERE id = ? LIMIT 1`).get(id);
 }

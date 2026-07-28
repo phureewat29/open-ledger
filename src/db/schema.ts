@@ -3,24 +3,12 @@ import { copyFileSync, readdirSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { MIGRATIONS, type Migration } from "./migrations/index.js";
 
-/**
- * Brings `db` up to the latest schema version by applying any pending forward
- * migrations. Never drops tables or overwrites the file. `dbPath` (omitted for
- * :memory:) enables a pre-migration backup of the file.
- */
+/** Never drops tables or overwrites the file. */
 export function migrate(db: Database.Database, dbPath?: string): void {
   applyMigrations(db, MIGRATIONS, dbPath);
 }
 
-/**
- * The migration runner, parameterised on the manifest so tests can drive a
- * synthetic one. Reads the applied version from `schema_migrations`; refuses a
- * database newer than the build; refuses a version-0 database that already
- * holds tables, loudly and without touching it; backs the file up before
- * upgrading one that is already at a known version; then applies each pending
- * migration in its own transaction, recording the version only if its `up`
- * commits.
- */
+/** Migrations are a parameter, not a direct import, so tests can drive a synthetic manifest. */
 export function applyMigrations(
   db: Database.Database,
   migrations: Migration[],
@@ -36,8 +24,7 @@ export function applyMigrations(
   }
   if (current === migrations.length) return;
 
-  // Every migration is CREATE TABLE IF NOT EXISTS, so a foreign database would
-  // otherwise be half-adopted in silence.
+  // Every migration is CREATE TABLE IF NOT EXISTS, so a foreign database would otherwise be half-adopted in silence.
   if (current === 0 && hasUserTables(db)) {
     const at = dbPath ? ` at ${dbPath}` : "";
     throw new Error(
@@ -46,8 +33,7 @@ export function applyMigrations(
     );
   }
 
-  // A version-0 database that reaches here is empty; only an upgrade has
-  // anything worth copying.
+  // A version-0 database that reaches here is empty; only an upgrade has anything worth copying.
   if (dbPath && current >= 1) backupDatabase(db, dbPath);
 
   db.exec(`
@@ -81,7 +67,17 @@ function currentVersion(db: Database.Database): number {
   return row.version;
 }
 
-/** True once the database holds any table other than the migration ledger. */
+/** Which of `tables` this database does not have — the schema half of `doctor`. */
+export function listMissingTables(db: Database.Database, tables: string[]): string[] {
+  const placeholders = tables.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
+    .all(...tables) as { name: string }[];
+  const present = new Set(rows.map((r) => r.name));
+  return tables.filter((t) => !present.has(t));
+}
+
+/** True if the database holds any table other than the migration ledger itself. */
 function hasUserTables(db: Database.Database): boolean {
   const row = db
     .prepare(
@@ -93,11 +89,8 @@ function hasUserTables(db: Database.Database): boolean {
   return !!row;
 }
 
-/**
- * Copies the database file to `<dbPath>.<YYYYMMDD-HHMMSS>.bak` before a
- * migration runs, keeping only the five newest. Checkpoints the WAL first so
- * the copy is complete; a non-WAL database tolerates the checkpoint failing.
- */
+// Checkpoints the WAL first so the copy is complete; a non-WAL database
+// tolerates the checkpoint failing.
 function backupDatabase(db: Database.Database, dbPath: string): void {
   try {
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -117,6 +110,7 @@ function backupStamp(): string {
   );
 }
 
+/** Keeps the five newest `<dbPath>.<stamp>.bak` copies; older ones are pruned. */
 function pruneBackups(dbPath: string): void {
   const dir = dirname(dbPath);
   const prefix = `${basename(dbPath)}.`;

@@ -6,9 +6,5 @@ export interface Migration {
   up(db: Database.Database): void;
 }
 
-/**
- * The ordered migration manifest, written out explicitly: no fs glob, no
- * dynamic import, so the bare `tsc` build ships nothing extra to dist/ and the
- * list type-checks. Append new migrations to the end; never reorder or remove.
- */
+/** Explicit list (no fs glob) so bare `tsc` type-checks it. Append only; never reorder or remove. */
 export const MIGRATIONS: Migration[] = [baseline];
