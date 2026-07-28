@@ -10,52 +10,42 @@ export class ValidationError extends Error {
   }
 }
 
-// Coercion helpers: standard zod schemas that keep the harness's pre-zod
-// coercion semantics. Each preprocess passes undefined through so an absent
-// required key surfaces as a missing-required issue rather than a coerced value.
-
+// Each preprocess below passes undefined through, so an absent required key
+// surfaces as a missing-required issue rather than a coerced value.
 const toStringInput = (value: unknown): unknown =>
   typeof value === "string" || value === undefined ? value : String(value);
 
-// Non-finite results (NaN from "abc", etc.) pass the raw value through so
-// z.number rejects it and the formatter can echo the original in `got "…"`.
-// "" and null coerce to 0 via Number(), matching the old behaviour.
+/** Non-finite results pass the raw value through so z.number rejects it and the
+ *  formatter echoes the original in `got "…"`; "" and null coerce to 0 via Number(). */
 const toNumberInput = (value: unknown): unknown => {
   if (typeof value === "number") return value;
   const n = Number(value);
   return Number.isFinite(n) ? n : value;
 };
 
-// Only the literal strings "true"/"false" map to booleans; anything else
-// (including real booleans, which pass straight through) is left for z.boolean.
 const toBooleanInput = (value: unknown): unknown => {
   if (value === "true") return true;
   if (value === "false") return false;
   return value;
 };
 
-/** A string field. Non-strings are stringified; absent stays absent. */
 export function str() {
   return z.preprocess(toStringInput, z.string());
 }
 
-/** A number field (any finite number). */
 export function num() {
   return z.preprocess(toNumberInput, z.number());
 }
 
-/** A number field constrained to integers. */
 export function int() {
   return z.preprocess(toNumberInput, z.number().int());
 }
 
-/** A boolean field (real booleans, or the strings "true"/"false"). */
 export function bool() {
   return z.preprocess(toBooleanInput, z.boolean());
 }
 
-/** A JSON field, parsed from a string (or passed through if already parsed).
- *  A parse failure raises a custom issue carrying the JSON.parse message. */
+/** A parse failure raises a custom issue carrying the JSON.parse message. */
 export function json<T = unknown>() {
   return z.unknown().transform((value, ctx): T => {
     if (typeof value !== "string") return value as T;
@@ -89,11 +79,8 @@ function toSnakeCase(key: string): string {
   return key.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 }
 
-/**
- * Tries the key verbatim, its camelCase/snake_case forms, then aliases; first
- * non-`undefined` value wins. Auto-bridges commander's camelCase opts to the
- * snake_case names specs are written in, without per-field alias noise.
- */
+/** Auto-bridges commander's camelCase opts to the snake_case names specs are
+ *  written in; first non-`undefined` candidate wins. */
 function resolveRaw(
   raw: Record<string, unknown>,
   key: string,
@@ -107,8 +94,7 @@ function resolveRaw(
   return undefined;
 }
 
-/** Resolve each spec key against the raw record before zod runs; absent keys
- *  are omitted so zod's optional/default/required handling stays authoritative. */
+// Absent keys are omitted so zod's optional/default/required handling stays authoritative.
 function normalizeRaw(
   shape: Record<string, unknown>,
   raw: Record<string, unknown>,
@@ -143,13 +129,8 @@ function constraintClause(label: string, issue: Issue, raw: unknown): string {
   return `${label} ${issue.message}`;
 }
 
-/**
- * Formats zod issues into the harness's pinned message contract. Issues are
- * ordered by spec-key order; an issue whose normalized value is `undefined` is
- * a missing-required field. When every issue is missing, labels group into
- * `--a, --b required`; otherwise each clause (missing rendered `<label>
- * required`) joins with "; ".
- */
+/** An issue whose normalized value is `undefined` is a missing-required field.
+ *  All-missing groups as `--a, --b required`; otherwise clauses join with "; ". */
 function formatError(
   shape: Record<string, unknown>,
   normalized: Record<string, unknown>,
@@ -197,11 +178,7 @@ function parse<S extends z.ZodObject>(
   };
 }
 
-/**
- * Accumulates every missing-required and coercion error before throwing one
- * `ValidationError`. With `opts.atLeastOne`, a parse that produced zero output
- * keys fails with that message (the CLI's "at least one flag" guard).
- */
+/** Accumulates every missing-required and coercion error into one thrown `ValidationError`. */
 export function parseInput<S extends z.ZodObject>(
   schema: S,
   raw: Record<string, unknown>,
@@ -215,8 +192,7 @@ export function parseInput<S extends z.ZodObject>(
   return result.value;
 }
 
-/** Non-throwing counterpart of `parseInput`, for batch row-validation paths
- *  that must keep the PARTIAL exit-code contract. */
+/** For batch rows, which must keep the PARTIAL exit-code contract instead of throwing. */
 export function safeParse<S extends z.ZodObject>(
   schema: S,
   raw: Record<string, unknown>,

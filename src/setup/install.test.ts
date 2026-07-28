@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execFile } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -9,17 +8,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { installSkill, getVersion, skillMd, SkillPackVersionError } from "./install.js";
 import { SKILL_HOSTS } from "./hosts.js";
-import { createSandbox, type Sandbox } from "../lib/sandbox.js";
+import {
+  createSandbox,
+  makeRunCli,
+  type CliRunner,
+  type Sandbox,
+} from "../../fixtures/sandbox.js";
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-/** Minimal frontmatter parser (no yaml dep): key: value pairs between the fences. */
+// No yaml dep: key: value pairs between the fences.
 function parseFrontmatter(md: string): Record<string, string> {
   const m = md.match(/^---\n([\s\S]*?)\n---/);
   expect(m, "SKILL.md should start with a --- frontmatter block").toBeTruthy();
@@ -63,8 +66,8 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
   });
 });
 
-// Compare through realpath: macOS tmpdir is a symlink (/var -> /private/var),
-// which process.cwd() canonicalizes but the raw tmp string does not.
+// realpath needed: macOS tmpdir is a symlink (/var -> /private/var), which
+// process.cwd() canonicalizes but the raw tmp string does not.
 const HOST_PROJECT_DIRS: { host: string; rel: string[] }[] = [
   { host: "agents", rel: [".agents", "skills", "open-ledger"] },
   { host: "claude", rel: [".claude", "skills", "open-ledger"] },
@@ -78,7 +81,6 @@ describe("SKILL_HOSTS registry", () => {
     expect(Object.keys(byId).sort()).toEqual(["agents", "claude", "kimi"]);
     expect(byId.agents.globalDir()).toBe(join(home, ".agents", "skills"));
     expect(byId.claude.globalDir()).toBe(join(home, ".claude", "skills"));
-    // kimi's project dir is its own, but its global reads the shared dir.
     expect(byId.kimi.globalDir()).toBe(join(home, ".agents", "skills"));
   });
 });
@@ -157,7 +159,7 @@ describe("installSkill — --dir base and version guard", () => {
     try {
       installSkill({ dir });
       const versionPath = join(dir, "skills", "open-ledger", "VERSION");
-      writeFileSync(versionPath, "0.0.1\n"); // simulate an older install
+      writeFileSync(versionPath, "0.0.1\n");
 
       let err: unknown;
       try {
@@ -177,47 +179,17 @@ describe("installSkill — --dir base and version guard", () => {
   });
 });
 
-// CLI integration (subprocess)
-
-// install.test.ts lives in src/setup/ -> repo root is two levels up.
-const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
-
 let sandbox: Sandbox;
+let runCli: CliRunner;
 
 beforeAll(() => {
   sandbox = createSandbox("oled-setup-cli-it-");
+  runCli = makeRunCli(sandbox);
 });
 
 afterAll(() => {
   sandbox.cleanup();
 });
-
-function runCli(args: string[]): Promise<CliResult> {
-  return new Promise((resolvePromise) => {
-    const child = execFile(
-      "npx",
-      ["tsx", cliEntry, ...args],
-      { cwd: sandbox.root, env: sandbox.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        const code =
-          error && typeof (error as { code?: unknown }).code === "number"
-            ? (error as { code: number }).code
-            : error
-              ? 1
-              : 0;
-        resolvePromise({ stdout: stdout ?? "", stderr: stderr ?? "", code });
-      },
-    );
-    child.stdin?.end();
-  });
-}
 
 describe("setup CLI (subprocess)", () => {
   it(

@@ -17,10 +17,7 @@ vi.mock("../context.js", () => ({
 
 import { applyRedaction } from "./redactor.js";
 
-/**
- * `redact`/`createRedactor` are private to this module; masking behavior is exercised
- * through the public `applyRedaction` API by round-tripping a single allowlisted field.
- */
+// createRedactor is private; exercised here through applyRedaction, round-tripping a single allowlisted field.
 function redact(text: string): string {
   return applyRedaction({ text }, true, ["text"]).text;
 }

@@ -2,29 +2,20 @@ import { loadDatasetRows, type DatasetDefinition, type DatasetRow } from "./load
 import { institutionsDataset } from "./institutions.js";
 import { defaultsDataset } from "./defaults.js";
 
-/**
- * Public surface of the reference-data module. The registry maps a dataset name
- * to its definition; `listDatasets`/`readDataset` are the generic access path
- * external agents reach through the `datasets` CLI noun. Typed finders
- * (`findInstitutions`, `findCountryDefaults`) live in their own modules and are
- * re-exported here.
- */
+/** A dataset with a typed finder of its own (`findCountryDefaults`) exports it from its own module instead. */
 
-// `any` for the file-shape parameter: the registry holds heterogeneous dataset
-// definitions (institutions files vs defaults files), and each was authored with
-// its own concrete `DatasetDefinition<...>` annotation, so this only erases the
-// per-entry file shape the generic loader doesn't need at the registry level.
+// `any` here only erases the per-entry file shape (institutions vs defaults each
+// have their own concrete `DatasetDefinition<...>`), which the registry doesn't need.
 const REGISTRY: Record<string, DatasetDefinition<any>> = {
   institutions: institutionsDataset,
   defaults: defaultsDataset,
 };
 
-/** Names of the shipped datasets (no file I/O). */
 export function listDatasetNames(): string[] {
   return Object.keys(REGISTRY);
 }
 
-/** Whether a dataset's rows carry a `kind` field (drives the CLI `--kind` guard). */
+/** Drives the CLI `--kind` guard. */
 export function datasetHasKinds(name: string): boolean {
   return !!REGISTRY[name]?.kinds;
 }
@@ -35,7 +26,6 @@ export interface DatasetSummary {
   rows: number;
 }
 
-/** One summary row per dataset: name, the countries it covers, and its row count. */
 export function listDatasets(): DatasetSummary[] {
   return Object.entries(REGISTRY).map(([name, def]) => {
     const rows = loadDatasetRows(name, def);
@@ -44,8 +34,7 @@ export function listDatasets(): DatasetSummary[] {
   });
 }
 
-/** Rows of one dataset, filtered by country (case-insensitive) and/or kind.
- *  Throws on an unknown name — the CLI validates the name first for a clean error. */
+/** Throws on an unknown name — the CLI validates the name first for a clean error. */
 export function readDataset(
   name: string,
   filter: { country?: string; kind?: string } = {},
@@ -59,8 +48,4 @@ export function readDataset(
   );
 }
 
-export { findInstitutions, getInstitutions } from "./institutions.js";
-export type { LoadedInstitution, Institution, InstitutionKind } from "./institutions.js";
-export { findCountryDefaults, availableCountries } from "./defaults.js";
-export type { CountryDefaults } from "./defaults.js";
 export type { DatasetRow } from "./loader.js";

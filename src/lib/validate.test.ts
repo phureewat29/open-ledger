@@ -96,7 +96,6 @@ describe("validate — nullable", () => {
   });
 
   it("treats the string \"null\" as a normal value, not null", () => {
-    // str is non-nullable-agnostic here: "null" coerces to the literal string.
     expect(parseInput(z.object({ name: str().nullable() }), { name: "null" }).name).toBe("null");
   });
 });

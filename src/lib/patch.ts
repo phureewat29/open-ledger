@@ -1,4 +1,3 @@
-/** A single spec entry describing how one patch key maps onto a SQL column. */
 export interface PatchField {
   /** SQL column; defaults to the patch key when omitted. */
   column?: string;
@@ -9,11 +8,7 @@ export interface PatchField {
   transform?: (value: unknown) => unknown;
 }
 
-/**
- * Output of `buildPatch`: parallel `sets`/`params` arrays ready to splice
- * into an `UPDATE ... SET` statement, plus `before`/`after` audit snapshots
- * keyed by patch key (not by column).
- */
+// before/after audit snapshots are keyed by patch key, not by column.
 interface PatchResult {
   sets: string[];
   params: unknown[];
@@ -25,9 +20,8 @@ interface PatchResult {
  * Builds `SET` fragments, params, and before/after snapshots for every `spec`
  * key present in `patch`. A key participates only when `patch[key] !==
  * undefined` (absent leaves the column untouched; explicit `null` binds SQL
- * NULL). `transform`'s return value becomes both the bound param and
- * `after[key]`. No `changed` flag: callers test `sets.length` themselves
- * after appending any hand-written fields.
+ * NULL). No `changed` flag: callers test `sets.length` themselves after
+ * appending any hand-written fields.
  */
 export function buildPatch<Row extends object>(
   spec: Record<string, PatchField>,

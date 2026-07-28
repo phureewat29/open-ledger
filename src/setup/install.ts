@@ -3,12 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { findHost, DEFAULT_HOST } from "./hosts.js";
 
-/**
- * Filesystem installer for the skill pack. Every host receives the checked-in
- * skills/SKILL.md verbatim; no templating, no per-host wrapper.
- */
+/** Every host receives the checked-in skills/SKILL.md verbatim: no templating, no per-host wrapper. */
 
-export interface InstalledTarget {
+interface InstalledTarget {
   /** The host id it landed under, or "dir" for an explicit --dir install. */
   kind: string;
   path: string;
@@ -26,10 +23,8 @@ export interface InstallOptions {
   force?: boolean;
 }
 
-/**
- * Thrown when a skill dir already exists at a DIFFERENT version and --force was
- * not given. The CLI maps this to exit code INVALID with a --force hint.
- */
+/** Thrown when an installed skill dir is at a DIFFERENT version and --force wasn't given;
+ *  the CLI maps this to exit code INVALID with a --force hint. */
 export class SkillPackVersionError extends Error {
   readonly installedVersion: string;
   readonly cliVersion: string;
@@ -46,26 +41,21 @@ export class SkillPackVersionError extends Error {
   }
 }
 
-// install.ts compiles to dist/setup/install.js; ../../package.json from
-// there is the package root (same 2-level depth as src/cli/index.ts uses).
+// install.ts compiles to dist/setup/install.js; ../../package.json from there is
+// the package root (same 2-level depth as src/cli/index.ts uses).
 const require = createRequire(import.meta.url);
 
-/** The CLI/package version the installed pack should be stamped with. */
 export function getVersion(): string {
   const { version } = require("../../package.json") as { version: string };
   return version;
 }
 
-/** The canonical checked-in skill document (skills/SKILL.md at the package root). */
 export function skillMd(): string {
   return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
 }
 
-/**
- * The final `open-ledger` skill dir for the given options.
- *   --dir D  → resolve(D)/skills/open-ledger  (host-agnostic; D is a bare base)
- *   host     → <cwd or home>/<host skills dir>/open-ledger  (the dir already ends in skills)
- */
+// --dir D is host-agnostic: resolve(D)/skills/open-ledger. Otherwise <cwd or
+// home>/<host skills dir>/open-ledger (the host dir already ends in skills).
 function resolveTarget(opts: InstallOptions): { kind: string; dir: string } {
   if (opts.dir) {
     return { kind: "dir", dir: join(resolve(opts.dir), "skills", "open-ledger") };
@@ -91,7 +81,6 @@ export function installSkill(opts: InstallOptions = {}): InstalledTarget {
   if (existing !== null && existing !== version && !opts.force) {
     throw new SkillPackVersionError({ installedVersion: existing, cliVersion: version, path: dir });
   }
-  // existing === version -> silent idempotent overwrite; different + force -> overwrite.
 
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "SKILL.md"), skillMd());

@@ -12,7 +12,6 @@ interface SectionRule {
   patterns: RegExp[];
   /** Trim a trailing parenthesised qualifier, e.g. "Corgi (partner)" → "Corgi". */
   stripParen?: boolean;
-  /** Drop the match if it equals the user's name. */
   skipIfUser?: boolean;
 }
 
@@ -38,7 +37,6 @@ const SECTION_RULES: SectionRule[] = [
   },
 ];
 
-// Patterns for numeric / identifier PII commonly found in Thai financial data.
 const NUMERIC_PII_PATTERNS: [RegExp, string][] = [
   // Thai national ID with dashes: 1-2345-67890-12-3
   [/\b\d-\d{4}-\d{5}-\d{2}-\d\b/g, "[NATID]"],
@@ -113,10 +111,8 @@ function buildRedactions(): RedactionEntry[] {
   return entries;
 }
 
-/**
- * Reads config.userName + context.md once to build the name rules, returning
- * a reusable string→string masker — amortizes that work across many values.
- */
+/** Builds name rules from config.userName + context.md once, returning a reusable
+ *  masker that amortizes that cost across many values. */
 function createRedactor(): (text: string) => string {
   const redactions = buildRedactions();
   return (text: string): string => {
@@ -132,10 +128,10 @@ function createRedactor(): (text: string) => string {
 }
 
 /**
- * Deep-walks `data` and redacts a string value only when its key is in
- * `fields` — a per-command allowlist of free-text fields, so ids/enums/amounts
- * the agent needs verbatim are never touched. Returns a fresh structure
- * (input untouched); a no-op when `enabled` is false.
+ * Deep-walks `data`, redacting a string value only when its key is in the
+ * per-command `fields` allowlist — ids/enums/amounts the agent needs verbatim
+ * stay untouched. Returns a fresh structure (input untouched); a no-op when
+ * `enabled` is false.
  */
 export function applyRedaction<T>(data: T, enabled: boolean, fields: readonly string[]): T {
   if (!enabled) return data;

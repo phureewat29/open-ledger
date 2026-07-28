@@ -4,28 +4,24 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * Generic loader for the shipped reference datasets. Each dataset is one
- * subdirectory under `datasets/` at the package root, holding one JSON file per
- * country (`<cc>.json`). This module reads, validates, flattens, and memoizes
- * those files; adding a country is a new file, not a code change. Dataset-specific
- * shape lives in the per-dataset modules (institutions.ts, defaults.ts), each of
- * which describes itself with a `DatasetDefinition`.
+ * Generic loader for the shipped reference datasets: one subdirectory per
+ * dataset under `datasets/`, one `<cc>.json` per country. Adding a country is
+ * a new file, not a code change — dataset-specific shape lives in the
+ * per-dataset modules (institutions.ts, defaults.ts).
  */
 
-// Two levels below the package root in both layouts: src/datasets/ under tsx,
-// dist/datasets/ once built. `datasets/` sits at the root and is not compiled,
-// so the same relative walk reaches it in dev, in the build, and in the package.
+// Two levels below the package root either way (src/datasets/ under tsx, dist/datasets/
+// built); the uncompiled datasets/ dir is reached by the same relative walk in both.
 const DATASETS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../datasets");
 
 /** A flattened dataset row, always tagged with the (uppercased) country it loaded from. */
 export type DatasetRow = Record<string, unknown> & { country: string };
 
 /**
- * Describes one dataset for the generic loader. `schema` validates a single
- * `<cc>.json` file (its `country` field is read to tag rows); `flatten` turns a
- * validated file into its base rows (the loader adds `country`); `sortKey` is the
- * within-country tiebreak; `kinds` (when present) lists the values the dataset's
- * `kind` field can take, which the CLI uses to police a `--kind` filter.
+ * Describes one dataset for the generic loader. `schema` validates one
+ * `<cc>.json` file; `flatten` turns it into base rows (the loader adds
+ * `country`); `sortKey` is the within-country tiebreak; `kinds` lists the
+ * `kind` values a `--kind` filter may police.
  */
 export interface DatasetDefinition<F extends { country: string } = { country: string }> {
   dirname: string;
@@ -35,8 +31,7 @@ export interface DatasetDefinition<F extends { country: string } = { country: st
   kinds?: readonly string[];
 }
 
-// Memoized per dataset name so importing a dataset module does no file I/O; the
-// first read builds that dataset's rows once.
+// Memoized per dataset name so importing a dataset module does no file I/O.
 const cache = new Map<string, DatasetRow[]>();
 
 function readCountryFile<F extends { country: string }>(
@@ -63,8 +58,6 @@ function readCountryFile<F extends { country: string }>(
   return def.flatten(parsed.data).map((row) => ({ ...row, country }));
 }
 
-/** Read + validate every `<dataset>/*.json`, flatten, and sort stably by
- *  country then the dataset's `sortKey`. Runs once per dataset; memoized. */
 function loadAll<F extends { country: string }>(def: DatasetDefinition<F>): DatasetRow[] {
   const dir = resolve(DATASETS_DIR, def.dirname);
   const files = readdirSync(dir)
@@ -80,9 +73,8 @@ function loadAll<F extends { country: string }>(def: DatasetDefinition<F>): Data
 }
 
 /**
- * Every row of a named dataset, sorted by country then the dataset's sort key.
- * Returns the shared memoized array — callers must copy (slice/filter) before
- * handing it out, which every finder in this module already does.
+ * Every row of a named dataset, sorted by country then the sort key. Returns
+ * the shared memoized array — callers must copy before mutating it.
  */
 export function loadDatasetRows<F extends { country: string }>(
   name: string,
