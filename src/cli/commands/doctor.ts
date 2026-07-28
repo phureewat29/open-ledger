@@ -5,11 +5,13 @@ import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { getConfigPath, getDataDir } from "../../config.js";
+import { listMissingTables } from "../../db/schema.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
 import { SKILL_HOSTS } from "../../setup/hosts.js";
 import { EXIT, currentMode, emit, emitList, runAction, type Column } from "../output.js";
 import { errorMessage } from "../../lib/result.js";
+import { probeOcrEndpoint, resolveOcr } from "../../extract/ocr.js";
 
 interface Check {
   name: string;
@@ -56,23 +58,37 @@ async function mupdfCheck(): Promise<Check> {
 }
 
 function schemaTablesCheck(db: Database.Database | null): Check {
-  if (!db) return { name: "schema_tables_present", ok: false, detail: "database not open" };
+  const name = "schema_tables_present";
+  if (!db) return { name, ok: false, detail: "database not open" };
 
   try {
-    const placeholders = REQUIRED_TABLES.map(() => "?").join(",");
-    const rows = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
-      .all(...REQUIRED_TABLES) as { name: string }[];
-    const present = new Set(rows.map((r) => r.name));
-    const missing = REQUIRED_TABLES.filter((t) => !present.has(t));
+    const missing = listMissingTables(db, REQUIRED_TABLES);
     return {
-      name: "schema_tables_present",
+      name,
       ok: missing.length === 0,
       detail: missing.length ? `missing: ${missing.join(", ")}` : undefined,
     };
   } catch (err) {
-    return { name: "schema_tables_present", ok: false, detail: errorMessage(err) };
+    return { name, ok: false, detail: errorMessage(err) };
   }
+}
+
+export async function ocrEndpointCheck(): Promise<Check> {
+  const name = "ocr_endpoint";
+  const settings = resolveOcr();
+  if (!settings) return { name, ok: true, detail: "not configured" };
+
+  const { baseUrl, model, preset } = settings;
+  const served = await probeOcrEndpoint(settings);
+  if (!served.ok) return { name, ok: false, detail: `${baseUrl}: ${served.error}` };
+  if (!served.value.includes(model)) {
+    return {
+      name,
+      ok: false,
+      detail: `${baseUrl} does not serve ${model} (serving: ${served.value.join(", ") || "nothing"})`,
+    };
+  }
+  return { name, ok: true, detail: `${preset}/${model} at ${baseUrl}` };
 }
 
 async function runChecks(): Promise<Check[]> {
@@ -87,12 +103,14 @@ async function runChecks(): Promise<Check[]> {
   checks.push(await mupdfCheck());
   checks.push(schemaTablesCheck(db));
   checks.push(skillPackCheck());
+  checks.push(await ocrEndpointCheck());
 
   return checks;
 }
 
-// Informational only; never a HARD_CHECK.
+/** Informational only; never a HARD_CHECK. */
 function skillPackCheck(): Check {
+  const name = "skill_pack";
   const candidates: { host: string; scope: string; path: string }[] = [];
   for (const host of SKILL_HOSTS) {
     candidates.push({
@@ -110,19 +128,19 @@ function skillPackCheck(): Check {
   }
 
   const found = candidates.find((c) => existsSync(c.path));
-  if (!found) return { name: "skill_pack", ok: true, detail: "not installed" };
+  if (!found) return { name, ok: true, detail: "not installed" };
 
   const installed = readFileSync(found.path, "utf8").trim();
   const where = `${found.host}, ${found.scope}`;
   const cli = getVersion();
   if (installed !== cli) {
     return {
-      name: "skill_pack",
+      name,
       ok: false,
       detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g open-ledger@latest)`,
     };
   }
-  return { name: "skill_pack", ok: true, detail: `installed ${installed} (${where})` };
+  return { name, ok: true, detail: `installed ${installed} (${where})` };
 }
 
 const CHECK_COLUMNS: Column<Check>[] = [

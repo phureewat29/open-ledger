@@ -1,35 +1,37 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, truncateSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import Database from "libsql";
 import { migrate } from "../../db/schema.js";
 import { createAccount } from "../../accounts/accounts.js";
-import { createSandbox, type Sandbox } from "../../lib/sandbox.js";
-
-// This test lives in src/cli/commands/ -> repo root is three levels up.
-const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
-const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
+import {
+  createSandbox,
+  makeRunCli,
+  parseNdjson,
+  type CliRunner,
+  type Sandbox,
+} from "../../../fixtures/sandbox.js";
+import { MAX_SOURCE_BYTES, loadSource } from "../../extract/source.js";
+import { encryptedPdf, pdfOf, textPdf } from "../../../fixtures/pdf.js";
+import { samplePng } from "../../../fixtures/images.js";
+import {
+  DEAD_OCR_BASE_URL,
+  liveOcr,
+  liveOcrEnv,
+  requireLiveOcr,
+} from "../../../fixtures/ocr-endpoint.js";
 
 let sandbox: Sandbox;
+let runCli: CliRunner;
 let dbPath: string;
 
 beforeAll(() => {
   // createSandbox blanks OLED_DB_ENCRYPTION_KEY, so this file can read the db directly with `libsql`.
   sandbox = createSandbox("oled-ingest-it-");
+  runCli = makeRunCli(sandbox);
   dbPath = sandbox.dbPath;
 
-  /**
-   * Seed real accounts so a "clean" transaction's sides resolve exactly (not
-   * via placeholder creation) — closed before the CLI runs, so the subprocess owns the writer.
-   */
+  // Closed before the CLI runs so the subprocess owns the writer.
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
@@ -43,64 +45,11 @@ afterAll(() => {
   sandbox.cleanup();
 });
 
-function runCli(args: string[], opts: { stdin?: string; cwd?: string } = {}): Promise<CliResult> {
-  return new Promise((resolvePromise) => {
-    const child = execFile(
-      "npx",
-      // Absolute script path, so callers can override `cwd` (e.g. an agent
-      // shell elsewhere than the data dir) without breaking tsx's entrypoint lookup.
-      ["tsx", cliEntry, ...args],
-      {
-        cwd: opts.cwd ?? sandbox.root,
-        env: sandbox.env,
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        const code =
-          error && typeof (error as { code?: unknown }).code === "number"
-            ? (error as { code: number }).code
-            : error
-              ? 1
-              : 0;
-        resolvePromise({ stdout: stdout ?? "", stderr: stderr ?? "", code });
-      },
-    );
-    if (opts.stdin != null) child.stdin?.write(opts.stdin);
-    child.stdin?.end();
-  });
-}
-
-/**
- * A tiny but structurally valid single-page PDF (mirrors the fixture in
- * src/ingest/prepare.test.ts) — enough for readPdf/countPdfPages without a real statement.
- */
-function minimalPdf(): Buffer {
-  const header = "%PDF-1.4\n";
-  const o1 = "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
-  const o2 = "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
-  const o3 =
-    "3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n";
-  const offset1 = header.length;
-  const offset2 = offset1 + o1.length;
-  const offset3 = offset2 + o2.length;
-  const xrefStart = offset3 + o3.length;
-  const xref =
-    `xref\n0 4\n` +
-    `0000000000 65535 f \n` +
-    `${String(offset1).padStart(10, "0")} 00000 n \n` +
-    `${String(offset2).padStart(10, "0")} 00000 n \n` +
-    `${String(offset3).padStart(10, "0")} 00000 n \n`;
-  const trailer = `trailer<</Size 4/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return Buffer.from(header + o1 + o2 + o3 + xref + trailer, "latin1");
-}
-
-function parseNdjson(stdout: string): any[] {
-  return stdout
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+function stage(relPath: string, bytes: Buffer): string {
+  const path = join(sandbox.dataDir, relPath);
+  mkdirSync(resolve(path, ".."), { recursive: true });
+  writeFileSync(path, bytes);
+  return path;
 }
 
 function readDb(): Database.Database {
@@ -145,7 +94,6 @@ describe("ingest commit v2 (subprocess)", () => {
 
     const [r0, r1, r2] = results;
 
-    // Clean transaction: both sides resolve exactly, no questions, no merchant.
     expect(r0.ok).toBe(true);
     expect(typeof r0.transaction_id).toBe("string");
     expect(r0.transaction_id).toMatch(/^tx:/);
@@ -157,7 +105,6 @@ describe("ingest commit v2 (subprocess)", () => {
       { side: "credit", requested: "asset:cash", resolved: "asset:cash", how: "exact" },
     ]);
 
-    // Well-formed new-category hint: auto-created silently -> placeholder_created, NO question.
     expect(r1.ok).toBe(true);
     expect(r1.raised_questions).toBe(0);
     expect(r1.sides[0]).toEqual({
@@ -168,7 +115,6 @@ describe("ingest commit v2 (subprocess)", () => {
     });
     expect(r1.sides[1].how).toBe("exact");
 
-    // Leaf-only hint: nothing well-formed to build -> uncategorized fallback + 1 question.
     expect(r2.ok).toBe(true);
     expect(r2.raised_questions).toBe(1);
     expect(r2.sides[0]).toEqual({
@@ -186,7 +132,6 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(summary.failed).toBe(0);
     expect(summary.raised_questions).toBe(1);
 
-    // Only the fallback wrote a question; the silently created placeholder account carries no has_question flag.
     const db = readDb();
     const n = (
       db.prepare("SELECT COUNT(*) AS n FROM questions WHERE batch_id = ?").get(summary.batch_id) as {
@@ -229,7 +174,7 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(missing.code).toBe(5);
   });
 
-  it("returns exit 7 (PARTIAL) when one item is valid and one is dirty", async () => {
+  it("returns exit 7 (PARTIAL) with a clean dirty_input result per bad row, never a raw SQL error", async () => {
     const ndjson = [
       JSON.stringify({
         date: "2026-02-01",
@@ -240,30 +185,11 @@ describe("ingest commit v2 (subprocess)", () => {
       }),
       JSON.stringify({
         date: "2026-02-02",
-        description: "Dirty",
+        description: "Self",
         debit_account: "expense:food",
         credit_account: "expense:food",
         amount: 5,
       }),
-    ].join("\n");
-
-    const { stdout, code } = await runCli(["ingest", "commit", "--json"], { stdin: ndjson });
-    expect(code).toBe(7);
-
-    const objs = parseNdjson(stdout);
-    const results = objs.filter((o) => o.type === "result");
-    const summary = objs.find((o) => o.type === "summary");
-
-    expect(results[0].ok).toBe(true);
-    expect(results[1].ok).toBe(false);
-    expect(results[1].reason).toBe("dirty_input");
-    expect(typeof results[1].message).toBe("string");
-    expect(summary.posted).toBe(1);
-    expect(summary.failed).toBe(1);
-  }, 30000);
-
-  it("an item without a date is a clean dirty_input failure, not a raw SQL error", async () => {
-    const ndjson = [
       JSON.stringify({
         description: "Missing date",
         debit_account: "expense:food",
@@ -279,12 +205,13 @@ describe("ingest commit v2 (subprocess)", () => {
     const results = objs.filter((o) => o.type === "result");
     const summary = objs.find((o) => o.type === "summary");
 
-    expect(results).toHaveLength(1);
-    expect(results[0].ok).toBe(false);
-    expect(results[0].reason).toBe("dirty_input");
-    expect(results[0].message).toMatch(/ISO date/);
-    expect(summary.posted).toBe(0);
-    expect(summary.failed).toBe(1);
+    expect(results[0].ok).toBe(true);
+    expect(results[1]).toMatchObject({ ok: false, reason: "dirty_input" });
+    expect(typeof results[1].message).toBe("string");
+    expect(results[2]).toMatchObject({ ok: false, reason: "dirty_input" });
+    expect(results[2].message).toMatch(/ISO date/);
+    expect(summary.posted).toBe(1);
+    expect(summary.failed).toBe(2);
 
     expect(stderr).not.toMatch(/SQLITE|SQL error/i);
   }, 30000);
@@ -324,7 +251,6 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(secondSummary.duplicates).toBe(1);
     expect(secondSummary.failed).toBe(0);
 
-    // Exactly one transaction for this file survived (idempotent insert).
     const db2 = readDb();
     const n = (
       db2.prepare("SELECT COUNT(*) AS n FROM transactions WHERE source_file_id = 'sf:idem'").get() as {
@@ -333,6 +259,61 @@ describe("ingest commit v2 (subprocess)", () => {
     ).n;
     db2.close();
     expect(n).toBe(1);
+  }, 45000);
+
+  it("a duplicate re-commit reports the sides the stored row holds, not the ones this run would have resolved", async () => {
+    const db = readDb();
+    createAccount(db, { id: "expense:sides-a", name: "Sides A", type: "expense", parent_id: "expense" });
+    createAccount(db, { id: "expense:sides-b", name: "Sides B", type: "expense", parent_id: "expense" });
+    db.prepare(
+      `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
+    ).run("sf:dup-sides", "/tmp/dup-sides.pdf", "dup-sides-hash", "application/pdf");
+    db.close();
+
+    const item = JSON.stringify({
+      date: "2026-03-10",
+      description: "Recategorized after its first commit",
+      debit_account: "expense:sides-a",
+      credit_account: "asset:cash",
+      amount: 33,
+      row_index: 0,
+    });
+
+    const first = await runCli(["ingest", "commit", "--file", "sf:dup-sides", "--json"], { stdin: item });
+    expect(first.code).toBe(0);
+    expect(parseNdjson(first.stdout).find((o) => o.type === "result").sides[0]).toEqual({
+      side: "debit",
+      requested: "expense:sides-a",
+      resolved: "expense:sides-a",
+      how: "exact",
+    });
+
+    // expense:sides-a still exists, so re-resolving it would silently report "exact" again.
+    const moved = await runCli([
+      "transactions",
+      "recategorize",
+      "--filter-account",
+      "expense:sides-a",
+      "--set-account",
+      "expense:sides-b",
+      "--json",
+    ]);
+    expect(moved.code).toBe(0);
+    expect(parseNdjson(moved.stdout)[0].affected).toBe(1);
+
+    const second = await runCli(["ingest", "commit", "--file", "sf:dup-sides", "--json"], { stdin: item });
+    expect(second.code).toBe(0);
+    const result = parseNdjson(second.stdout).find((o) => o.type === "result");
+    expect(result.duplicate).toBe(true);
+    expect(result.sides).toEqual([
+      {
+        side: "debit",
+        requested: "expense:sides-a",
+        resolved: "expense:sides-b",
+        how: "as_committed",
+      },
+      { side: "credit", requested: "asset:cash", resolved: "asset:cash", how: "as_committed" },
+    ]);
   }, 45000);
 
   it("an ingested row carrying code:\"void\" still counts in balances (void is void_of-only, unreachable from ingest input)", async () => {
@@ -357,9 +338,7 @@ describe("ingest commit v2 (subprocess)", () => {
       .prepare(`SELECT code, void_of FROM transactions WHERE description = ?`)
       .get(description) as { code: string | null; void_of: string | null };
     db.close();
-    // `code` passes through verbatim (still a dormant, agent-settable field)...
     expect(row.code).toBe("void");
-    // ...but only `void_of` can exclude a row from balances, and ingest cannot set it.
     expect(row.void_of).toBeNull();
 
     const after = await runCli(["accounts", "show", "expense:food", "--json"]);
@@ -445,15 +424,9 @@ describe("ingest commit v2 (subprocess)", () => {
 });
 
 describe("ingest prepare (subprocess)", () => {
-  it("resolves the rel_path `ingest list` itself emits, even when invoked from an unrelated cwd", async () => {
-    const dataDir = sandbox.dataDir;
-    mkdirSync(join(dataDir, "statements"), { recursive: true });
-    writeFileSync(join(dataDir, "statements", "kbank-jan.pdf"), minimalPdf());
+  it("extracts a PDF's own text layer into one document, resolving the rel_path `ingest list` emits", async () => {
+    stage("statements/kbank-jan.pdf", textPdf());
 
-    /**
-     * Regression: a real agent session hit E_NOT_FOUND passing `ingest list`'s own rel_path
-     * into `ingest prepare` from a cwd that wasn't the data dir; reproduced by running from the sandbox root.
-     */
     const list = await runCli(["ingest", "list", "--regex", "kbank-jan", "--json"], { cwd: sandbox.root });
     expect(list.code).toBe(0);
     const entry = parseNdjson(list.stdout).find((r) => r.type === "file");
@@ -463,21 +436,200 @@ describe("ingest prepare (subprocess)", () => {
     const prepare = await runCli(["ingest", "prepare", entry.rel_path, "--json"], { cwd: sandbox.root });
     expect(prepare.code).toBe(0);
     const obj = JSON.parse(prepare.stdout.trim());
-    expect(obj.document).toBe(join(dataDir, "statements", "kbank-jan.pdf"));
+    expect(obj).toMatchObject({
+      kind: "text",
+      source: "text-layer",
+      text_layer: "complete",
+      page_count: 1,
+    });
+    expect(obj.document).toBe(join(sandbox.cacheDir, obj.file_id, "document.txt"));
+    expect(readFileSync(obj.document, "utf8")).toContain("--- page 1 ---");
+    expect(obj.failed_pages).toBeUndefined();
+    expect(obj.ocr_model).toBeUndefined();
   }, 30000);
 
-  it("exits NOT_FOUND for a path or id that resolves to nothing", async () => {
-    const { code, stderr } = await runCli(["ingest", "prepare", "no/such/statement.pdf", "--json"]);
-    expect(code).toBe(5); // EXIT.NOT_FOUND
-    expect(JSON.parse(stderr.trim()).error.code).toBe("E_NOT_FOUND");
+  it("hands an image back by its own path, writing nothing to the cache", async () => {
+    const path = stage("receipts/receipt.png", samplePng());
+
+    const { stdout, code } = await runCli(["ingest", "prepare", path, "--json"]);
+    expect(code).toBe(0);
+    const obj = JSON.parse(stdout.trim());
+    expect(obj).toMatchObject({
+      kind: "images",
+      source: "original",
+      text_layer: "none",
+      page_count: 1,
+      pages: [{ page: 1, path }],
+    });
+    expect(obj.dpi).toBeUndefined();
+    expect(existsSync(join(sandbox.cacheDir, obj.file_id))).toBe(false);
+  }, 30000);
+
+  it("rasterizes to 1-based page PNGs when no OCR server is configured, with or without --rescan", async () => {
+    const scan = stage("statements/scan.pdf", pdfOf(["image", "image"]));
+
+    const { stdout, code } = await runCli(["ingest", "prepare", scan, "--json"]);
+    expect(code).toBe(0);
+    const obj = JSON.parse(stdout.trim());
+    expect(obj).toMatchObject({
+      kind: "images",
+      source: "raster",
+      text_layer: "none",
+      dpi: 200,
+      page_count: 2,
+    });
+    expect(obj.pages).toEqual([
+      { page: 1, path: join(sandbox.cacheDir, obj.file_id, "p1.png") },
+      { page: 2, path: join(sandbox.cacheDir, obj.file_id, "p2.png") },
+    ]);
+    expect(readFileSync(obj.pages[0].path).subarray(1, 4).toString("latin1")).toBe("PNG");
+
+    const text = stage("statements/two-page.pdf", pdfOf(["text", "text"]));
+    const rescanned = await runCli(["ingest", "prepare", text, "--rescan", "--no-ocr", "--json"]);
+    expect(rescanned.code).toBe(0);
+    expect(JSON.parse(rescanned.stdout.trim())).toMatchObject({
+      kind: "images",
+      source: "raster",
+      text_layer: "none",
+      page_count: 2,
+    });
+  }, 30000);
+
+  it("maps a refusal to its exit code and hint: unreadable type USAGE, missing path NOT_FOUND", async () => {
+    const path = stage("bucket/notes.docx", Buffer.from("PK"));
+
+    const unsupported = await runCli(["ingest", "prepare", path, "--json"]);
+    expect(unsupported.code).toBe(2); // EXIT.USAGE
+    const { error } = JSON.parse(unsupported.stderr.trim());
+    expect(error.code).toBe("E_USAGE");
+    expect(error.hint).toContain(".pdf");
+
+    const missing = await runCli(["ingest", "prepare", "no/such/statement.pdf", "--json"]);
+    expect(missing.code).toBe(5); // EXIT.NOT_FOUND
+    expect(JSON.parse(missing.stderr.trim()).error.code).toBe("E_NOT_FOUND");
+  }, 30000);
+
+  it("exits INPUT_REQUIRED for a locked PDF, then extracts it with the piped password", async () => {
+    const path = stage("statements/locked.pdf", await encryptedPdf("secret"));
+
+    const locked = await runCli(["ingest", "prepare", path, "--json"]);
+    expect(locked.code).toBe(4); // EXIT.INPUT_REQUIRED
+    expect(JSON.parse(locked.stderr.trim()).error.code).toBe("E_INPUT_REQUIRED");
+
+    const unlocked = await runCli(["ingest", "prepare", path, "--password-stdin", "--json"], {
+      stdin: "secret",
+    });
+    expect(unlocked.code).toBe(0);
+    const obj = JSON.parse(unlocked.stdout.trim());
+    expect(obj).toMatchObject({ kind: "text", source: "text-layer" });
+    expect(existsSync(join(sandbox.cacheDir, obj.file_id, "document.pdf"))).toBe(false);
+  }, 30000);
+
+  it("--force keeps the prior ingest's transactions when the re-read fails", async () => {
+    const path = stage("statements/force-locked.pdf", await encryptedPdf("secret"));
+
+    // Registered by hash without unlocking it, so a successful prepare (which would vault the password) is what lets the re-read open the file.
+    const source = loadSource(path);
+    if (!source.ok) throw new Error(source.message);
+    const fileId = "sf:force-locked";
+    const db = readDb();
+    db.prepare(
+      `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
+    ).run(fileId, path, source.value.hash, source.value.mime);
+    db.close();
+
+    const commit = await runCli(["ingest", "commit", "--file", fileId, "--json"], {
+      stdin: JSON.stringify({
+        date: "2026-06-01",
+        description: "Force survivor",
+        debit_account: "expense:food",
+        credit_account: "asset:cash",
+        amount: 77,
+      }),
+    });
+    expect(commit.code).toBe(0);
+    const txId = parseNdjson(commit.stdout).find((o) => o.type === "result").transaction_id;
+
+    const forced = await runCli(["ingest", "prepare", path, "--force", "--password-stdin", "--json"], {
+      stdin: "nope",
+    });
+    expect(forced.code).toBe(4); // EXIT.INPUT_REQUIRED
+
+    // The files row survived too, or its deletion would have cascaded this transaction away.
+    const list = await runCli(["transactions", "list", "--query", "Force survivor", "--json"]);
+    expect(list.code).toBe(0);
+    expect(parseNdjson(list.stdout).map((r) => r.id)).toContain(txId);
+  }, 45000);
+});
+
+describe("ingest prepare against an OCR server (subprocess)", () => {
+  it("exits NOT_READY rather than degrading to images when nothing is listening", async () => {
+    // Two pages, so this doesn't hash-dedup onto the live case's one-page scan.
+    const path = stage("statements/scan-dead.pdf", pdfOf(["image", "image"]));
+    const { code, stderr } = await runCli(["ingest", "prepare", path, "--json"], {
+      env: {
+        ...sandbox.env,
+        OLED_OCR_BASE_URL: DEAD_OCR_BASE_URL,
+        OLED_OCR_MODEL: "test-ocr-model",
+      },
+    });
+    expect(code).toBe(3); // EXIT.NOT_READY
+    const { error } = JSON.parse(stderr.trim());
+    expect(error.code).toBe("E_NOT_READY");
+    expect(error.hint).toContain("--no-ocr");
+  }, 30000);
+});
+
+describe.skipIf(!liveOcr)("ingest prepare against an OCR server (live OCR endpoint)", () => {
+  it(
+    "reads a scan through the configured endpoint and names the model",
+    async () => {
+      const path = stage("statements/scan-ocr.pdf", pdfOf(["image"]));
+
+      const { stdout, code } = await runCli(["ingest", "prepare", path, "--json"], {
+        env: liveOcrEnv(sandbox.env),
+      });
+      expect(code).toBe(0);
+      const obj = JSON.parse(stdout.trim());
+      expect(obj).toMatchObject({
+        kind: "text",
+        source: "ocr",
+        ocr_model: requireLiveOcr().model,
+        page_count: 1,
+        failed_pages: [],
+      });
+      expect(readFileSync(obj.document, "utf8").startsWith("--- page 1 ---\n")).toBe(true);
+    },
+    240_000,
+  );
+});
+
+describe("ingest list (subprocess)", () => {
+  it("lists images, skips file types it cannot read, and reports an oversized file as unreadable", async () => {
+    stage("bucket/receipt.png", samplePng());
+    stage("bucket/notes.docx", Buffer.from("PK"));
+    const huge = join(sandbox.dataDir, "bucket", "huge.pdf");
+    closeSync(openSync(huge, "w"));
+    truncateSync(huge, MAX_SOURCE_BYTES + 1024);
+
+    const { stdout, code } = await runCli(["ingest", "list", "--regex", "^bucket/", "--json"]);
+    expect(code).toBe(0);
+    const objs = parseNdjson(stdout);
+    const files = objs.filter((o) => o.type === "file");
+    expect(files.map((f) => f.rel_path).sort()).toEqual(["bucket/huge.pdf", "bucket/receipt.png"]);
+
+    const oversized = files.find((f) => f.rel_path === "bucket/huge.pdf");
+    expect(oversized.status).toBe("unreadable");
+    expect(oversized.note).toBeTruthy();
+    expect(objs.find((o) => o.type === "summary").unreadable).toBe(1);
   }, 30000);
 });
 
 describe("vault (subprocess)", () => {
-  it("add/list/rm round-trips via --password-stdin without leaking plaintext", async () => {
+  it("add/list/rm round-trips a piped password without leaking plaintext", async () => {
     const pattern = "^kbank-.*";
 
-    const add = await runCli(["vault", "add", pattern, "--password-stdin", "--json"], {
+    const add = await runCli(["vault", "add", pattern, "--json"], {
       stdin: "hunter2",
     });
     expect(add.code).toBe(0);
@@ -490,7 +642,6 @@ describe("vault (subprocess)", () => {
     const rows = parseNdjson(list.stdout);
     const row = rows.find((r) => r.pattern === pattern);
     expect(row).toBeDefined();
-    // Never exposes the password (neither plaintext nor the encrypted column).
     expect(JSON.stringify(row)).not.toContain("hunter2");
     expect(row.password_encrypted).toBeUndefined();
 
@@ -501,12 +652,10 @@ describe("vault (subprocess)", () => {
     const list2 = await runCli(["vault", "list", "--json"]);
     const rows2 = parseNdjson(list2.stdout);
     expect(rows2.find((r) => r.pattern === pattern)).toBeUndefined();
-  }, 30000);
 
-  it("rm of a missing entry (with --yes) exits NOT_FOUND (5)", async () => {
-    const { code, stderr } = await runCli(["vault", "rm", "does-not-exist", "--yes", "--json"]);
-    expect(code).toBe(5); // EXIT.NOT_FOUND
-    expect(JSON.parse(stderr.trim()).error.code).toBe("E_NOT_FOUND");
+    const gone = await runCli(["vault", "rm", pattern, "--yes", "--json"]);
+    expect(gone.code).toBe(5); // EXIT.NOT_FOUND
+    expect(JSON.parse(gone.stderr.trim()).error.code).toBe("E_NOT_FOUND");
   }, 30000);
 });
 
@@ -522,10 +671,7 @@ describe("ingest fail (subprocess)", () => {
       db.close();
     }
 
-    /**
-     * cleanCache resolves OLED_CACHE_DIR/<fileId>; precreate it so the subprocess
-     * has something real to remove, mirroring what `ingest prepare` would leave behind.
-     */
+    // Precreate the cache subdir the subprocess would otherwise leave behind, so there's something real to remove.
     const cacheSubdir = join(sandbox.cacheDir, fileId);
     mkdirSync(cacheSubdir, { recursive: true });
     writeFileSync(join(cacheSubdir, "page-1.png"), "fake png bytes");

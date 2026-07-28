@@ -1,26 +1,13 @@
 /**
- * Two-stage integration test for the deterministic CLI harness.
- *
- * Stage 1 spawns `node dist/cli/index.js <cmd> --json` for every read-only
- * command against a throwaway env (temp HOME + OLED_DB_PATH/DATA_DIR/
- * CACHE_DIR) over an empty ledger, asserting NDJSON stdout/stderr, the
- * expected exit code, and no ANSI escapes.
- *
- * Stage 2 drives a full write-path lifecycle in its own isolated env:
- * vault-unlock an encrypted statement, ingest/commit, answer questions,
- * edit/delete transactions, adjust/merge/delete accounts, drop a file,
- * install the skill pack, update config — each step asserting on the
- * actual NDJSON shape.
- *
- * Run via `npx tsx scripts/integration.ts` (or `npm run integration`, which
- * builds first). This file builds `dist/` itself, so a direct invocation is
- * self-sufficient.
+ * Two-stage integration test for the CLI harness (stage 1: read-only sweep;
+ * stage 2: write-path lifecycle). Builds `dist/` itself, so `npx tsx
+ * scripts/integration.ts` is runnable directly with no separate build step.
  */
 import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, existsSync, rmSync, copyFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSandbox, registerProcessCleanup } from "../src/lib/sandbox.js";
+import { createSandbox, registerProcessCleanup } from "../fixtures/sandbox.js";
 
 const SCRIPT_DIR = dirname(fileURLToPath(new URL(import.meta.url)));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -34,15 +21,13 @@ registerProcessCleanup(() => {
 
 /**
  * Node only delivers signals like SIGINT between event loop turns, and
- * back-to-back synchronous `spawnSync` calls never yield one. This gives
- * registerProcessCleanup's handler a turn to run so Ctrl-C isn't stuck
- * until the whole script finishes.
+ * back-to-back synchronous `spawnSync` calls never yield one — this gives
+ * registerProcessCleanup's handler a turn to run.
  */
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-// eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b/;
 
 interface Result {
@@ -102,9 +87,15 @@ const READ_CASES: Case[] = [
     args: ["transactions", "delete", "tx:nonexistent", "--yes"],
     expectExit: 5,
   },
+  // Parse failures: commander's own plain text would fail the NDJSON check.
+  { label: "unknown option", args: ["ingest", "list", "--nope"], expectExit: 2 },
+  { label: "unknown command", args: ["bogus"], expectExit: 2 },
+  { label: "unknown subcommand", args: ["ingest", "bogus"], expectExit: 2 },
+  { label: "missing required argument", args: ["transactions", "show"], expectExit: 2 },
+  // A verbless noun: commander's help screen on stderr would fail the same check.
+  { label: "noun without a subcommand", args: ["vault"], expectExit: 2 },
 ];
 
-/** Every non-empty line must parse as JSON on its own (NDJSON). */
 function checkNdjson(text: string): string | null {
   const lines = text.split("\n").filter((l) => l.length > 0);
   for (const line of lines) {
@@ -204,16 +195,14 @@ function sh(ctx: Ctx, args: string[], opts: { stdin?: string } = {}): { stdout: 
   return out;
 }
 
-/** `sh()` plus an exit-0 assertion — the common case for every lifecycle step. */
 function shOk(ctx: Ctx, args: string[], opts: { stdin?: string } = {}): { stdout: string; stderr: string; code: number } {
   const r = sh(ctx, args, opts);
   assert(r.code === 0, `expected exit 0 for "${args.join(" ")}", got ${r.code}\nstderr: ${r.stderr}`);
   return r;
 }
 
-/** Rows for the main lifecycle batch (re-committed verbatim to prove
- *  idempotency). Hand-crafted, not parsed from the fixture PDF — the PDF
- *  only exercises discovery, vault unlock, and prepare. */
+/** Hand-crafted, not parsed from the fixture PDF (which only exercises
+ *  discovery/vault unlock/prepare); re-committed verbatim later to prove idempotency. */
 function lifecycleItems(): Record<string, unknown>[] {
   return [
     {
@@ -276,9 +265,7 @@ function stepConfigShowEncrypted(ctx: Ctx): void {
   assert(cfg.dbEncryptionKey?.set === true, `config show did not reflect the generated key: ${JSON.stringify(cfg)}`);
 }
 
-/** Committed demo statement (examples/corgi-claude/fixtures/): a synthetic, AES-256
- *  password-protected statement from a fictional bank. Must stay in the
- *  repo for this test to run. */
+/** AES-256 password-protected fixture; must stay in the repo for this test to run. */
 const FIXTURE_STATEMENT = join(
   REPO_ROOT,
   "examples",
@@ -298,7 +285,7 @@ function stepPlaceStatement(ctx: Ctx): void {
 }
 
 function stepVaultAddIngestList(ctx: Ctx): void {
-  const add = shOk(ctx, ["vault", "add", "^card-statement", "--password-stdin"], {
+  const add = shOk(ctx, ["vault", "add", "^card-statement"], {
     stdin: FIXTURE_PASSWORD,
   });
   const addResult = parseOne(add.stdout);
@@ -319,12 +306,13 @@ function stepIngestPrepare(ctx: Ctx): void {
   const result = parseOne(res.stdout);
   assert(typeof result.file_id === "string" && result.file_id.startsWith("sf:"), `bad file_id: ${JSON.stringify(result)}`);
   assert(result.page_count === 6, `expected page_count 6, got ${result.page_count}`);
+  assert(result.kind === "text", `expected the text layer to be extracted, got kind ${result.kind}`);
   const cacheDirResolved = resolve(ctx.cacheDir);
   assert(
     typeof result.document === "string" && result.document.startsWith(cacheDirResolved),
-    `expected a decrypted cache copy under ${cacheDirResolved}, got ${result.document}`,
+    `expected the extracted text under ${cacheDirResolved}, got ${result.document}`,
   );
-  assert(existsSync(result.document), `decrypted document missing on disk: ${result.document}`);
+  assert(existsSync(result.document), `extracted document missing on disk: ${result.document}`);
   ctx.fileId = result.file_id;
 }
 
@@ -376,6 +364,11 @@ function stepIngestReCommitDuplicate(ctx: Ctx): void {
     summary.duplicates === 3 && summary.posted === 0,
     `expected duplicates:3 posted:0, got ${JSON.stringify(summary)}`,
   );
+  // Sides come from the stored rows now, not from re-resolving the input.
+  assert(
+    results.every((r) => r.sides === undefined || r.sides.every((s: { how: string }) => s.how === "as_committed")),
+    `expected every duplicate side reported as_committed: ${JSON.stringify(results.map((r) => r.sides))}`,
+  );
 
   const status = parseOne(shOk(ctx, ["status"]).stdout);
   assert(status.counts.transactions === 3, `expected 3 transactions after the no-op re-pipe, got ${status.counts.transactions}`);
@@ -425,15 +418,10 @@ function stepTransactionsUpdateShow(ctx: Ctx): void {
 }
 
 /**
- * `transactions add` (strict, existing accounts) + `transactions dedupe --auto-merge`.
- *
- * `autoMergeStrictDuplicateTransactions` (src/ingest/dedup.ts)
- * only merges a group whose earliest member has both merchant_id AND
- * source_file_id. A manual `transactions add` row has neither, so it can't
- * strict-match anything — the manual add below only covers the "strict
- * create" case. The auto-merge assertion instead posts a second file-sourced
- * dog food row (same date/amount/accounts/merchant, different row_index) via
- * the same source file.
+ * Auto-merge (src/ingest/dedup.ts) only matches rows with both merchant_id
+ * AND source_file_id, which a manual `transactions add` row has neither of —
+ * so the manual add below only covers "strict create"; the auto-merge
+ * assertion instead posts a second file-sourced duplicate row.
  */
 function stepTransactionsAddAutoMerge(ctx: Ctx): void {
   const manual = shOk(ctx, [
@@ -637,11 +625,8 @@ const STAGE2_STEPS: { label: string; fn: (ctx: Ctx) => void }[] = [
 ];
 
 /**
- * Stage 2 uses its own fresh isolated env (distinct temp dir) rather than
- * stage 1's, because stage 1's read sweep already migrates a plaintext db
- * and `config --generate-key` refuses to key an existing db. All stage-2
- * calls share this one env object, so the encryption key `config` writes
- * into config.json is picked up by every later invocation.
+ * Own fresh env, not stage 1's: stage 1's read sweep already migrates a
+ * plaintext db, and `config --generate-key` refuses to key an existing one.
  */
 async function runStage2(): Promise<Result[]> {
   const sandbox = createSandbox("oled-integration-stage2-");

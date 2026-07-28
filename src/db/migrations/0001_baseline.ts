@@ -45,7 +45,6 @@ export function up(db: Database.Database): void {
       file_hash TEXT NOT NULL UNIQUE,
       mime TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('pending','ingested','failed')),
-      raw_text TEXT,
       ingested_at TEXT,
       source TEXT,
       error TEXT,

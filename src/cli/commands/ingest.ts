@@ -1,8 +1,8 @@
-import { resolve } from "path";
-import { Option } from "commander";
 import type { Command } from "commander";
 import {
+  EXIT,
   type Column,
+  type ExitCode,
   currentMode,
   emit,
   emitList,
@@ -14,49 +14,26 @@ import {
 } from "../output.js";
 import { openDb } from "../db.js";
 import { commitIngest } from "./ingest-commit.js";
-
 /**
- * `ingest`: list candidate files, prepare pages, commit extracted rows, mark
- * files done/failed. Heavy db/ingest imports are deferred inside each action
- * so non-db commands don't pay for libsql/mupdf at startup (see status.ts).
+ * The accepted-input facts, so help text can't drift from the enforcing table;
+ * source.ts avoids mupdf/libsql, so it's safe on the startup path.
  */
+import { MAX_SOURCE_BYTES, SUPPORTED_EXTS } from "../../extract/source.js";
+/**
+ * Types only, erased at compile time — the ingest modules load lazily inside
+ * each action, keeping libsql/mupdf off the startup path.
+ */
+import type { IngestEntry, PrepareOutcome, PrepareFailure } from "../../ingest/prepare.js";
 
-// Erased type query: the discovered-entry shape without pulling ingest/prepare
-// (and its heavy deps) onto the startup path.
-type IngestEntry = Awaited<ReturnType<typeof import("../../ingest/prepare.js").discoverFiles>>[number];
+type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
 
 const INGEST_COLUMNS: Column<IngestEntry>[] = [
   { header: "Status", value: (r) => r.status },
   { header: "Enc", value: (r) => (r.encrypted ? `yes(${r.vaultCandidates})` : "no") },
   { header: "File ID", value: (r) => r.fileId ?? "-" },
   { header: "Path", value: (r) => r.relPath },
+  { header: "Note", value: (r) => r.note ?? "" },
 ];
-
-/**
- * Parse a `--pages` spec into 0-based page indices for `prepareFile`.
- *   "all" / "" → undefined (every page)
- *   "1-5,8"    → [0,1,2,3,4,7]  (1-based input, converted to 0-based)
- * Malformed tokens raise CliError USAGE.
- */
-export function parsePagesSpec(spec: string): number[] | undefined {
-  const trimmed = spec.trim().toLowerCase();
-  if (!trimmed || trimmed === "all") return undefined;
-
-  const pages = new Set<number>();
-  for (const rawTok of trimmed.split(",")) {
-    const tok = rawTok.trim();
-    if (!tok) continue;
-    const m = tok.match(/^(\d+)(?:-(\d+))?$/);
-    if (!m) fail("USAGE", `invalid --pages token "${tok}" (expected N or N-M, 1-based)`);
-    const start = parseInt(m[1], 10);
-    const end = m[2] != null ? parseInt(m[2], 10) : start;
-    if (start < 1) fail("USAGE", `--pages values are 1-based; "${tok}" is out of range`);
-    if (end < start) fail("USAGE", `invalid --pages range "${tok}" (end before start)`);
-    for (let p = start; p <= end; p++) pages.add(p - 1);
-  }
-  if (pages.size === 0) return undefined;
-  return [...pages].sort((a, b) => a - b);
-}
 
 interface ListIngestOpts {
   regex?: string;
@@ -76,7 +53,13 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
   }
 
   const entries = await discoverFiles(db, { regex });
-  const counts = { new: 0, pending: 0, ingested: 0, failed: 0 };
+  const counts: Record<IngestEntry["status"], number> = {
+    new: 0,
+    pending: 0,
+    ingested: 0,
+    failed: 0,
+    unreadable: 0,
+  };
   for (const e of entries) counts[e.status]++;
   const total = entries.length;
 
@@ -92,6 +75,7 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
         status: e.status,
         encrypted: e.encrypted,
         vault_candidates: e.vaultCandidates,
+        note: e.note ?? null,
       });
     }
     emitSummary({ ...counts, total });
@@ -101,7 +85,7 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
   emitList(entries, INGEST_COLUMNS);
   if (mode.tty) {
     process.stdout.write(
-      `\n${counts.new} new, ${counts.pending} pending, ${counts.ingested} ingested, ${counts.failed} failed (${total} total)\n`,
+      `\n${counts.new} new, ${counts.pending} pending, ${counts.ingested} ingested, ${counts.failed} failed, ${counts.unreadable} unreadable (${total} total)\n`,
     );
   }
 }
@@ -109,84 +93,82 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
 interface PrepareIngestOpts {
   passwordStdin?: boolean;
   force?: boolean;
-  format?: string;
-  dpi?: string;
-  pages?: string;
-  out?: string;
+  rescan?: boolean;
+  /** commander's `--no-ocr` negation: false only when the flag was passed. */
+  ocr?: boolean;
 }
 
-// Mirrors DEFAULT_DPI in ingest/pdf.ts (not exported), reported back so the
-// caller knows the resolution used when rasterizing to png.
-const DEFAULT_DPI = 150;
+const PASSWORD_HINT =
+  "pipe the password with --password-stdin, or store it once via `oled vault add <pattern>`";
+
+const ACCEPTED_EXTS = SUPPORTED_EXTS.join(" ");
+const SIZE_LIMIT = `${MAX_SOURCE_BYTES / (1024 * 1024)} MB`;
+
+const PREPARE_FAILURES: Record<PrepareFailure, { code: ExitCode; hint: string }> = {
+  not_found: { code: "NOT_FOUND", hint: "run `oled ingest list --json` to see what is discoverable" },
+  unsupported_extension: {
+    code: "USAGE",
+    hint: `supported: ${ACCEPTED_EXTS} — export other formats first`,
+  },
+  kind_mismatch: { code: "USAGE", hint: "the bytes disagree with the extension; re-export or rename" },
+  too_large: {
+    code: "INVALID",
+    hint: `the limit is ${SIZE_LIMIT} — split the file or export it smaller`,
+  },
+  unreadable: { code: "NOT_FOUND", hint: "check the path and its permissions" },
+  pdf_unreadable: { code: "INVALID", hint: "the PDF may be corrupt; re-download or re-export it" },
+  password_required: { code: "INPUT_REQUIRED", hint: PASSWORD_HINT },
+  wrong_password: { code: "INPUT_REQUIRED", hint: PASSWORD_HINT },
+  ocr_unreachable: { code: "NOT_READY", hint: "start the OCR server, or re-run with --no-ocr" },
+  ocr_rejected: {
+    code: "NOT_READY",
+    hint: "check the model against `oled doctor --json`, or re-run with --no-ocr",
+  },
+};
+
+/** What each route adds to the shared head: a document to read, or page images. */
+const PREPARE_PAYLOAD: {
+  [K in PrepareSuccess["kind"]]: (
+    result: Extract<PrepareSuccess, { kind: K }>,
+  ) => Record<string, unknown>;
+} = {
+  text: (result) => ({
+    ...(result.model ? { ocr_model: result.model } : {}),
+    document: result.document,
+    pages: result.pages,
+    // Only the OCR route reads page by page, so only it can lose one.
+    ...(result.source === "ocr" ? { failed_pages: result.failedPages } : {}),
+  }),
+  images: (result) => ({ ...(result.dpi ? { dpi: result.dpi } : {}), pages: result.pages }),
+};
 
 async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise<void> {
   const db = await openDb();
-  const { resolveEntryPath, prepareFile, PasswordRequiredError } = await import(
-    "../../ingest/prepare.js"
-  );
-
-  if (resolveEntryPath(db, pathOrId) === null) {
-    fail("NOT_FOUND", `no ingest entry or file at "${pathOrId}"`);
-  }
-
-  if (opts.format && opts.format !== "png" && opts.format !== "pdf") {
-    fail("USAGE", `--format must be "png" or "pdf" (got "${opts.format}")`, {
-      hint: "use --format png for page images, --format pdf for the document",
-    });
-  }
-  const format = (opts.format ?? "pdf") as "png" | "pdf";
-
-  const pages = parsePagesSpec(opts.pages ?? "all");
-
-  let dpi: number | undefined;
-  if (opts.dpi != null) {
-    dpi = Number(opts.dpi);
-    if (!Number.isFinite(dpi) || dpi <= 0) fail("USAGE", `--dpi must be a positive number (got "${opts.dpi}")`);
-  }
+  const { prepareFile } = await import("../../ingest/prepare.js");
 
   const password = opts.passwordStdin ? await readSecretFromStdin() : undefined;
-  const outDir = opts.out ? resolve(opts.out) : undefined;
-
-  let result;
-  try {
-    result = await prepareFile(db, pathOrId, {
-      password,
-      force: !!opts.force,
-      format,
-      dpi,
-      pages,
-      outDir,
-    });
-  } catch (err) {
-    if (!(err instanceof PasswordRequiredError)) throw err;
-    if (err.reason === "wrong_password") {
-      fail("INPUT_REQUIRED", "incorrect password for encrypted PDF", {
-        hint: "pipe the correct password with --password-stdin, or store one via `oled vault add <pattern> --password-stdin`",
-      });
-    }
-    fail("INPUT_REQUIRED", "password required for encrypted PDF", {
-      hint: "pipe the password with --password-stdin, or store one via `oled vault add <pattern> --password-stdin`",
-    });
-  }
-
-  if (result.format === "pdf") {
-    emitObject({
-      file_id: result.fileId,
-      format: result.format,
-      document: result.document,
-      page_count: result.pageCount,
-      pages: result.pages,
-    });
-    return;
+  const result = await prepareFile(db, pathOrId, {
+    password,
+    force: !!opts.force,
+    rescan: !!opts.rescan,
+    noOcr: opts.ocr === false,
+  });
+  if (!result.ok) {
+    const { code, hint } = PREPARE_FAILURES[result.reason];
+    fail(code, result.message, { hint });
   }
 
   emitObject({
     file_id: result.fileId,
+    kind: result.kind,
+    source: result.source,
+    text_layer: result.textLayer,
     page_count: result.pageCount,
-    format: result.format,
-    dpi: dpi ?? DEFAULT_DPI,
-    pages: result.pages,
+    ...PREPARE_PAYLOAD[result.kind](result as never),
   });
+
+  // A page the endpoint could not read is a hole in the document, not a failed run.
+  if (result.kind === "text" && result.failedPages.length > 0) process.exitCode = EXIT.PARTIAL;
 }
 
 interface CompleteIngestOpts {
@@ -230,9 +212,9 @@ export function registerIngest(program: Command): void {
       "after",
       [
         "",
-        "Behavior: the statement pipeline, list files, prepare pages to read, commit rows, mark done or failed.",
-        "Typical flow: list, prepare <id>, read the returned document, then commit --file <sf:id> --input <batch>.",
-        "Locked PDFs exit 4: pass the password with --password-stdin, or store it once with vault add <pattern> --password-stdin. No PDF reader? prepare --format png returns page images to read.",
+        "Behavior: the statement pipeline, list the files waiting, prepare one for reading, commit its rows, mark it done or failed.",
+        "Typical flow: list, prepare <id>, read what prepare returns, commit --file <sf:id> with the rows on stdin (or --input <batch>), then done <sf:id>.",
+        `Accepts ${ACCEPTED_EXTS}, up to ${SIZE_LIMIT}. Locked PDFs exit 4: pass the password with --password-stdin, or store it once with vault add <pattern>.`,
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     );
@@ -245,15 +227,23 @@ export function registerIngest(program: Command): void {
 
   ingest
     .command("prepare <pathOrId>")
-    .description("Prepare a file for ingestion; returns the statement's document path to Read")
-    .option("--password-stdin", "read a password from stdin")
-    .option("--force", "overwrite existing prepared output")
-    .option("--format <fmt>", "output format: pdf (default) or png page images")
-    .option("--dpi <n>", "rasterization DPI for --format png (default 200)")
-    .addOption(
-      new Option("--pages <spec>", "page range to prepare (1-based, e.g. all | 1-5,8)").hideHelp(),
+    .description("Extract a statement file into text (or page images) to read")
+    .option("--password-stdin", "read the password for a locked PDF from stdin")
+    .option("--force", "re-register the file, dropping the prior ingest's rows and artifacts")
+    .option("--rescan", "ignore the text layer and read the page images instead")
+    .option("--no-ocr", "ignore the OCR server and return the page images to you")
+    .addHelpText(
+      "after",
+      [
+        "",
+        'Behavior: reads the file once and returns text whenever it can. A PDF carrying its own text layer is extracted directly. Otherwise the pages become images — a scan is rasterized, a photo is taken as it lies — and the OCR server reads them when one is configured (`oled config --ocr-url <url>`); with none configured they come back to you. The reader is named in source: "text-layer" or "ocr" when kind is "text", "raster" or "original" when kind is "images".',
+        'Output kind "text": one `document` path to read. Inside it, pages are separated by `--- page N ---` markers; cite the row\'s page as source_page on commit. Page numbers count from 1 everywhere — the markers, the pages[] entries, and source_page.',
+        'Output kind "images": one path per page under pages[], in order — read them yourself.',
+        "Escape hatches: --rescan ignores a garbled text layer and reads the pages instead; --no-ocr ignores the OCR server and returns the page images. Both together always return images.",
+        "Exits: 2 the file type is not supported, 3 the OCR server is misconfigured or unreachable, 4 the PDF needs a password, 5 nothing at that path or id, 6 the file is too large or corrupt, 7 the OCR server failed on some pages — each carries a `[page N: OCR failed]` line in the document and is listed in failed_pages; re-run with --no-ocr to read those pages yourself.",
+        "Example: oled ingest prepare statement.pdf --json",
+      ].join("\n"),
     )
-    .option("--out <dir>", "output directory")
     .action(runAction(prepareIngest));
 
   ingest

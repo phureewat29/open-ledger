@@ -1,100 +1,96 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  mkdtempSync,
+  closeSync,
+  existsSync,
   mkdirSync,
-  writeFileSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
-  existsSync,
-  statSync,
   rmSync,
-} from "fs";
-import { tmpdir } from "os";
-import { resolve } from "path";
-import Database from "libsql";
-import { migrate } from "../db/schema.js";
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import type Database from "libsql";
 import { generateKey } from "../db/encryption.js";
 import { config } from "../config.js";
 import { createAccount } from "../accounts/accounts.js";
 import { upsertMerchant } from "../db/queries/merchants.js";
 import { insertTransaction, countTransactionsBySourceFile } from "../db/queries/transactions.js";
 import { findFileById } from "../db/queries/files.js";
-import { savePassword } from "./pdf.js";
+import { upsertPassword } from "../db/queries/vault.js";
+import { PAGE_RENDER } from "../extract/extract.js";
+import { MAX_SOURCE_BYTES, loadSource, type LoadedSource } from "../extract/source.js";
 import {
-  discoverFiles,
-  registerPendingFile,
-  prepareFile,
-  resolveEntryPath,
+  corruptPdf,
+  encryptedPdf,
+  mixedPdf,
+  scanPdf,
+  textPdf,
+} from "../../fixtures/pdf.js";
+import { samplePng } from "../../fixtures/images.js";
+import { freshDb } from "../../fixtures/db.js";
+import {
+  DEAD_OCR_BASE_URL,
+  LIVE_PAGE_TIMEOUT_MS,
+  liveOcr,
+  requireLiveOcr,
+  requireLiveOcrSource,
+} from "../../fixtures/ocr-endpoint.js";
+import {
   cleanCache,
-  PasswordRequiredError,
+  discoverFiles,
+  prepareFile,
+  registerPendingFile,
+  resolveEntryPath,
 } from "./prepare.js";
-
-function minimalPdf(): Buffer {
-  const header = "%PDF-1.4\n";
-  const o1 = "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
-  const o2 = "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
-  const o3 =
-    "3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n";
-  const offset1 = header.length;
-  const offset2 = offset1 + o1.length;
-  const offset3 = offset2 + o2.length;
-  const xrefStart = offset3 + o3.length;
-  const xref =
-    `xref\n0 4\n` +
-    `0000000000 65535 f \n` +
-    `${String(offset1).padStart(10, "0")} 00000 n \n` +
-    `${String(offset2).padStart(10, "0")} 00000 n \n` +
-    `${String(offset3).padStart(10, "0")} 00000 n \n`;
-  const trailer = `trailer<</Size 4/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return Buffer.from(header + o1 + o2 + o3 + xref + trailer, "latin1");
-}
-
-async function encryptedPdf(password: string): Promise<Buffer> {
-  const mupdf = await import("mupdf");
-  const doc = mupdf.Document.openDocument(minimalPdf(), "application/pdf");
-  try {
-    const out = doc.saveToBuffer(
-      `encrypt=aes-256,user-password=${password},owner-password=${password}`,
-    );
-    return Buffer.from(out.asUint8Array());
-  } finally {
-    doc.destroy();
-  }
-}
-
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
-  return db;
-}
 
 let dataDir: string;
 let cacheDir: string;
-let outDir: string;
+let outsideDir: string; // outside the data dir, for the cwd-relative resolution case
+const png = samplePng();
 
 beforeEach(() => {
   dataDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-data-"));
   cacheDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-cache-"));
-  outDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-out-"));
+  outsideDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-outside-"));
   config.dataDir = dataDir;
   config.dbEncryptionKey = generateKey();
+  // A developer's own OLED_OCR_* env would otherwise route these tests at a live endpoint.
+  config.ocrBaseUrl = "";
+  config.ocrModel = "";
+  config.ocrApiKey = "";
   process.env.OLED_CACHE_DIR = cacheDir;
 });
 
 afterEach(() => {
-  for (const dir of [dataDir, cacheDir, outDir]) {
+  for (const dir of [dataDir, cacheDir, outsideDir]) {
     rmSync(dir, { recursive: true, force: true });
   }
   delete process.env.OLED_CACHE_DIR;
 });
 
+function write(name: string, bytes: Buffer): string {
+  const path = resolve(dataDir, name);
+  writeFileSync(path, bytes);
+  return path;
+}
+
+function loaded(path: string): LoadedSource {
+  const source = loadSource(path);
+  if (!source.ok) throw new Error(`fixture is not loadable: ${source.message}`);
+  return source.value;
+}
+
 describe("discoverFiles", () => {
   it("walks recursively, dedups by hash, and flags known files", async () => {
     const db = freshDb();
-    writeFileSync(resolve(dataDir, "a.pdf"), minimalPdf());
+    write("a.pdf", textPdf());
     mkdirSync(resolve(dataDir, "sub"), { recursive: true });
-    writeFileSync(resolve(dataDir, "sub", "b.pdf"), minimalPdf());
+    write("sub/b.pdf", textPdf());
 
     const first = await discoverFiles(db);
     expect(first).toHaveLength(2);
@@ -103,7 +99,7 @@ describe("discoverFiles", () => {
     expect(first.map((e) => e.relPath).sort()).toEqual(["a.pdf", "sub/b.pdf"]);
 
     const target = first.find((e) => e.relPath === "a.pdf")!;
-    const { fileId } = registerPendingFile(db, target.path);
+    const { fileId } = registerPendingFile(db, loaded(target.path));
 
     const second = await discoverFiles(db);
     const known = second.find((e) => e.relPath === "a.pdf")!;
@@ -113,38 +109,83 @@ describe("discoverFiles", () => {
 
   it("filters by regex against the relative path", async () => {
     const db = freshDb();
-    writeFileSync(resolve(dataDir, "a.pdf"), minimalPdf());
+    write("a.pdf", textPdf());
     mkdirSync(resolve(dataDir, "sub"), { recursive: true });
-    writeFileSync(resolve(dataDir, "sub", "b.pdf"), minimalPdf());
+    write("sub/b.pdf", textPdf());
 
     const entries = await discoverFiles(db, { regex: /^sub\// });
     expect(entries.map((e) => e.relPath)).toEqual(["sub/b.pdf"]);
   });
 
-  it("reports encryption and matching vault candidates", async () => {
+  it("lists images alongside PDFs and ignores extensions it cannot read", async () => {
     const db = freshDb();
-    writeFileSync(resolve(dataDir, "kbank.pdf"), await encryptedPdf("secret"));
-    savePassword(db, "^kbank.*", "secret", config.dbEncryptionKey);
+    write("statement.pdf", textPdf());
+    write("receipt.png", png);
+    write("notes.docx", Buffer.from("PK"));
+
+    const entries = await discoverFiles(db);
+    expect(entries.map((e) => e.relPath).sort()).toEqual(["receipt.png", "statement.pdf"]);
+  });
+
+  it("reports an oversized file as unreadable instead of sinking the walk", async () => {
+    const db = freshDb();
+    write("small.pdf", textPdf());
+    const huge = resolve(dataDir, "huge.pdf");
+    closeSync(openSync(huge, "w"));
+    truncateSync(huge, MAX_SOURCE_BYTES + 1024);
+
+    const entries = await discoverFiles(db);
+    const big = entries.find((e) => e.relPath === "huge.pdf")!;
+    expect(big).toMatchObject({ status: "unreadable", hash: null, fileId: null });
+    expect(big.note).toContain(String(MAX_SOURCE_BYTES));
+    expect(entries.find((e) => e.relPath === "small.pdf")!.status).toBe("new");
+  });
+
+  it("reports a PDF it cannot open as unreadable, naming the reason", async () => {
+    const db = freshDb();
+    write("broken.pdf", corruptPdf());
 
     const [entry] = await discoverFiles(db);
-    expect(entry.encrypted).toBe(true);
-    expect(entry.vaultCandidates).toBe(1);
+    expect(entry.status).toBe("unreadable");
+    expect(entry.note).toBeTruthy();
+  });
+
+  it("reports encryption and matching vault candidates, and never asks the vault about an image", async () => {
+    const db = freshDb();
+    write("kbank.pdf", await encryptedPdf("secret"));
+    write("kbank.png", png);
+    upsertPassword(db, "^kbank.*", "secret", config.dbEncryptionKey);
+
+    const entries = await discoverFiles(db);
+    expect(entries.find((e) => e.relPath === "kbank.pdf")).toMatchObject({
+      encrypted: true,
+      vaultCandidates: 1,
+    });
+    expect(entries.find((e) => e.relPath === "kbank.png")).toMatchObject({
+      encrypted: false,
+      vaultCandidates: 0,
+    });
   });
 });
 
 describe("registerPendingFile", () => {
   it("inserts a pending row and dedups on re-register", () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const source = loaded(write("a.pdf", textPdf()));
 
-    const first = registerPendingFile(db, path);
+    const first = registerPendingFile(db, source);
     expect(first.alreadyKnown).toBe(false);
     expect(first.fileId.startsWith("sf:")).toBe(true);
     expect(findFileById(db, first.fileId)?.status).toBe("pending");
 
-    const second = registerPendingFile(db, path);
+    const second = registerPendingFile(db, source);
     expect(second).toEqual({ fileId: first.fileId, alreadyKnown: true });
+  });
+
+  it("records the real mime, so an image is not filed as a PDF", () => {
+    const db = freshDb();
+    const { fileId } = registerPendingFile(db, loaded(write("receipt.png", png)));
+    expect(findFileById(db, fileId)?.mime).toBe("image/png");
   });
 });
 
@@ -152,11 +193,8 @@ describe("resolveEntryPath", () => {
   it("resolves a rel_path (as emitted by `ingest list`) relative to the data dir, regardless of cwd", () => {
     const db = freshDb();
     mkdirSync(resolve(dataDir, "sub"), { recursive: true });
-    const path = resolve(dataDir, "sub", "b.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("sub/b.pdf", textPdf());
 
-    // cwd is somewhere else entirely (an agent's shell rarely sits in the
-    // data dir) — this is the exact failure a live agent session hit.
     const elsewhere = mkdtempSync(resolve(tmpdir(), "oled-ingest-elsewhere-"));
     const prevCwd = process.cwd();
     process.chdir(elsewhere);
@@ -170,22 +208,18 @@ describe("resolveEntryPath", () => {
 
   it("still resolves an absolute path", () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("a.pdf", textPdf());
     expect(resolveEntryPath(db, path)).toBe(path);
   });
 
   it("still resolves a cwd-relative path when it isn't rooted under the data dir", () => {
     const db = freshDb();
-    const path = resolve(outDir, "c.pdf");
-    writeFileSync(path, minimalPdf());
+    writeFileSync(resolve(outsideDir, "c.pdf"), textPdf());
     const prevCwd = process.cwd();
-    process.chdir(outDir);
+    process.chdir(outsideDir);
     try {
-      /**
-       * Compare against process.cwd(), not the pre-chdir `outDir` string — on macOS the tmp
-       * dir is itself a symlink, so chdir resolves it to its real path (`/private/var/...` vs `/var/...`).
-       */
+      // Compare against process.cwd(), not the pre-chdir string — macOS tmpdir is a
+      // symlink, so chdir resolves it to its real path (/private/var/... vs /var/...).
       expect(resolveEntryPath(db, "c.pdf")).toBe(resolve(process.cwd(), "c.pdf"));
     } finally {
       process.chdir(prevCwd);
@@ -194,9 +228,8 @@ describe("resolveEntryPath", () => {
 
   it("still resolves a sf: file id", () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
-    const { fileId } = registerPendingFile(db, path);
+    const path = write("a.pdf", textPdf());
+    const { fileId } = registerPendingFile(db, loaded(path));
     expect(resolveEntryPath(db, fileId)).toBe(path);
   });
 
@@ -207,155 +240,297 @@ describe("resolveEntryPath", () => {
   });
 });
 
-describe("prepareFile", () => {
-  it("rasterizes requested pages to PNGs (resolving a fileId)", async () => {
+describe("prepareFile: text route", () => {
+  it("writes one document.txt (0600, in a 0700 dir) with a marker per page", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
-    const { fileId } = registerPendingFile(db, path);
+    const path = write("a.pdf", mixedPdf());
 
-    const result = await prepareFile(db, fileId, {
-      format: "png",
-      pages: [0],
-      dpi: 72,
-      outDir,
+    const outcome = await prepareFile(db, path);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok || outcome.kind !== "text") return;
+
+    expect(outcome).toMatchObject({
+      kind: "text",
+      source: "text-layer",
+      textLayer: "partial",
+      pageCount: 3,
+      failedPages: [],
     });
-    expect(result.format).toBe("png");
-    expect(result.pageCount).toBe(1);
-    expect(result.pages).toHaveLength(1);
-    expect(result.pages[0].page).toBe(0);
-    expect(result.pages[0].path).toBe(resolve(outDir, "p0.png"));
+    expect(outcome.document).toBe(resolve(cacheDir, outcome.fileId, "document.txt"));
+    expect(statSync(outcome.document).mode & 0o777).toBe(0o600);
+    expect(statSync(resolve(cacheDir, outcome.fileId)).mode & 0o777).toBe(0o700);
 
-    const png = readFileSync(result.pages[0].path);
-    expect(png[0]).toBe(0x89);
-    expect(png.subarray(1, 4).toString("latin1")).toBe("PNG");
+    const text = readFileSync(outcome.document, "utf8");
+    expect(text).toContain("--- page 1 ---");
+    expect(text).toContain("--- page 3 ---");
+    expect(text).toContain("1234.56 THB DEBIT ACME");
+    expect(outcome.pages[0]).toEqual({ page: 1, chars: expect.any(Number) });
+    expect(outcome.pages[0].chars).toBeGreaterThan(0);
   });
 
-  it("defaults to every page when none are requested (png fallback)", async () => {
+  it("resolves a file id as readily as a path", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("a.pdf", textPdf());
+    const { fileId } = registerPendingFile(db, loaded(path));
 
-    const result = await prepareFile(db, path, { format: "png", dpi: 72, outDir });
-    expect(result.pages.map((p) => p.page)).toEqual([0]);
+    const outcome = await prepareFile(db, fileId);
+    expect(outcome.ok && outcome.fileId).toBe(fileId);
   });
 
-  it("defaults to pdf format when none is specified", async () => {
+  it("extracts a locked PDF's text without ever writing the statement itself to disk", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("kbank.pdf", await encryptedPdf("secret"));
 
-    const result = await prepareFile(db, path, { outDir });
-    expect(result.format).toBe("pdf");
+    const outcome = await prepareFile(db, path, { password: "secret" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok || outcome.kind !== "text") return;
+
+    expect(readFileSync(outcome.document, "utf8")).toContain("--- page 1 ---");
+    expect(readdirSync(resolve(cacheDir, outcome.fileId))).toEqual(["document.txt"]);
   });
 
-  it("returns the original data-dir path as the document for a non-encrypted pdf, writing nothing to the cache", async () => {
+  it("purges a prior run's artifacts before writing its own", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("a.pdf", textPdf());
 
-    const result = await prepareFile(db, path, { format: "pdf", outDir });
-    expect(result.format).toBe("pdf");
-    expect(result.document).toBe(path);
-    expect(result.pages).toEqual([{ page: 0, path }]);
-    // Nothing was written under either the explicit outDir or the fileId's cache dir.
-    expect(readdirSync(outDir)).toEqual([]);
-    expect(existsSync(resolve(cacheDir, result.fileId))).toBe(false);
+    const first = await prepareFile(db, path);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const dir = resolve(cacheDir, first.fileId);
+    writeFileSync(resolve(dir, "p9.png"), "stale");
+
+    const second = await prepareFile(db, path);
+    expect(second.ok && second.fileId).toBe(first.fileId);
+    expect(readdirSync(dir)).toEqual(["document.txt"]);
   });
 
-  it("writes a decrypted document.pdf (mode 0600) to the cache dir for an encrypted pdf, purged by cleanCache", async () => {
+});
+
+describe("prepareFile: image route", () => {
+  it("hands back an image by its own path, writing nothing", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "kbank.pdf");
-    writeFileSync(path, await encryptedPdf("secret"));
+    const path = write("receipt.png", png);
 
-    // No outDir -> lands under getCacheDir()/<fileId>, like the png fallback.
-    const result = await prepareFile(db, path, { format: "pdf", password: "secret" });
-    const expectedDir = resolve(cacheDir, result.fileId);
-    expect(result.format).toBe("pdf");
-    expect(result.document).toBe(resolve(expectedDir, "document.pdf"));
-    expect(result.pages).toEqual([{ page: 0, path: result.document }]);
-    expect(readFileSync(result.document!).subarray(0, 4).toString("latin1")).toBe("%PDF");
-    expect(statSync(result.document!).mode & 0o777).toBe(0o600);
-
-    const removed = cleanCache(result.fileId);
-    expect(removed.removed).toEqual([expectedDir]);
-    expect(existsSync(result.document!)).toBe(false);
+    const outcome = await prepareFile(db, path);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome).toMatchObject({
+      kind: "images",
+      source: "original",
+      textLayer: "none",
+      pageCount: 1,
+      pages: [{ page: 1, path }],
+    });
+    expect(outcome.kind === "images" && outcome.dpi).toBeUndefined();
+    expect(existsSync(resolve(cacheDir, outcome.fileId))).toBe(false);
   });
 
-  it("force re-registers and cascades away the prior ingest's transactions", async () => {
+  it("rasterizes a scan to 1-based p{N}.png files (0600) when no endpoint is configured", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("scan.pdf", scanPdf());
+
+    const outcome = await prepareFile(db, path);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok || outcome.kind !== "images") return;
+    expect(outcome).toMatchObject({ source: "raster", textLayer: "none", dpi: PAGE_RENDER.dpi });
+    expect(outcome.pages).toEqual([{ page: 1, path: resolve(cacheDir, outcome.fileId, "p1.png") }]);
+
+    const bytes = readFileSync(outcome.pages[0].path);
+    expect(bytes.subarray(1, 4).toString("latin1")).toBe("PNG");
+    expect(statSync(outcome.pages[0].path).mode & 0o777).toBe(0o600);
+  });
+
+  it("--rescan ignores a good text layer and rasterizes instead", async () => {
+    const db = freshDb();
+    const path = write("a.pdf", textPdf());
+
+    const outcome = await prepareFile(db, path, { rescan: true });
+    expect(outcome.ok && outcome.kind).toBe("images");
+    expect(outcome.ok && outcome.textLayer).toBe("none");
+  });
+
+});
+
+describe("prepareFile: ocr route", () => {
+  it("stays on the agent route when a model is set but no url is", async () => {
+    const db = freshDb();
+    const path = write("scan.pdf", scanPdf());
+    config.ocrModel = "test-ocr-model";
+
+    const outcome = await prepareFile(db, path);
+    expect(outcome).toMatchObject({ ok: true, kind: "images", source: "raster" });
+  });
+});
+
+describe.skipIf(!liveOcr)("prepareFile: ocr route (live OCR endpoint)", () => {
+  it(
+    "reads a scan through the endpoint, naming the model that read it",
+    async () => {
+      const db = freshDb();
+      const path = write("scan.pdf", scanPdf());
+      Object.assign(config, requireLiveOcrSource());
+
+      const outcome = await prepareFile(db, path);
+      // Named before the narrowing guard, so a silent fallback to the raster route can't pass this vacuously.
+      expect(outcome.ok && outcome.kind).toBe("text");
+      if (!outcome.ok || outcome.kind !== "text") return;
+      expect(outcome).toMatchObject({
+        source: "ocr",
+        model: requireLiveOcr().model,
+        failedPages: [],
+      });
+      expect(readFileSync(outcome.document, "utf8").startsWith("--- page 1 ---\n")).toBe(true);
+    },
+    LIVE_PAGE_TIMEOUT_MS,
+  );
+
+  it(
+    "drops a prior run's document.txt when this run returns the image untouched",
+    async () => {
+      const db = freshDb();
+      const path = write("receipt.png", png);
+      Object.assign(config, requireLiveOcrSource());
+
+      const first = await prepareFile(db, path);
+      expect(first.ok && first.kind).toBe("text");
+      if (!first.ok) return;
+      expect(existsSync(resolve(cacheDir, first.fileId, "document.txt"))).toBe(true);
+
+      const second = await prepareFile(db, path, { noOcr: true });
+      expect(second.ok && second.source).toBe("original");
+      expect(existsSync(resolve(cacheDir, first.fileId))).toBe(false);
+    },
+    LIVE_PAGE_TIMEOUT_MS,
+  );
+});
+
+describe("prepareFile: refusals", () => {
+  it("reports a missing path or id as not_found", async () => {
+    const db = freshDb();
+    const outcome = await prepareFile(db, "no/such/statement.pdf");
+    expect(outcome).toMatchObject({ ok: false, reason: "not_found" });
+  });
+
+  it("reports an extension it cannot read", async () => {
+    const db = freshDb();
+    const outcome = await prepareFile(db, write("notes.docx", Buffer.from("PK")));
+    expect(outcome).toMatchObject({ ok: false, reason: "unsupported_extension" });
+  });
+
+  it("reports bytes that disagree with the extension", async () => {
+    const db = freshDb();
+    const outcome = await prepareFile(db, write("mislabeled.pdf", png));
+    expect(outcome).toMatchObject({ ok: false, reason: "kind_mismatch" });
+  });
+
+  it("reports a PDF mupdf cannot open", async () => {
+    const db = freshDb();
+    const outcome = await prepareFile(db, write("broken.pdf", corruptPdf()));
+    expect(outcome).toMatchObject({ ok: false, reason: "pdf_unreadable" });
+  });
+
+  it("reports password_required for a locked PDF with no password to try", async () => {
+    const db = freshDb();
+    const outcome = await prepareFile(db, write("kbank.pdf", await encryptedPdf("secret")));
+    expect(outcome).toMatchObject({ ok: false, reason: "password_required" });
+  });
+
+  it("reports wrong_password for a password that does not open it", async () => {
+    const db = freshDb();
+    const path = write("kbank.pdf", await encryptedPdf("secret"));
+    const outcome = await prepareFile(db, path, { password: "nope" });
+    expect(outcome).toMatchObject({ ok: false, reason: "wrong_password" });
+  });
+});
+
+describe("prepareFile: --force", () => {
+  // A re-prepare needs something to lose.
+  function commitRow(db: Database.Database, fileId: string): void {
     createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
     createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-
-    const { fileId: oldId } = registerPendingFile(db, path);
     const merchant = upsertMerchant(db, { canonical_name: "Shop" });
     insertTransaction(db, {
       date: "2026-05-01",
       description: "Shop",
       merchant_id: merchant.id,
-      source_file_id: oldId,
+      source_file_id: fileId,
       debit_account_id: "expense",
       credit_account_id: "asset",
       amount: 1000,
       currency: "THB",
     });
-    expect(countTransactionsBySourceFile(db, oldId)).toBe(1);
+    expect(countTransactionsBySourceFile(db, fileId)).toBe(1);
+  }
 
-    const result = await prepareFile(db, path, { force: true, dpi: 72, outDir });
-    expect(result.fileId).not.toBe(oldId);
-    expect(findFileById(db, oldId)).toBeNull();
-    expect(countTransactionsBySourceFile(db, oldId)).toBe(0);
+  it("re-registers the bytes, cascading away the prior ingest's transactions and artifacts", async () => {
+    const db = freshDb();
+    const path = write("scan.pdf", scanPdf());
+
+    const first = await prepareFile(db, path);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const oldDir = resolve(cacheDir, first.fileId);
+    expect(existsSync(oldDir)).toBe(true);
+    commitRow(db, first.fileId);
+
+    const second = await prepareFile(db, path, { force: true });
+    expect(second.ok).toBe(true);
+    if (!second.ok || second.kind !== "images") return;
+    expect(second.fileId).not.toBe(first.fileId);
+    expect(findFileById(db, first.fileId)).toBeNull();
+    expect(countTransactionsBySourceFile(db, first.fileId)).toBe(0);
+    expect(existsSync(oldDir)).toBe(false);
+    expect(findFileById(db, second.fileId)?.status).toBe("pending");
+    expect(existsSync(second.pages[0].path)).toBe(true);
   });
 
-  it("throws password_required for an encrypted PDF with no password", async () => {
+  it("keeps the prior row and its transactions when the password does not open it", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "kbank.pdf");
-    writeFileSync(path, await encryptedPdf("secret"));
+    const path = write("kbank.pdf", await encryptedPdf("secret"));
+    // Registered without ever unlocking it, so no learned vault password can open the re-read.
+    const { fileId } = registerPendingFile(db, loaded(path));
+    commitRow(db, fileId);
 
-    await expect(prepareFile(db, path, { outDir })).rejects.toMatchObject({
-      name: "PasswordRequiredError",
-      reason: "password_required",
-    });
+    const forced = await prepareFile(db, path, { force: true, password: "nope" });
+    expect(forced).toMatchObject({ ok: false, reason: "wrong_password" });
+    expect(findFileById(db, fileId)?.status).toBe("pending");
+    expect(countTransactionsBySourceFile(db, fileId)).toBe(1);
   });
 
-  it("unlocks an encrypted PDF with the supplied password (png fallback still rasterizes)", async () => {
+  it("keeps the prior row and its transactions when the OCR endpoint is dead", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "kbank.pdf");
-    writeFileSync(path, await encryptedPdf("secret"));
+    const path = write("scan.pdf", scanPdf());
 
-    const result = await prepareFile(db, path, {
-      format: "png",
-      password: "secret",
-      dpi: 72,
-      outDir,
-    });
-    expect(result.format).toBe("png");
-    expect(result.pageCount).toBe(1);
-    expect(existsSync(result.pages[0].path)).toBe(true);
+    const first = await prepareFile(db, path);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    commitRow(db, first.fileId);
+
+    config.ocrBaseUrl = DEAD_OCR_BASE_URL;
+    config.ocrModel = "test-ocr-model";
+    const forced = await prepareFile(db, path, { force: true });
+    expect(forced).toMatchObject({ ok: false, reason: "ocr_unreachable" });
+    expect(findFileById(db, first.fileId)?.status).toBe("pending");
+    expect(countTransactionsBySourceFile(db, first.fileId)).toBe(1);
+    expect(existsSync(resolve(cacheDir, first.fileId))).toBe(true);
   });
 });
 
 describe("cleanCache", () => {
   it("purges one file's subdir and then the whole cache", async () => {
     const db = freshDb();
-    const path = resolve(dataDir, "a.pdf");
-    writeFileSync(path, minimalPdf());
+    const path = write("scan.pdf", scanPdf());
 
-    /**
-     * No outDir -> lands under getCacheDir()/<fileId> (redirected to tmp). format:"png" so a
-     * cache write actually happens (pdf's default is a no-write passthrough — see prepareFile tests).
-     */
-    const one = await prepareFile(db, path, { format: "png", dpi: 72 });
+    const one = await prepareFile(db, path);
+    expect(one.ok).toBe(true);
+    if (!one.ok) return;
     const oneDir = resolve(cacheDir, one.fileId);
     expect(existsSync(oneDir)).toBe(true);
 
-    const removedOne = cleanCache(one.fileId);
-    expect(removedOne.removed).toEqual([oneDir]);
+    expect(cleanCache(one.fileId).removed).toEqual([oneDir]);
     expect(existsSync(oneDir)).toBe(false);
 
-    await prepareFile(db, path, { format: "png", dpi: 72, force: true });
+    await prepareFile(db, path, { force: true });
     const removedAll = cleanCache();
     expect(removedAll.removed.length).toBeGreaterThan(0);
     expect(existsSync(cacheDir)).toBe(false);

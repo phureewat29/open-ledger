@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import Database from "libsql";
-import { migrate } from "../schema.js";
 import {
   countFiles,
   deleteFile,
@@ -12,13 +11,7 @@ import {
 import { createAccount } from "../../accounts/accounts.js";
 import { insertTransaction } from "./transactions.js";
 import { recordQuestion } from "./questions.js";
-
-function freshDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
-  return db;
-}
+import { freshDb } from "../../../fixtures/db.js";
 
 function insertFile(db: Database.Database, id: string, status: "pending" | "ingested" | "failed"): void {
   db.prepare(

@@ -1,70 +1,37 @@
-import { randomUUID } from "crypto";
-import {
-  readdirSync,
-  statSync,
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  rmSync,
-} from "fs";
-import { isAbsolute, resolve, relative, sep } from "path";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type Database from "libsql";
-import { config, getDataDir, getCacheDir } from "../config.js";
+import { config, getCacheDir, getDataDir } from "../config.js";
 import {
-  readPdf,
-  isEncrypted,
-  unlockNonInteractive,
-  rasterizePageN,
-  countPdfPages,
-  findCandidates,
-} from "./pdf.js";
-import { deleteFile, findFileById } from "../db/queries/files.js";
-import { tryExecute } from "../lib/result.js";
+  findFileByHash,
+  findFileById,
+  insertPendingFile,
+  replaceFile,
+  type PendingFileInput,
+} from "../db/queries/files.js";
+import { extractFile, type Extraction, type TextPage } from "../extract/extract.js";
+import { resolveOcr } from "../extract/ocr.js";
+import { isEncryptedPdf } from "../extract/pdf.js";
+import type { TextLayer } from "../extract/route.js";
+import { SOURCES, loadSource, type LoadedSource } from "../extract/source.js";
+import { tryExecute, type Result } from "../lib/result.js";
+import { findCandidates, unlockNonInteractive } from "./vault.js";
 
-type IngestStatus = "new" | "pending" | "ingested" | "failed";
+type IngestStatus = "new" | "pending" | "ingested" | "failed" | "unreadable";
 
-interface IngestEntry {
+export interface IngestEntry {
   path: string;
-  // Forward-slashed relative path from the data dir.
+  /** Forward-slashed relative path from the data dir. */
   relPath: string;
-  hash: string;
+  /** null when the bytes could not be read, so there is nothing to hash. */
+  hash: string | null;
   fileId: string | null;
   status: IngestStatus;
   encrypted: boolean;
   vaultCandidates: number;
+  note?: string;
 }
-
-interface PreparedPage {
-  page: number;
-  path: string;
-}
-
-export interface PrepareResult {
-  fileId: string;
-  pageCount: number;
-  format: "png" | "pdf";
-  /** Present for format:"pdf" — the document to Read directly (original path
-   *  when unencrypted, a decrypted cache copy when the source was encrypted). */
-  document?: string;
-  pages: PreparedPage[];
-}
-
-/** Thrown when a PDF is encrypted and neither the vault nor the caller's
- *  password unlocks it; the CLI maps `reason` to its own exit/prompt behavior. */
-export class PasswordRequiredError extends Error {
-  readonly reason: "password_required" | "wrong_password";
-  constructor(reason: "password_required" | "wrong_password") {
-    super(
-      reason === "wrong_password"
-        ? "Incorrect password for encrypted PDF."
-        : "Password required for encrypted PDF.",
-    );
-    this.name = "PasswordRequiredError";
-    this.reason = reason;
-  }
-}
-
-const SUPPORTED_EXTS = new Set([".pdf"]);
 
 interface WalkedFile {
   path: string;
@@ -87,27 +54,43 @@ function walk(dir: string, root: string, out: WalkedFile[]): void {
       continue;
     }
     if (!stat.value.isFile()) continue;
-
-    const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
-    if (!SUPPORTED_EXTS.has(ext)) continue;
+    if (!SOURCES[extname(entry).toLowerCase()]) continue;
 
     out.push({ path: full, relPath: relative(root, full).split(sep).join("/") });
   }
 }
 
-interface KnownRow {
-  id: string;
-  status: "pending" | "ingested" | "failed";
+interface Encryption {
+  encrypted: boolean;
+  vaultCandidates: number;
 }
 
-function findKnownByHash(db: Database.Database, hash: string): KnownRow | null {
-  return (
-    (db
-      .prepare(`SELECT id, status FROM files WHERE file_hash = ?`)
-      .get(hash) as KnownRow | undefined) ?? null
-  );
+const UNLOCKED: Encryption = { encrypted: false, vaultCandidates: 0 };
+
+/** Only a PDF can be locked, and only a PDF can be unopenable — an image needs neither probe. */
+async function encryptionOf(db: Database.Database, source: LoadedSource): Promise<Result<Encryption>> {
+  if (source.kind !== "pdf") return { ok: true, value: UNLOCKED };
+
+  const probe = await tryExecute(() => isEncryptedPdf(source.bytes));
+  if (!probe.ok) return probe;
+  if (!probe.value) return { ok: true, value: UNLOCKED };
+  return {
+    ok: true,
+    value: {
+      encrypted: true,
+      vaultCandidates: findCandidates(db, source.path, config.dbEncryptionKey).length,
+    },
+  };
 }
 
+function unreadableEntry(file: WalkedFile, note: string): IngestEntry {
+  return { ...file, hash: null, fileId: null, status: "unreadable", ...UNLOCKED, note };
+}
+
+/**
+ * A file this harness can't read becomes an `unreadable` row, rather than
+ * sinking the whole listing.
+ */
 export async function discoverFiles(
   db: Database.Database,
   opts: { regex?: RegExp } = {},
@@ -119,151 +102,296 @@ export async function discoverFiles(
   const entries: IngestEntry[] = [];
   for (const file of walked) {
     if (opts.regex && !opts.regex.test(file.relPath)) continue;
-    const loaded = readPdf(file.path);
-    const known = findKnownByHash(db, loaded.hash);
-    const encrypted = await isEncrypted(loaded.bytes);
-    const vaultCandidates = encrypted
-      ? findCandidates(db, file.path, config.dbEncryptionKey).length
-      : 0;
+
+    const loaded = loadSource(file.path);
+    if (!loaded.ok) {
+      entries.push(unreadableEntry(file, loaded.message));
+      continue;
+    }
+    const encryption = await encryptionOf(db, loaded.value);
+    if (!encryption.ok) {
+      entries.push(unreadableEntry(file, encryption.error));
+      continue;
+    }
+
+    const known = findFileByHash(db, loaded.value.hash);
     entries.push({
-      path: file.path,
-      relPath: file.relPath,
-      hash: loaded.hash,
+      ...file,
+      hash: loaded.value.hash,
       fileId: known?.id ?? null,
       status: known ? known.status : "new",
-      encrypted,
-      vaultCandidates,
+      ...encryption.value,
     });
   }
   return entries;
+}
+
+function newFileId(): string {
+  return `sf:${randomUUID()}`;
+}
+
+function pendingRow(source: LoadedSource, fileId: string): PendingFileInput {
+  return { id: fileId, path: source.path, file_hash: source.hash, mime: source.mime };
 }
 
 /** Pending row keyed by content hash, so re-registering the same bytes is a
  *  no-op that returns the existing id. */
 export function registerPendingFile(
   db: Database.Database,
-  absPath: string,
+  source: LoadedSource,
 ): { fileId: string; alreadyKnown: boolean } {
-  const loaded = readPdf(absPath);
-  const known = findKnownByHash(db, loaded.hash);
+  const known = findFileByHash(db, source.hash);
   if (known) return { fileId: known.id, alreadyKnown: true };
 
-  const fileId = `sf:${randomUUID()}`;
-  db.prepare(
-    `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
-  ).run(fileId, absPath, loaded.hash, loaded.mime);
+  const fileId = newFileId();
+  insertPendingFile(db, pendingRow(source, fileId));
   return { fileId, alreadyKnown: false };
 }
 
-interface PrepareOptions {
-  password?: string;
-  force?: boolean;
-  format?: "png" | "pdf";
-  dpi?: number;
-  // 0-based page indices; omit for every page.
-  pages?: number[];
-  outDir?: string;
-}
-
-/**
- * Resolves the entry path in order: absolute, data-dir-relative (what `ingest
- * list`'s `rel_path` emits), cwd-relative, then `sf:` file id. Returns null
- * when nothing matches.
- */
+/** Resolution order: absolute, data-dir-relative, cwd-relative, then `sf:` file id; null if none match. */
 export function resolveEntryPath(db: Database.Database, entryOrId: string): string | null {
-  // 1. Absolute path that exists as-is.
   if (isAbsolute(entryOrId) && existsSync(entryOrId)) return entryOrId;
 
-  // 2. Relative to the data dir — makes `rel_path` from `ingest list` work
-  //    regardless of the caller's cwd.
   const viaDataDir = resolve(getDataDir(), entryOrId);
   if (existsSync(viaDataDir)) return viaDataDir;
 
-  // 3. Relative to the current working directory (legacy behavior).
   const viaCwd = resolve(entryOrId);
   if (existsSync(viaCwd)) return viaCwd;
 
-  // 4. A file id.
   const byId = findFileById(db, entryOrId);
   if (byId) return byId.path;
 
   return null;
 }
 
+interface PrepareOptions {
+  password?: string;
+  /** Re-read the bytes and, once that succeeds, replace the prior row — dropping
+   *  its transactions, questions, and artifacts. */
+  force?: boolean;
+  /** Ignore the text layer, for garbled or junk layers. */
+  rescan?: boolean;
+  /** Ignore the OCR endpoint, and read the page images yourself. */
+  noOcr?: boolean;
+}
+
+/** Everything that can stop a prepare. The CLI maps each to an exit code and a hint. */
+export type PrepareFailure =
+  | "not_found"
+  | "unsupported_extension"
+  | "kind_mismatch"
+  | "too_large"
+  | "unreadable"
+  | "pdf_unreadable"
+  | "password_required"
+  | "wrong_password"
+  | "ocr_unreachable"
+  | "ocr_rejected";
+
+interface TextPageChars {
+  page: number;
+  chars: number;
+}
+
+interface ImagePagePath {
+  page: number;
+  path: string;
+}
+
+export type PrepareOutcome =
+  | {
+      ok: true;
+      fileId: string;
+      kind: "text";
+      source: "text-layer" | "ocr";
+      textLayer: TextLayer;
+      /** The model that read the pages, on the ocr route only. */
+      model?: string;
+      pageCount: number;
+      /** One file to read, pages separated by `--- page N ---` markers. */
+      document: string;
+      pages: TextPageChars[];
+      /** Pages whose text is a placeholder because the endpoint failed on them. */
+      failedPages: number[];
+    }
+  | {
+      ok: true;
+      fileId: string;
+      kind: "images";
+      source: "raster" | "original";
+      textLayer: TextLayer;
+      pageCount: number;
+      /** Present when the pages were rasterized from a PDF. */
+      dpi?: number;
+      pages: ImagePagePath[];
+    }
+  | { ok: false; reason: PrepareFailure; message: string };
+
+type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
+
+function replaceFileRow(
+  db: Database.Database,
+  priorId: string,
+  source: LoadedSource,
+  fileId: string,
+): void {
+  replaceFile(db, priorId, pendingRow(source, fileId));
+  cleanCache(priorId);
+}
+
+type UnlockedBytes =
+  | { ok: true; bytes: Buffer }
+  | {
+      ok: false;
+      reason: Extract<PrepareFailure, "pdf_unreadable" | "password_required" | "wrong_password">;
+      message: string;
+    };
+
+const UNLOCK_FAILED: Record<"password_required" | "wrong_password", string> = {
+  password_required: "the PDF is locked and no stored password opened it",
+  wrong_password: "the supplied password did not open the PDF",
+};
+
+/** Images are never locked; decrypted PDF bytes stay in memory — only extracted text is written to disk. */
+async function readableBytes(
+  db: Database.Database,
+  source: LoadedSource,
+  password?: string,
+): Promise<UnlockedBytes> {
+  if (source.kind !== "pdf") return { ok: true, bytes: source.bytes };
+
+  // Passes an already-unlocked source through untouched; throws on bytes mupdf can't open at all.
+  const attempt = await tryExecute(() =>
+    unlockNonInteractive(db, source.bytes, source.path, { password }),
+  );
+  if (!attempt.ok) return { ok: false, reason: "pdf_unreadable", message: attempt.error };
+
+  const unlocked = attempt.value;
+  if (!unlocked.ok) {
+    return { ok: false, reason: unlocked.reason, message: UNLOCK_FAILED[unlocked.reason] };
+  }
+  return { ok: true, bytes: unlocked.decrypted };
+}
+
+const DOCUMENT_FILE = "document.txt";
+
+/** Markers give every row a 1-based page to cite as `source_page`. */
+function documentText(pages: TextPage[]): string {
+  return `${pages.map((page) => `--- page ${page.page} ---\n${page.text}`).join("\n\n")}\n`;
+}
+
+interface WriteTarget {
+  fileId: string;
+  dir: string;
+  /** The input file's own path — what an untouched image page cites. */
+  sourcePath: string;
+}
+
+/** Rebuilt per prepare, so a prior run's artifacts can never be mistaken for this one's. */
+function freshDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+}
+
+function writeDocument(
+  extraction: Extract<Extraction, { kind: "text" }>,
+  target: WriteTarget,
+): PrepareSuccess {
+  freshDir(target.dir);
+  const document = resolve(target.dir, DOCUMENT_FILE);
+  writeFileSync(document, documentText(extraction.pages), { mode: 0o600 });
+  return {
+    ok: true,
+    fileId: target.fileId,
+    kind: "text",
+    source: extraction.source,
+    textLayer: extraction.textLayer,
+    model: extraction.model,
+    pageCount: extraction.pages.length,
+    document,
+    pages: extraction.pages.map((page) => ({ page: page.page, chars: page.text.length })),
+    failedPages: extraction.failedPages,
+  };
+}
+
+function writePages(
+  extraction: Extract<Extraction, { kind: "images" }>,
+  target: WriteTarget,
+): PrepareSuccess {
+  const head = {
+    ok: true as const,
+    fileId: target.fileId,
+    kind: "images" as const,
+    source: extraction.source,
+    textLayer: extraction.textLayer,
+    pageCount: extraction.pages.length,
+    dpi: extraction.dpi,
+  };
+
+  // An untouched image is read where it lies; only a prior run's artifacts could be there to mislead.
+  if (extraction.source === "original") {
+    rmSync(target.dir, { recursive: true, force: true });
+    const pages = extraction.pages.map((page) => ({ page: page.page, path: target.sourcePath }));
+    return { ...head, pages };
+  }
+
+  freshDir(target.dir);
+  const pages: ImagePagePath[] = [];
+  for (const page of extraction.pages) {
+    const path = resolve(target.dir, `p${page.page}.png`);
+    writeFileSync(path, page.bytes, { mode: 0o600 });
+    pages.push({ page: page.page, path });
+  }
+  return { ...head, pages };
+}
+
+const WRITE_ARTIFACTS: {
+  [K in Extraction["kind"]]: (
+    extraction: Extract<Extraction, { kind: K }>,
+    target: WriteTarget,
+  ) => PrepareSuccess;
+} = {
+  text: writeDocument,
+  images: writePages,
+};
+
+/** A failure leaves the ledger exactly as it found it. */
 export async function prepareFile(
   db: Database.Database,
   entryOrId: string,
   opts: PrepareOptions = {},
-): Promise<PrepareResult> {
-  const format = opts.format ?? "pdf";
-
+): Promise<PrepareOutcome> {
   const absPath = resolveEntryPath(db, entryOrId);
   if (absPath === null) {
-    throw new Error(`no ingest entry or file at "${entryOrId}"`);
+    return { ok: false, reason: "not_found", message: `no ingest entry or file at "${entryOrId}"` };
   }
 
-  const loaded = readPdf(absPath);
-  let known = findKnownByHash(db, loaded.hash);
-  if (known && opts.force) {
-    deleteFile(db, known.id);
-    known = null;
-  }
-  const fileId = known
-    ? known.id
-    : registerPendingFile(db, absPath).fileId;
+  const loaded = loadSource(absPath);
+  if (!loaded.ok) return { ok: false, reason: loaded.reason, message: loaded.message };
+  const source = loaded.value;
 
-  // Fast path: an unencrypted PDF is handed back by its original path — no cache copy, nothing written.
-  if (format === "pdf" && !(await isEncrypted(loaded.bytes))) {
-    const pageCount = await countPdfPages(loaded.bytes);
-    return {
-      fileId,
-      pageCount,
-      format,
-      document: absPath,
-      pages: [{ page: 0, path: absPath }],
-    };
-  }
+  // Every case but --force's swap (see replaceFileRow) registers now: a file
+  // that never opens still needs an id for `ingest fail`.
+  const prior = opts.force ? findFileByHash(db, source.hash) : null;
+  const fileId = prior ? newFileId() : registerPendingFile(db, source).fileId;
 
-  const unlocked = await unlockNonInteractive(db, loaded.bytes, absPath, {
-    password: opts.password,
-  });
-  if (!unlocked.ok) throw new PasswordRequiredError(unlocked.reason);
+  const readable = await readableBytes(db, source, opts.password);
+  if (!readable.ok) return readable;
 
-  const pageCount = await countPdfPages(unlocked.decrypted);
-  const outDir = opts.outDir ?? resolve(getCacheDir(), fileId);
-  mkdirSync(outDir, { recursive: true, mode: 0o700 });
+  const extracted = await extractFile(
+    { kind: source.kind, mime: source.mime, bytes: readable.bytes, path: source.path },
+    { ocr: resolveOcr(), overrides: { rescan: opts.rescan, noOcr: opts.noOcr } },
+  );
+  if (!extracted.ok) return { ok: false, reason: extracted.reason, message: extracted.message };
 
-  if (format === "pdf") {
-    const out = resolve(outDir, "document.pdf");
-    writeFileSync(out, unlocked.decrypted, { mode: 0o600 });
-    return { fileId, pageCount, format, document: out, pages: [{ page: 0, path: out }] };
-  }
-
-  const requested = opts.pages ?? range(pageCount);
-  const pages = await rasterizePages(unlocked.decrypted, requested, pageCount, outDir, opts.dpi);
-  return { fileId, pageCount, format, pages };
-}
-
-async function rasterizePages(
-  decrypted: Buffer,
-  requested: number[],
-  pageCount: number,
-  outDir: string,
-  dpi?: number,
-): Promise<PreparedPage[]> {
-  for (const p of requested) {
-    if (p < 0 || p >= pageCount) {
-      throw new Error(`page ${p} out of range (0..${pageCount - 1}).`);
-    }
-  }
-  const pages: PreparedPage[] = [];
-  for (const p of requested) {
-    const png = await rasterizePageN(decrypted, p, dpi);
-    const out = resolve(outDir, `p${p}.png`);
-    writeFileSync(out, png, { mode: 0o600 });
-    pages.push({ page: p, path: out });
-  }
-  return pages;
+  const target: WriteTarget = {
+    fileId,
+    dir: resolve(getCacheDir(), fileId),
+    sourcePath: source.path,
+  };
+  const written = WRITE_ARTIFACTS[extracted.value.kind](extracted.value as never, target);
+  if (prior) replaceFileRow(db, prior.id, source, fileId);
+  return written;
 }
 
 export function cleanCache(fileId?: string): { removed: string[] } {
@@ -280,8 +408,4 @@ export function cleanCache(fileId?: string): { removed: string[] } {
   const removed = readdirSync(base).map((name) => resolve(base, name));
   rmSync(base, { recursive: true, force: true });
   return { removed };
-}
-
-function range(n: number): number[] {
-  return Array.from({ length: n }, (_, i) => i);
 }

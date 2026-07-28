@@ -12,9 +12,8 @@ import {
 import { openDb } from "../db.js";
 
 /**
- * `vault`: manages file-password patterns for unlocking encrypted statements
- * non-interactively. Passwords are encrypted at rest (see pdf.ts's
- * savePassword); this surface never prints plaintext.
+ * Passwords are encrypted at rest (see src/db/queries/vault.ts); this surface
+ * never prints plaintext.
  */
 
 // Erased type query: the stored-password row shape without pulling the db
@@ -28,28 +27,25 @@ const VAULT_COLUMNS: Column<VaultRow>[] = [
   { header: "Last Used", value: (r) => r.last_used_at ?? "-" },
 ];
 
-interface AddVaultEntryOpts {
-  passwordStdin?: boolean;
-}
-
-async function addVaultEntry(pattern: string, _opts: AddVaultEntryOpts): Promise<void> {
+async function addVaultEntry(pattern: string): Promise<void> {
   try {
-    // eslint-disable-next-line no-new
     new RegExp(pattern);
   } catch (err) {
-    fail("USAGE", `invalid regex pattern: ${(err as Error).message}`);
+    fail("USAGE", `invalid regex pattern: ${(err as Error).message}`, {
+      hint: "a pattern is a regex matched against the file name, e.g. '^kbank.*' — see `oled vault add --help`",
+    });
   }
 
   const password = await readSecretFromStdin();
   if (!password) {
     fail("INPUT_REQUIRED", "no password on stdin", {
-      hint: "pipe the password via --password-stdin, e.g. `printf %s 'secret' | oled vault add <pattern> --password-stdin`",
+      hint: "the password is read from stdin, e.g. `printf %s 'secret' | oled vault add <pattern>`",
     });
   }
 
   const db = await openDb();
-  const { savePassword } = await import("../../ingest/pdf.js");
-  const id = savePassword(db, pattern, password, config.dbEncryptionKey);
+  const { upsertPassword } = await import("../../db/queries/vault.js");
+  const id = upsertPassword(db, pattern, password, config.dbEncryptionKey);
   emitObject({ id, pattern });
 }
 
@@ -79,8 +75,15 @@ export function registerVault(program: Command): void {
 
   vault
     .command("add <pattern>")
-    .description("Add a vault entry for a file pattern (password read from stdin)")
-    .option("--password-stdin", "read a password from stdin")
+    .description("Add a vault entry for a file-name pattern (pipe the password on stdin)")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Pattern: a regex matched case-insensitively against the file NAME only — not the relative path `ingest list` shows.",
+        "Example: printf %s 'secret' | oled vault add '^kbank.*' --json",
+      ].join("\n"),
+    )
     .action(runAction(addVaultEntry));
 
   vault

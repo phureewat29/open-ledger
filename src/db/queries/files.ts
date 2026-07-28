@@ -18,10 +18,7 @@ interface FileRow {
   created_at: string;
 }
 
-/**
- * Bucket the `files` table by its `status` enum. Missing buckets are
- * filled with 0 so callers can render a stable shape without null checks.
- */
+/** Missing status buckets are filled with 0 so callers get a stable shape without null checks. */
 export function countFiles(db: Database.Database): FileTotals {
   const rows = db
     .prepare(`SELECT status, COUNT(*) AS n FROM files GROUP BY status`)
@@ -36,39 +33,65 @@ export function countFiles(db: Database.Database): FileTotals {
   return totals;
 }
 
+const FILE_SELECT = `SELECT id, path, file_hash, mime, status, ingested_at, source, error, created_at
+   FROM files`;
+
 export function listFiles(db: Database.Database): FileRow[] {
   return db
-    .prepare(
-      `SELECT id, path, file_hash, mime, status, ingested_at, source, error, created_at
-       FROM files
-       ORDER BY ingested_at DESC, created_at DESC`,
-    )
+    .prepare(`${FILE_SELECT} ORDER BY ingested_at DESC, created_at DESC`)
     .all() as FileRow[];
 }
 
 export function findFileById(db: Database.Database, id: string): FileRow | null {
-  const row = db
-    .prepare(
-      `SELECT id, path, file_hash, mime, status, ingested_at, source, error, created_at
-       FROM files WHERE id = ?`,
-    )
-    .get(id) as FileRow | undefined;
+  const row = db.prepare(`${FILE_SELECT} WHERE id = ?`).get(id) as FileRow | undefined;
   return row ?? null;
 }
 
+/** The row a file's bytes already registered as; `file_hash` is UNIQUE, so a content match is exactly one row. */
+export function findFileByHash(db: Database.Database, hash: string): FileRow | null {
+  const row = db.prepare(`${FILE_SELECT} WHERE file_hash = ?`).get(hash) as FileRow | undefined;
+  return row ?? null;
+}
+
+/** The columns a newly discovered file supplies; the rest are the schema's. */
+export interface PendingFileInput {
+  id: string;
+  path: string;
+  file_hash: string;
+  mime: string;
+}
+
+export function insertPendingFile(db: Database.Database, file: PendingFileInput): void {
+  db.prepare(
+    `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
+  ).run(file.id, file.path, file.file_hash, file.mime);
+}
+
+/**
+ * Delete leads (file_hash is UNIQUE) then re-insert, atomically; the delete cascades away
+ * the prior row's transactions and questions (ON DELETE CASCADE).
+ */
+export function replaceFile(
+  db: Database.Database,
+  priorId: string,
+  file: PendingFileInput,
+): void {
+  const tx = db.transaction((): void => {
+    deleteFile(db, priorId);
+    insertPendingFile(db, file);
+  });
+  tx();
+}
+
 interface DeleteFileResult {
-  /** The deleted row, or null when no row matched the id. */
   removed: FileRow | null;
-  /** Count of transaction rows that cascaded out. */
   removedTransactions: number;
-  /** Count of question rows that cascaded out. */
   removedQuestions: number;
 }
 
 /**
- * Deletes a `files` row; ON DELETE CASCADE removes its transactions and
- * questions. Cascaded counts are gathered before the DELETE so callers can
- * report what disappeared.
+ * Cascaded transaction/question counts are gathered before the DELETE runs —
+ * CASCADE would make them unrecoverable after.
  */
 export function deleteFile(db: Database.Database, id: string): DeleteFileResult {
   const removed = findFileById(db, id);
@@ -96,10 +119,6 @@ interface MarkFileFailedOpts {
   error: string;
 }
 
-/**
- * Stamp a `files` row as ingested: status='ingested', ingested_at=now,
- * source recorded (which agent/provider produced the ingest).
- */
 export function markFileIngested(
   db: Database.Database,
   fileId: string,
@@ -112,8 +131,7 @@ export function markFileIngested(
     .run(opts.source ?? null, fileId).changes;
 }
 
-/** Stamps a `files` row as failed (status, source, error); ingested_at is
- *  left untouched since a failed file was never successfully ingested. */
+/** ingested_at is left untouched: a failed file was never successfully ingested. */
 export function markFileFailed(
   db: Database.Database,
   fileId: string,
