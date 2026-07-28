@@ -137,7 +137,7 @@ function skillPackCheck(): Check {
     return {
       name,
       ok: false,
-      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g open-ledger@latest)`,
+      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g @morroc/open-ledger@latest)`,
     };
   }
   return { name, ok: true, detail: `installed ${installed} (${where})` };

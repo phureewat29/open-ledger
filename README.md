@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/open-ledger"><img src="https://img.shields.io/npm/v/open-ledger.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/open-ledger"><img src="https://img.shields.io/npm/dt/open-ledger.svg" alt="npm total downloads" /></a>
+  <a href="https://www.npmjs.com/package/@morroc/open-ledger"><img src="https://img.shields.io/npm/v/@morroc/open-ledger.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@morroc/open-ledger"><img src="https://img.shields.io/npm/dt/@morroc/open-ledger.svg" alt="npm total downloads" /></a>
 </p>
 
 <br />
@@ -41,7 +41,7 @@ The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host 
 1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
 
    ```bash
-   npm install -g open-ledger
+   npm install -g @morroc/open-ledger
    ```
 
 2. Paste into your AI chat:
@@ -58,7 +58,7 @@ Your AI walks you through the rest.
 ### Coding Agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, PI)
 
 ```bash
-npm install -g open-ledger
+npm install -g @morroc/open-ledger
 npx skills add phureewat29/open-ledger
 ```
 
