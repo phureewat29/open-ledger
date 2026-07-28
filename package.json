@@ -30,7 +30,7 @@
     "datasets/"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "test": "vitest run --typecheck --typecheck.tsconfig ./tsconfig.typecheck.json",
     "dev": "tsx src/cli/index.ts",
     "release": "tsx scripts/release.ts",
