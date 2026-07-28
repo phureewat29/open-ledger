@@ -22,7 +22,7 @@
 
 <br />
 
-You've tried many personal finance apps from the App Store. None of them fits what you need, because each is someone else's idea of your money and lifestyle. So you asked AI to build the one that would, and it failed you too. It halucinate the numbers, mangled your data, and never quite understood what you wanted.
+You've tried many personal finance apps from the App Store. None of them fits what you need, because each is someone else's idea of your money and lifestyle. So you asked AI to build the one that would, and it failed you too. It hallucinated the numbers, mangled your data, and never quite understood what you wanted.
 
 AI fails when it has nowhere reliable to keep the numbers. OpenLedger gives it that place, a deterministic harness that holds every number in your own records.
 
@@ -81,8 +81,8 @@ Every row becomes a *transaction*: it debits one account and credits another by 
 This is the loop the skill teaches an agent to run:
 
 1. **Discover**: `oled ingest list --json` to find new/pending files.
-2. **Prepare**: `oled ingest prepare <path>` registers the file and returns its readable `document` path, unlocking encrypted PDFs via `oled vault`.
-3. **Read**: the agent reads the statement PDF directly (modern agent models read PDFs natively; OpenLedger stays deterministic).
+2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it, unlocking encrypted PDFs via `oled vault`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. With no text layer and no OCR endpoint, it comes back as one image per page.
+3. **Read**: the agent reads what prepare returned, either the text document or the page images, and picks out every transaction row.
 4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, fuzzy account match, uncategorized fallback, cross-currency row).
 5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
 
@@ -100,7 +100,7 @@ oled ingest         # Ingest pipeline: list / prepare / commit / done / fail
 oled files          # Browse ingested files (list / show / drop)
 oled vault          # Manage file-password patterns for encrypted statements
 
-oled transactions   # Transactions: list / show / add / update / delete / recategorize / dedupe
+oled transactions   # Transactions: list / show / add / update / delete / recategorize / dedupe / merge
 oled accounts       # Manage the chart of accounts
 oled merchants      # Manage merchants and their default accounts
 oled questions      # List, answer, and defer open questions
@@ -109,16 +109,17 @@ oled report         # Income, expenses, and net
 oled notes          # Manage freeform notes
 oled datasets       # Reference datasets
 
-oled data           # Open the data folder in file explorer (alias: open)
+oled open           # Open the data folder in file explorer
 ```
 
 ## Security & Privacy
 
 - All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.oled/db.sqlite`.
-- The config file (`~/.oled/config.json`) carries `0600` permissions; the only secret it holds is the database encryption key, and `config`/`status` surface only a fingerprint of it, never the plaintext.
+- The config file (`~/.oled/config.json`) carries `0600` permissions. It holds two secrets at most, the database encryption key and the OCR endpoint API key; `config show` surfaces a fingerprint of each and `status` one of the database key, never the plaintext.
 - Encrypted-PDF passwords sit AES-GCM-encrypted in `db.sqlite` under a filename pattern; plaintext never touches disk.
+- A decrypted statement stays in memory. Only what an agent has to read is written to `cache/`: the extracted text, or the page images.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
-- No telemetry, no analytics. OpenLedger makes no network calls of its own.
+- No telemetry, no analytics. OpenLedger makes no network calls of its own. The exception is opt-in and goes only to the OCR endpoint you configure: `ingest prepare` sends it the page images to read, and `doctor` asks it which models it serves.
 
 ## Configuration
 
@@ -126,11 +127,11 @@ OpenLedger stores everything in `~/.oled/`:
 
 ```
 ~/.oled/
-  config.json    # locale, currency, paths, encryption key fingerprint (0600 permissions)
+  config.json    # locale, currency, paths, database encryption key (0600 permissions)
   context.md     # persistent freeform context an agent can read (path shown as context_path in oled config show)
   db.sqlite      # encrypted SQLite database
-  data/          # drop any PDFs here (subfolders allowed)
-  cache/         # scratch space for rasterized/decrypted pages handed to an agent
+  data/          # drop your statements here, as PDFs or images (subfolders allowed)
+  cache/         # extracted text and page images handed to an agent
 ```
 
 ### Environment variables
@@ -154,9 +155,23 @@ OLED_DB_PATH=
 # Optional. Default: ~/.oled/data
 OLED_DATA_DIR=
 
-# Optional. Scratch space for decrypted/rasterized artifacts handed to external
+# Optional. Scratch space for the extracted text and page images handed to external
 # agent CLIs. Default: ~/.oled/cache
 OLED_CACHE_DIR=
+
+# Optional. OpenAI-compatible OCR endpoint base URL, including its version
+# segment, e.g. http://127.0.0.1:1234/v1. A non-local URL sends statement page
+# images off this machine.
+OLED_OCR_BASE_URL=
+
+# Optional. Model id served at OLED_OCR_BASE_URL. The id picks the built-in
+# prompt, sampling, and page-render profile; blank asks the endpoint for the
+# default profile's own model.
+OLED_OCR_MODEL=
+
+# Optional. API key for the OCR endpoint, if it requires one. Set it here or in
+# the shell: `oled config` has no flag for it.
+OLED_OCR_API_KEY=
 ```
 
 ## Contributing
