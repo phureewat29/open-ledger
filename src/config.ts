@@ -17,6 +17,9 @@ export interface OpenLedgerConfig {
   dbEncryptionKey: string;
   dataDir: string;
   userName: string;
+  ocrBaseUrl: string;
+  ocrModel: string;
+  ocrApiKey: string;
 }
 
 const OLED_DIR = process.env.OLED_DIR
@@ -24,25 +27,30 @@ const OLED_DIR = process.env.OLED_DIR
   : resolve(homedir(), ".oled");
 
 /**
- * Drives both field resolution and the persisted-key list: `envVar` (when
- * present) is checked before the file value. Unknown keys on disk are
- * tolerated on read and dropped on the next write — saveConfig writes only
- * the fields listed here.
+ * Also drives the persisted-key list: unknown keys on disk are tolerated on
+ * read and dropped on the next write — `saveConfig` writes only the fields
+ * listed here.
  */
 const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: string }> = {
-  // Single last-resort locale/currency constants for the whole codebase,
-  // overridden by `config converge`. Every other module reads the resolved
-  // config value (or getDisplayCurrency) rather than hardcoding a currency.
-  // A later wave seeds these from the active dataset.
+  // Last-resort constants; `config converge` overrides them — other modules
+  // should read the resolved value, not hardcode a currency.
   displayLocale: { default: "th-TH" },
   displayCurrency: { default: "THB" },
   dbPath: { envVar: "OLED_DB_PATH", default: resolve(OLED_DIR, "db.sqlite") },
   dbEncryptionKey: { envVar: "OLED_DB_ENCRYPTION_KEY", default: "" },
   dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },
   userName: { default: "User" },
+  ocrBaseUrl: { envVar: "OLED_OCR_BASE_URL", default: "" },
+  // Blank means the preset registry's own default model; src/extract/presets/ owns the id.
+  ocrModel: { envVar: "OLED_OCR_MODEL", default: "" },
+  ocrApiKey: { envVar: "OLED_OCR_API_KEY", default: "" },
 };
 
 const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as readonly (keyof OpenLedgerConfig)[];
+
+/** Config fields whose value must never be echoed in plaintext; `config show`
+ *  renders each as `{ set, fingerprint }` via `keyFingerprint()` instead. */
+export const CONFIG_SECRETS = ["dbEncryptionKey", "ocrApiKey"] as const;
 
 export function getOledDir(): string {
   return OLED_DIR;
@@ -56,7 +64,7 @@ export function getDataDir(): string {
   return config.dataDir;
 }
 
-/** Scratch space for decrypted/rasterized artifacts; env-overridable for tests. */
+/** Scratch space for extracted text and page images; env-overridable for tests. */
 export function getCacheDir(): string {
   return process.env.OLED_CACHE_DIR || resolve(OLED_DIR, "cache");
 }
@@ -73,15 +81,12 @@ function loadFileConfig(): Partial<OpenLedgerConfig> {
   try {
     return JSON.parse(readFileSync(configPath, "utf-8"));
   } catch {
-    // Intentional swallow: this runs at module load (via buildConfig) and from
-    // saveConfig. A corrupt config file must degrade to defaults rather than
-    // throw — otherwise every command, including the `config` commands that
-    // would repair it, would crash on startup.
+    // Must degrade to defaults, not throw — every command, including the
+    // ones that would repair the file, would crash at startup otherwise.
     return {};
   }
 }
 
-/** Project an arbitrary object down to just the surviving config keys. */
 function pickConfigFields(obj: Record<string, unknown>): Partial<OpenLedgerConfig> {
   const out: Partial<OpenLedgerConfig> = {};
   for (const key of CONFIG_KEYS) {
@@ -104,10 +109,9 @@ function buildConfig(): OpenLedgerConfig {
 export const config = buildConfig();
 
 /**
- * The persisted config, projected to known keys — file values only, with neither
- * env overrides nor the hardcoded defaults folded in. Converge uses this to tell
- * an explicitly-persisted value apart from a defaulted one, so it can slot a
- * dataset-derived default between the two.
+ * File values only — no env overrides, no defaults folded in. Converge uses
+ * this to tell an explicitly-persisted value apart from a defaulted one, so
+ * it can slot a dataset-derived default between the two.
  */
 export function loadPersistedConfig(): Partial<OpenLedgerConfig> {
   return pickConfigFields(loadFileConfig() as Record<string, unknown>);

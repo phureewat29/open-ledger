@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "fs";
 import { openDb } from "../db.js";
 import {
   config as appConfig,
+  CONFIG_SECRETS,
   getConfigPath,
   keyFingerprint,
   loadPersistedConfig,
@@ -17,18 +18,19 @@ import { currentMode, emit, fail, readSecretFromStdin, runAction, type OutputMod
 import * as z from "zod";
 import { parseInput, str, bool } from "../../lib/validate.js";
 
-type RedactedConfig = Omit<OpenLedgerConfig, "dbEncryptionKey"> & {
-  dbEncryptionKey: { set: boolean; fingerprint?: string };
-};
+type SecretKey = (typeof CONFIG_SECRETS)[number];
 
-// dbEncryptionKey is the only secret in config; surface {set, fingerprint}
-// rather than the passphrase itself, which would land in shells/logs/bug reports.
+type RedactedConfig = Omit<OpenLedgerConfig, SecretKey> &
+  Record<SecretKey, { set: boolean; fingerprint?: string }>;
+
+/** Every CONFIG_SECRETS key surfaces as {set, fingerprint}, never plaintext (which would land in shells/logs/bug reports). */
 function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
-  const key = cfg.dbEncryptionKey;
-  const dbEncryptionKey = key
-    ? { set: true, fingerprint: keyFingerprint(key) }
-    : { set: false };
-  return { ...cfg, dbEncryptionKey };
+  const redacted = { ...cfg } as Record<string, unknown>;
+  for (const key of CONFIG_SECRETS) {
+    const value = cfg[key];
+    redacted[key] = value ? { set: true, fingerprint: keyFingerprint(value) } : { set: false };
+  }
+  return redacted as RedactedConfig;
 }
 
 /** Redacted config plus the resolved context.md path (there's no separate `context` command). */
@@ -36,7 +38,6 @@ function showPayload(): Record<string, unknown> {
   return { ...redactConfig(appConfig), context_path: getContextPath() };
 }
 
-/** Flatten a (possibly one-level-nested) object into label/value rows for human display. */
 function flattenRows(obj: Record<string, unknown>): [string, string][] {
   const rows: [string, string][] = [];
   for (const [k, v] of Object.entries(obj)) {
@@ -59,8 +60,7 @@ function printConfig(mode: OutputMode, data: Record<string, unknown>): void {
   printKeyValues(mode, flattenRows(data));
 }
 
-/** Every flag the bare `config` action accepts, keyed to auto-bridge commander's
- *  camelCase opts (parseInput tries each key's camelCase/snake_case form). */
+/** Every flag the bare `config` action accepts; snake_case so parseInput auto-bridges commander's camelCase opts. */
 const CONVERGE_FLAGS_SPEC = z.object({
   data_dir: str().optional(),
   db: str().optional(),
@@ -70,30 +70,30 @@ const CONVERGE_FLAGS_SPEC = z.object({
   currency: str().optional(),
   user_name: str().optional(),
   country: str().optional(),
+  ocr_url: str().optional(),
+  ocr_model: str().optional(),
 });
 
 type ConvergeFlags = z.infer<typeof CONVERGE_FLAGS_SPEC>;
 
+/** Every field converge writes from flags. `ocrApiKey` is absent by design: it is env-only (OLED_OCR_API_KEY). */
+type ConvergedConfig = Pick<
+  OpenLedgerConfig,
+  | "dataDir"
+  | "dbPath"
+  | "displayLocale"
+  | "displayCurrency"
+  | "userName"
+  | "ocrBaseUrl"
+  | "ocrModel"
+>;
+
 /**
- * Idempotent configure: ensures the data dir, persists settings, migrates the
- * db, seeds context.md if absent. Each value resolves to an explicit flag or
- * the already-loaded singleton value, so re-writing unchanged values is a no-op.
+ * Precedence: flag > env var > persisted file > dataset default > code
+ * default (displayLocale/currency have no env var tier). `country` defaults
+ * to "th" and is validated, so an unknown name never reaches the file.
  */
-async function convergeConfig(flags: ConvergeFlags): Promise<void> {
-  if (flags.generate_key && flags.encryption_key_stdin) {
-    fail("USAGE", "--generate-key and --encryption-key-stdin are mutually exclusive");
-  }
-
-  const dataDir: string = flags.data_dir ?? appConfig.dataDir;
-  const dbPath: string = flags.db ?? appConfig.dbPath;
-
-  // Seed locale/currency from the chosen country's dataset defaults, but only
-  // where the user hasn't already spoken. Precedence: explicit flag > env var >
-  // persisted file value > dataset default > code default. displayLocale/
-  // displayCurrency have no env var today, so that tier is currently a no-op; a
-  // persisted value still wins over the dataset, and the dataset default replaces
-  // the code default as the last resort (country defaults to "th", whose dataset
-  // matches the old hardcoded th-TH/THB).
+function resolveConvergedConfig(flags: ConvergeFlags): ConvergedConfig {
   const country = flags.country ?? "th";
   const defaults = findCountryDefaults(country);
   if (!defaults) {
@@ -102,59 +102,85 @@ async function convergeConfig(flags: ConvergeFlags): Promise<void> {
     });
   }
   const persisted = loadPersistedConfig();
-  const displayLocale: string = flags.locale || persisted.displayLocale || defaults.locale;
-  const displayCurrency: string = flags.currency || persisted.displayCurrency || defaults.currency;
 
-  const userName: string = flags.user_name ?? appConfig.userName;
-
-  mkdirSync(dataDir, { recursive: true });
-
-  const patch: Partial<OpenLedgerConfig> = {
-    dataDir,
-    dbPath,
-    displayLocale,
-    displayCurrency,
-    userName,
+  return {
+    dataDir: flags.data_dir ?? appConfig.dataDir,
+    dbPath: flags.db ?? appConfig.dbPath,
+    displayLocale: flags.locale || persisted.displayLocale || defaults.locale,
+    displayCurrency: flags.currency || persisted.displayCurrency || defaults.currency,
+    userName: flags.user_name ?? appConfig.userName,
+    // The URL alone decides whether OCR is configured.
+    ocrBaseUrl: flags.ocr_url ?? appConfig.ocrBaseUrl,
+    ocrModel: flags.ocr_model ?? appConfig.ocrModel,
   };
-  if (flags.generate_key) {
-    // "Ensure a key exists": minting a new one over a live key would orphan the encrypted db.
-    if (!appConfig.dbEncryptionKey) patch.dbEncryptionKey = generateKey();
-  } else if (flags.encryption_key_stdin) {
-    patch.dbEncryptionKey = await readSecretFromStdin();
-  }
+}
 
-  // No re-encryption path exists, so refuse before saveConfig — a bad request
-  // must leave both the config file and the database untouched.
-  if (
-    patch.dbEncryptionKey !== undefined &&
-    patch.dbEncryptionKey !== appConfig.dbEncryptionKey &&
-    existsSync(dbPath)
-  ) {
-    fail("INVALID", `database ${dbPath} already exists; changing the encryption key would make it unreadable`, {
-      hint: "keep the current key (drop --generate-key / --encryption-key-stdin), or move the database file aside first",
-    });
-  }
+/**
+ * `undefined` means "leave the persisted key alone", which is also what
+ * --generate-key means once a key exists: minting a new one over a live key
+ * would orphan the encrypted db.
+ */
+async function resolveEncryptionKey(flags: ConvergeFlags): Promise<string | undefined> {
+  if (flags.generate_key) return appConfig.dbEncryptionKey ? undefined : generateKey();
+  if (flags.encryption_key_stdin) return readSecretFromStdin();
+  return undefined;
+}
 
+/**
+ * No re-encryption path exists, so refuse before saveConfig — a bad request
+ * must leave both the config file and the database untouched.
+ */
+function guardKeyChange(key: string | undefined, dbPath: string): void {
+  if (key === undefined || key === appConfig.dbEncryptionKey || !existsSync(dbPath)) return;
+  // A keyless db is the common case: any earlier command created it, so say so
+  // rather than talking about changing a key the caller never set.
+  const change = appConfig.dbEncryptionKey ? "changing its encryption key" : "encrypting it now";
+  fail("INVALID", `database ${dbPath} already exists; ${change} would make it unreadable`, {
+    hint: "drop --generate-key / --encryption-key-stdin to keep using this database, or move it aside (keep a backup) and re-run to start an encrypted one",
+  });
+}
+
+async function applyConvergedConfig(
+  converged: ConvergedConfig,
+  dbEncryptionKey: string | undefined,
+): Promise<void> {
+  const patch: Partial<OpenLedgerConfig> = { ...converged };
+  if (dbEncryptionKey !== undefined) patch.dbEncryptionKey = dbEncryptionKey;
   saveConfig(patch);
 
-  // Open once to run the migration against the (freshly) configured db path.
+  // openDb() runs the migration against the (freshly) configured db path.
   const db = await openDb();
 
-  // Seed the structural accounts the ledger auto-references, so the first
-  // ingest resolves them by exact match. Idempotent: no-ops if already present.
+  // Seeds structural accounts the ledger auto-references so first ingest resolves them; idempotent.
   const { ensureStructuralAccount } = await import("../../accounts/accounts.js");
   for (const id of ["expense:uncategorized", "equity:adjustments", "equity:opening-balance"] as const) {
     ensureStructuralAccount(db, id);
   }
 
-  // Seed the context template only when absent — createContextTemplate is a
-  // no-op if the file already exists, so a converge never clobbers edits.
+  // createContextTemplate no-ops if the file exists, so this never clobbers edits.
   const { createContextTemplate } = await import("../../context.js");
-  createContextTemplate(userName);
+  createContextTemplate(converged.userName);
+}
+
+/**
+ * Idempotent: each value resolves to an explicit flag or the already-loaded
+ * singleton, so converging with no new flags is a no-op.
+ */
+async function convergeConfig(flags: ConvergeFlags): Promise<void> {
+  if (flags.generate_key && flags.encryption_key_stdin) {
+    fail("USAGE", "--generate-key and --encryption-key-stdin are mutually exclusive");
+  }
+
+  const converged = resolveConvergedConfig(flags);
+  mkdirSync(converged.dataDir, { recursive: true });
+
+  const dbEncryptionKey = await resolveEncryptionKey(flags);
+  guardKeyChange(dbEncryptionKey, converged.dbPath);
+  await applyConvergedConfig(converged, dbEncryptionKey);
 
   printConfig(currentMode(), {
     ...redactConfig(appConfig),
-    created: { config: getConfigPath(), db: dbPath, data_dir: dataDir },
+    created: { config: getConfigPath(), db: converged.dbPath, data_dir: converged.dataDir },
   });
 }
 
@@ -184,6 +210,8 @@ export function registerConfig(program: Command): void {
     .option("--currency <code>", "default currency code")
     .option("--country <code>", "seed locale/currency from a country's defaults (default: th)")
     .option("--user-name <name>", "user display name")
+    .option("--ocr-url <url>", "OCR endpoint base URL, e.g. http://127.0.0.1:1234/v1 (enables OCR on its own)")
+    .option("--ocr-model <id>", "OCR model id served at --ocr-url; picks the built-in prompt and render profile")
     .action(runAction(configureHarness));
 
   configCmd
