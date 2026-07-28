@@ -11,13 +11,9 @@ import type { Config } from "../config.js";
 import type { TokenUsage } from "../report/events.js";
 import { estimateTextTokens, estimateTokens } from "./tokens.js";
 
-/**
- * One chat turn against any OpenAI-compatible endpoint. The runner owns the
- * loop and the retry policy; this module only turns a request into a reply or a
- * classified error.
- */
+// Retry loop lives in the runner, not here.
 
-export interface ToolCallRequest {
+interface ToolCallRequest {
   id: string;
   name: string;
   /** Raw JSON string from the model, validated by the tool it names. */
@@ -40,7 +36,7 @@ export interface ChatFailure {
   message: string;
 }
 
-export type ChatResult = { ok: true; value: ChatReply } | ChatFailure;
+type ChatResult = { ok: true; value: ChatReply } | ChatFailure;
 
 export interface ChatModel {
   readonly name: string;
@@ -139,8 +135,7 @@ export function createOpenAiCompatibleModel(config: Config): ChatModel {
   return {
     name: config.model,
     complete(messages, tools) {
-      // Rejection handler rather than a Result: classify needs the thrown
-      // APIError's status, which a stringified error message cannot carry.
+      // Rejection handler, not a Result: classify needs the thrown APIError itself.
       return request(messages, tools).then((completion) => toReply(completion, messages), classify);
     },
   };

@@ -1,9 +1,8 @@
 import { tryExecute } from "../core/result.js";
 
 /**
- * Every reader of oled's `--json` output starts here. Unparseable lines are
- * skipped rather than reported: help text and warnings share the stream, and a
- * line that is not an object carries nothing any caller wants.
+ * Unparseable lines are skipped, not reported: help text and warnings share
+ * the stream, and a non-object line carries nothing any caller wants.
  */
 export function parseNdjson(text: string): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];

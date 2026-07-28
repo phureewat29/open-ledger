@@ -5,19 +5,13 @@ import { basename, join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
 import type { OpenLedgerRunner } from "../oled/command.js";
 
-/**
- * A throwaway directory tree plus the env that pins oled inside it. Nothing
- * here touches the caller's real ~/.oled: HOME is redirected and every
- * OLED_* path points into the tree.
- */
-
+// Never touches the caller's real ~/.oled: HOME and every OLED_* path point into the tree.
 export interface Workspace {
   root: string;
   home: string;
   data: string;
   cwd: string;
   cache: string;
-  /** `oled setup --dir` base; the pack lands at <agent>/skills/open-ledger. */
   agent: string;
   /** npm --global --prefix target for the packed CLI. */
   npm: string;
@@ -35,7 +29,12 @@ export interface SkillPack {
 
 const DIRS = ["home", "data", "cwd", "cache", "agent", "npm"] as const;
 
-/** A blank encryption key means a plain db file: reproducible across runs. */
+/**
+ * A blank encryption key means a plain db file: reproducible across runs. Every
+ * OLED_* the harness reads is set here, blank included — an operator's exported
+ * OCR endpoint would otherwise reroute a statement and change what the model was
+ * measured on.
+ */
 function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
   const bin = join(paths.npm, "bin");
   return {
@@ -48,6 +47,9 @@ function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
     OLED_DATA_DIR: paths.data,
     OLED_CACHE_DIR: paths.cache,
     OLED_DB_ENCRYPTION_KEY: "",
+    OLED_OCR_BASE_URL: "",
+    OLED_OCR_MODEL: "",
+    OLED_OCR_API_KEY: "",
     NO_COLOR: "1",
   };
 }
@@ -72,11 +74,7 @@ export function createWorkspace(): Result<Workspace> {
   return created;
 }
 
-/**
- * Copies each statement into <data>/corgi-bank/, the layout `ingest list`
- * discovers. Only the PDFs travel: the fact files stay in the example, out of
- * every path the model can reach.
- */
+// Only the PDFs travel: the fact files stay out of every path the model can reach.
 export function seedStatements(workspace: Workspace, sourcePdfs: string[]): Result<string[]> {
   const seeded = tryExecute(() => {
     const dir = join(workspace.data, "corgi-bank");
@@ -91,11 +89,8 @@ export function seedStatements(workspace: Workspace, sourcePdfs: string[]): Resu
   return seeded;
 }
 
-/**
- * Installs the skill pack the CLI ships and reads it back. The system prompt is
- * the INSTALLED file, so its hash and length are what the report can be trusted
- * against.
- */
+/** The system prompt is the INSTALLED file, so its hash and length are what
+ *  the report can be trusted against. */
 export async function installSkillPack(
   workspace: Workspace,
   runner: OpenLedgerRunner,
@@ -128,16 +123,12 @@ function disposeWorkspace(workspace: Workspace): void {
   rmSync(workspace.root, { recursive: true, force: true });
 }
 
-export interface WorkspaceGuard {
+interface WorkspaceGuard {
   register(workspace: Workspace): void;
   /** Call on a clean finish; a kept workspace prints its path instead. */
   release(): void;
 }
 
-/**
- * Deletes the workspace on exit, Ctrl-C, or SIGTERM, so an aborted run cannot
- * leave a multi-megabyte npm prefix behind.
- */
 export function createWorkspaceGuard(keep: boolean): WorkspaceGuard {
   let workspace: Workspace | null = null;
   let released = false;

@@ -7,25 +7,18 @@ import type { EventSink, PhaseExit, PhaseId } from "../report/events.js";
 import { attachArtifacts, type TransportPlan } from "./attach.js";
 import { findTool, toolSpecs, unknownToolResult, type Tool } from "./tools.js";
 
-/**
- * The turn loop. It emits what the model tried and what came back; the three
- * things it does — one retry, one stall prod, and handing back the files a
- * command produced — are emitted as operational events, which the eval excludes
- * by design.
- */
+// The runner's own moves — a retry, a stall prod, handing artifacts back —
+// are operational events, which the eval excludes by design.
 
-/**
- * Run-level, never per phase: friction is read across the whole run, and a count
- * that restarted would make two phases' calls look like one turn.
- */
-export interface TurnCounter {
+// Run-level, never per phase: a counter that restarted per phase would make
+// two phases' calls look like one turn.
+interface TurnCounter {
   count: number;
 }
 
-export interface RunnerDeps {
+interface RunnerDeps {
   model: ChatModel;
   tools: Tool[];
-  /** How what oled produces reaches this model. */
   transport: TransportPlan;
   emit: EventSink;
   contextBudgetTokens: number;
@@ -39,10 +32,9 @@ const MAX_REPLY_ECHO = 4_000;
 const TRIMMED_PLACEHOLDER = "[tool result dropped by the context guard]";
 
 /**
- * Drops the OLDEST tool results first, replacing the content instead of removing
- * the message so every tool_call still has its answer. The system prompt and the
- * user's turns are never touched, which is what keeps an attachment out of reach:
- * the statement the host handed over stays for the whole run.
+ * Drops the OLDEST tool results first, replacing content instead of removing
+ * the message, so every tool_call keeps an answer. The system prompt and the
+ * user's turns are never touched, so an attachment stays for the whole run.
  */
 function trimContext(
   deps: RunnerDeps,
@@ -54,7 +46,7 @@ function trimContext(
       (message) => message.role === "tool" && message.content !== TRIMMED_PLACEHOLDER,
     );
     const message = messages[index];
-    if (index < 0 || message?.role !== "tool") return;
+    if (message?.role !== "tool") return;
     messages[index] = { ...message, content: TRIMMED_PLACEHOLDER };
     deps.emit({ type: "context_trim", phase });
   }
@@ -64,7 +56,6 @@ function describe(phase: PhaseId, err: ChatFailure): string {
   return `${phase}: the endpoint failed (${err.status ?? "no status"}): ${err.message}`;
 }
 
-/** One retry, and only for a transient failure. */
 async function complete(
   deps: RunnerDeps,
   messages: ChatCompletionMessageParam[],
@@ -88,7 +79,6 @@ async function complete(
 
 interface Invoked {
   answer: ChatCompletionMessageParam;
-  /** What the host carried back, pushed only once every tool_call has its answer. */
   attachment: ChatCompletionMessageParam | null;
 }
 
@@ -106,6 +96,7 @@ async function runToolCall(
         deps.tools.map((known) => known.name),
       );
   deps.emit({ type: "tool_call", phase, turn, ...result.observation });
+  for (const note of result.notes) deps.emit({ type: "operational", phase, ...note });
 
   const answer: ChatCompletionMessageParam = {
     role: "tool",
@@ -119,11 +110,7 @@ async function runToolCall(
   return { answer, attachment: attached.message };
 }
 
-/**
- * Runs one phase against the shared message history. A failure means the
- * endpoint itself is unusable; everything the model gets wrong is recorded,
- * not raised.
- */
+/** A failure means the endpoint itself is unusable; everything the model gets wrong is recorded, not raised. */
 export async function runPhase(
   deps: RunnerDeps,
   messages: ChatCompletionMessageParam[],

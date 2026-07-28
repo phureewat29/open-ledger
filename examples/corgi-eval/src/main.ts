@@ -29,7 +29,7 @@ import {
 } from "./statement/truth.js";
 import { createOpenAiCompatibleModel } from "./model/chat.js";
 import { resolveContextBudget, type ContextBudget } from "./model/capabilities.js";
-import { planHostTransport, type TransportPlan } from "./agent/attach.js";
+import { planHostTransport, transportNames, type TransportPlan } from "./agent/attach.js";
 import { createTools, type Tool } from "./agent/tools.js";
 import { runPhase } from "./agent/runner.js";
 import { createRecorder } from "./report/recorder.js";
@@ -41,22 +41,13 @@ import {
   NET_WORTH_TOLERANCE,
 } from "./report/scorecard.js";
 import { buildTranscript } from "./report/transcript.js";
-import {
-  renderConsole,
-  timestampSlug,
-  traceLine,
-  writeReport,
-  type RunIdentity,
-  type RunReport,
-  type SetupStep,
-  type ToolSchema,
-} from "./report/render.js";
+import { renderConsole, timestampSlug, traceLine, writeReport } from "./report/render.js";
+import type { RunIdentity, RunReport, SetupStep, ToolSchema } from "./report/report.js";
 import type { EventSink } from "./report/events.js";
 
 const EXAMPLE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 // Only the sandbox reaches out of the example: it packs the product it tests.
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-// Statements and their fact files live together in fixtures/, out of the project root.
 const FIXTURES = STATEMENT_FIXTURES.map((name) => join(EXAMPLE_ROOT, "fixtures", name));
 const REPORTS_DIR = join(EXAMPLE_ROOT, "reports");
 const OLED_TIMEOUT_MS = 120_000;
@@ -65,17 +56,18 @@ function note(text: string): void {
   process.stderr.write(`${text}\n`);
 }
 
+/** `work` comes before `describe` so the value's type is inferred, not annotated. */
 type Step = <T>(
   name: string,
-  describe: (value: T) => string,
   work: () => Promise<Result<T>>,
+  describe: (value: T) => string,
 ) => Promise<Result<T>>;
 
 function createStepRecorder(steps: SetupStep[]): Step {
   return async function step<T>(
     name: string,
-    describe: (value: T) => string,
     work: () => Promise<Result<T>>,
+    describe: (value: T) => string,
   ): Promise<Result<T>> {
     note(`… ${name}`);
     const result = await work();
@@ -84,11 +76,6 @@ function createStepRecorder(steps: SetupStep[]): Step {
     note(`  ${result.ok ? "ok" : "failed"} ${name} — ${detail}`);
     return result;
   };
-}
-
-function describeTransport(plan: TransportPlan): string {
-  const { capabilities, kinds } = plan;
-  return `${capabilities.modalities.join("+")} (${capabilities.source}), carried as ${kinds.join(" or ")}`;
 }
 
 interface Sandbox {
@@ -106,8 +93,8 @@ async function prepare(
 ): Promise<Result<Sandbox>> {
   const created = await step(
     "create sandbox",
-    (workspace: Workspace) => workspace.root,
     async () => createWorkspace(),
+    (workspace) => workspace.root,
   );
   if (!created.ok) return created;
 
@@ -116,9 +103,9 @@ async function prepare(
 
   const installed = await step(
     "pack and install open-ledger",
-    (cli: InstalledCli) => `${cli.version}, ${cli.fileCount} files`,
     () =>
       installPackedCli({ repoRoot: REPO_ROOT, tarballDir: workspace.root, prefix: workspace.npm }),
+    (cli) => `${cli.version}, ${cli.fileCount} files`,
   );
   if (!installed.ok) return installed;
 
@@ -132,33 +119,32 @@ async function prepare(
 
   const seeded = await step(
     "seed the statements",
-    (paths: string[]) => paths.join(", "),
     async () => seedStatements(workspace, FIXTURES),
+    (paths) => paths.join(", "),
   );
   if (!seeded.ok) return seeded;
 
   const facts = await step(
     "load the checked-in statement facts",
-    (every: StatementFacts[]) => {
+    async () => loadEveryStatement(FIXTURES),
+    (every) => {
       const expected = expectLedger(every);
       return `${every.length} statement(s), ${expected.rows} rows, ${expected.charges.toFixed(2)} ${expected.currency} charged`;
     },
-    async () => loadEveryStatement(FIXTURES),
   );
   if (!facts.ok) return facts;
 
   const packed = await step(
     "install the skill",
-    (skill: SkillPack) =>
-      `${skill.version}, ${skill.length} chars, sha256 ${skill.sha256.slice(0, 12)}`,
     () => installSkillPack(workspace, runner),
+    (skill) => `${skill.version}, ${skill.length} chars, sha256 ${skill.sha256.slice(0, 12)}`,
   );
   if (!packed.ok) return packed;
 
   const probed = await step(
     "check the harness is reachable",
-    (probe: LedgerProbe) => `${probe.postedRows} rows, net worth ${probe.netWorth.toFixed(2)}`,
     () => probeLedger(runner),
+    (probe) => `${probe.postedRows} rows, net worth ${probe.netWorth.toFixed(2)}`,
   );
   if (!probed.ok) return probed;
 
@@ -190,12 +176,7 @@ interface Walked {
   snapshots: PhaseSnapshot[];
 }
 
-/**
- * The ledger is read back after every phase, so a report shows where progress
- * stopped instead of only what was left at the end. The reads are the same
- * read-only commands the final probe uses and emit no events, so nothing the
- * eval counts moves.
- */
+/** Re-probes the ledger after every phase (no events emitted) so a report shows where progress stopped. */
 async function walkthrough(run: Walkthrough): Promise<Walked> {
   const { config, sandbox, tools, transport, emit } = run;
   const deps = {
@@ -204,8 +185,7 @@ async function walkthrough(run: Walkthrough): Promise<Walked> {
     transport,
     emit,
     contextBudgetTokens: run.budget.tokens,
-    // Shared across phases: a turn number is what separates concurrent tool
-    // calls from a later reaction to one.
+    // Shared across phases: separates concurrent tool calls from a later reaction to one.
     turns: { count: 0 },
   };
   const messages: ChatCompletionMessageParam[] = [
@@ -261,7 +241,7 @@ function buildIdentity(args: {
       modalitiesSource: transport.capabilities.source,
       contextLength: transport.capabilities.contextLength,
       detail: transport.capabilities.detail,
-      transports: transport.kinds,
+      transports: transportNames(transport),
     },
     context: { budgetTokens: budget.tokens, source: budget.source, detail: budget.detail },
     oled: { version: cli.version, tarball: cli.tarball, fileCount: cli.fileCount },
@@ -290,14 +270,17 @@ async function run(config: Config): Promise<Result<boolean>> {
   const startedAt = new Date();
   const recorder = createRecorder();
 
-  // First, and before any sandbox work: a model that cannot be sent a statement
-  // must stop the run here rather than earn a report of zero rows.
-  const planned = await step("read what the model accepts", describeTransport, () =>
-    planHostTransport({
-      baseUrl: config.baseUrl,
-      model: config.model,
-      override: config.inputModalities,
-    }),
+  // Before any sandbox work: a model that can't take a statement shouldn't earn a report of zero rows.
+  const planned = await step(
+    "read what the model accepts",
+    () =>
+      planHostTransport({
+        baseUrl: config.baseUrl,
+        model: config.model,
+        override: config.inputModalities,
+      }),
+    (plan) =>
+      `${plan.capabilities.modalities.join("+")} (${plan.capabilities.source}), carried as ${transportNames(plan).join(" or ")}`,
   );
   if (!planned.ok) return planned;
 

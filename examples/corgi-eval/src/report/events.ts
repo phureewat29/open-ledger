@@ -1,9 +1,5 @@
-/**
- * The run's observable vocabulary. The runner emits these; the recorder is the
- * only subscriber that keeps state, and the scorecard reads the recorded stream
- * back to derive every analysis. No event carries a duration: this run measures
- * how a model and the OpenLedger contract fit together, not how fast either is.
- */
+// No event carries a duration: this run measures how a model and the
+// OpenLedger contract fit together, not how fast either is.
 
 export type PhaseId = "ingest" | "resolve" | "answer";
 
@@ -15,12 +11,17 @@ export interface TokenUsage {
 }
 
 /** How the harness refused a tool call before any command could run. */
-export type RejectionType = "unknown_tool" | "bad_tool_args" | "refused_shell";
+export type RejectionType =
+  | "unknown_tool"
+  | "bad_tool_args"
+  | "refused_shell"
+  /** A `<placeholder>` was copied from the docs instead of a real value. */
+  | "refused_placeholder"
+  /** The command acts on the operator's machine, not the sandbox. */
+  | "refused_command";
 
-/**
- * Why a phase's loop ended. A model that answered, one that ran out of calls and
- * one that went quiet look identical in a reply count and mean nothing alike.
- */
+// Why a phase's loop ended - "answered", "call_cap", "stalled" mean very different things
+// despite producing the same reply count.
 export type PhaseExit = "answered" | "call_cap" | "stalled";
 
 /** `ingest commit` counters, read back from its NDJSON summary. */
@@ -37,7 +38,6 @@ export interface ToolObservation {
   subcommand: string;
   /** The argument string the model passed, truncated; bulk rows travel on stdin. */
   args: string;
-  /** Reproducible display of what ran. */
   command: string;
   ok: boolean;
   /** null when nothing ran: the harness refused the call, or the process never finished. */
@@ -47,6 +47,8 @@ export interface ToolObservation {
   message: string;
   /** oled's `hint` field, when the error carried one. */
   hint: string | null;
+  /** The host piped the model's `stdin` field into the command. */
+  stdin: boolean;
   /** NDJSON lines piped to `ingest commit` on stdin; null for every other call. */
   rows: number | null;
   commit: CommitCounters | null;
@@ -55,22 +57,26 @@ export interface ToolObservation {
 }
 
 /**
- * Kept because the run needs them, excluded from the eval: they describe the
- * endpoint, the loop that drives it, and what the host carried on the model's
- * behalf, not the model's fit with the contract. Every one of them is recorded,
- * because a payload the host silently dropped would look like a model mistake.
+ * Excluded from the eval score - these describe the endpoint and host, not the
+ * model - but still recorded, since a payload the host silently dropped would
+ * otherwise look like a model mistake.
  */
 export type OperationalType =
   | "endpoint_retry"
   | "stall_prod"
-  /** The host delivered what a command produced. */
   | "artifacts_attached"
   /** A size or count cap dropped part of it. */
   | "artifacts_capped"
-  /** A file oled named could not be read. */
+  /** A file oled named could not be read, or a `prepare` payload the host could not parse. */
   | "artifacts_unreadable"
   /** The model's input types allow no route for it. */
   | "artifacts_no_route";
+
+/** An operational event a host step produced, minus the phase the runner knows. */
+export interface OperationalNote {
+  operation: OperationalType;
+  detail: string;
+}
 
 export type RunEvent =
   | { type: "phase_start"; phase: PhaseId; title: string }
@@ -86,11 +92,7 @@ export type RunEvent =
       toolCalls: number;
       usage: TokenUsage;
     }
-  /**
-   * `turn` is the llm_call that dispatched it. Calls sharing a turn were sent
-   * together, before any of their results existed, so none of them could have
-   * been informed by another's reply.
-   */
+  // Calls sharing a `turn` were sent together, before any of their results existed.
   | ({ type: "tool_call"; phase: PhaseId; turn: number } & ToolObservation)
   | { type: "context_trim"; phase: PhaseId }
   /** `operation`, not `type`: `type` is already this union's own tag. */

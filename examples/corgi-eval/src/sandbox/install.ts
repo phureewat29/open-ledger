@@ -3,11 +3,7 @@ import { join } from "node:path";
 import { tryExecute, type Result } from "../core/result.js";
 import { execCapture } from "../oled/command.js";
 
-/**
- * Installs OpenLedger the way a user would: pack the repo into a tarball, then
- * `npm install --global` it into a throwaway prefix. The walkthrough scores the
- * published artifact, not the checkout's source tree.
- */
+/** Packs and `npm install --global`s a tarball so the walkthrough scores the published artifact, not the checkout's source tree. */
 
 export interface InstalledCli {
   binPath: string;
@@ -54,10 +50,7 @@ async function pack(repoRoot: string, destination: string): Promise<Result<PackE
   return parsePackJson(packed.value.stdout);
 }
 
-/**
- * `dist/` is what the tarball ships, so a missing build would install a CLI
- * that cannot start — cheaper to say so here than to debug it inside the run.
- */
+/** dist/ is what the tarball ships — a missing build fails here instead of surfacing as a broken CLI mid-run. */
 export async function installPackedCli(args: {
   repoRoot: string;
   tarballDir: string;

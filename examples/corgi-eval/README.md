@@ -16,25 +16,28 @@ npm start
 Needs Node 18 or newer, `npm run build` at the repo root (the sandbox installs the
 packed tarball), and network for that install.
 
-The model must accept image or file input. A statement is a PDF, so a text-only
-model cannot read it and the run stops at startup rather than write a report of
-zero rows. On OpenRouter both the input types and the model's context window are
-read from the model list; on any other endpoint set `LLM_INPUT_MODALITIES`.
+A statement reaches the model as extracted text, or as page images when the
+harness has no text to give. A model that accepts neither is stopped at startup
+rather than left to write a report of zero rows. On OpenRouter both the input
+types and the model's context window are read from the model list; on any other
+endpoint set `LLM_INPUT_MODALITIES`.
 
 `.env`: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_STREAM`, `LLM_TIMEOUT_MS`,
 `LLM_INPUT_MODALITIES`, `CONTEXT_BUDGET_TOKENS`. Flags: `--model`, `--base-url`,
 `--keep` (keep the sandbox), `-h`.
 
 Each run prints a summary and writes `reports/<date>-<model>.md` and `.json`.
+`npm run typecheck` and `npm test` check the harness itself without an endpoint;
+`npm test` needs Node 21 or newer, whose test runner expands the glob it passes.
 
 ## What the host carries
 
 The model has one tool, `oled`, and no way to open a file. So when a command
 reports having produced something to read, the host puts it into the conversation:
-a PDF as a file part for a model that accepts files, page images for a model that
-accepts images, nothing at all for a model that accepts neither. Everything the
-host attaches, cuts to stay inside its size caps, or has no route for is counted
-in the report.
+the extracted document as a text part, page images for a model that accepts
+images, nothing at all for a model that accepts neither. Everything the host
+attaches, cuts to stay inside its size caps, or has no route for is counted in
+the report.
 
 This is transport, not help. The model chooses the command; the host only hands
 back what that command produced, byte for byte. It never opens, parses, or
@@ -52,10 +55,9 @@ own. Whether it does is part of what the eval measures.
 Two of these drove CLI fixes, now shipped. The third is what the eval still
 watches for.
 
-- Models invented `--format text`. `ingest prepare --help` hid the flag, so
-  SKILL.md was the only place it appeared. Fixed: `--format` and `--dpi` now
-  show in `--help`, a `USAGE` error carries a `hint` pointing at `--help`, and a
-  bad `--format` value hints "pdf or png".
+- Models invented `--format text` to ask for text they could read. Fixed at the
+  source: `ingest prepare` now extracts the text itself and returns it whenever it
+  can, and the format flags it was guessing at are gone.
 - `skills/SKILL.md` step 5 told an agent to stage its batch to a file, which an
   agent with no file writes cannot do. Fixed: standard input takes a batch, and
   `ingest commit --help` and the empty-batch hint both say so.

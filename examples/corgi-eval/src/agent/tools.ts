@@ -1,31 +1,31 @@
 import * as z from "zod";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { tryExecute, type Result } from "../core/result.js";
-import { artifactsOf, type OpenLedgerArtifacts } from "../oled/artifacts.js";
+import { artifactsOf, type ArtifactScan, type OpenLedgerArtifacts } from "../oled/artifacts.js";
 import type { OpenLedgerRunner } from "../oled/command.js";
+import { carriesOutput, EXIT, HOST_APPENDED_FLAGS } from "../oled/contract.js";
 import { parseNdjson } from "../oled/ndjson.js";
-import type { CommitCounters, RejectionType, ToolObservation } from "../report/events.js";
+import type {
+  CommitCounters,
+  OperationalNote,
+  RejectionType,
+  ToolObservation,
+} from "../report/events.js";
 
 /**
- * The model's whole surface: the oled CLI, and nothing else. Anything the
- * model needs — reading a statement, committing a batch — it must get through a
- * real oled command, so the run scores the product's own surface rather than
- * a convenience this example invented. Bad arguments come back as a message the
- * model can act on: a tool never throws and never ends the run.
- *
- * A tool reports facts, never verdicts: the observation carries the subcommand,
- * the arguments, the exit code and oled's hint, and the scorecard classifies
- * from those. A refused call still hands back a ToolResult, because a refusal is
- * a result the model must read, not an error to propagate.
+ * A tool never throws: bad args and refusals come back as a normal ToolResult,
+ * and the scorecard classifies outcomes from the observation, not thrown errors.
  */
 
-export interface ToolResult {
-  /** What the model sees. */
-  content: string;
-  /** What the report records. */
-  observation: ToolObservation;
-  /** Files the command reported producing, for the host to carry back. */
+/** What the host took from the call on the model's behalf, and what it wants said about it. */
+interface HostArtifacts {
   artifacts: OpenLedgerArtifacts | null;
+  notes: OperationalNote[];
+}
+
+interface ToolResult extends HostArtifacts {
+  content: string;
+  observation: ToolObservation;
 }
 
 export interface Tool {
@@ -35,8 +35,7 @@ export interface Tool {
   invoke(rawArgs: string): Promise<ToolResult>;
 }
 
-// Large enough for a full `--json` listing of the posted ledger; small enough
-// that one runaway list cannot own the whole context window.
+// Large enough for a full `--json` ledger listing; small enough that one runaway list can't own the whole context window.
 const MAX_TOOL_CONTENT = 60_000;
 
 const MAX_ARGS_ECHO = 400;
@@ -77,6 +76,9 @@ function numberAt(row: Record<string, unknown>, key: string): number {
   return typeof value === "number" ? value : 0;
 }
 
+// A parse error commander answered itself prints `hint: …` instead, so both are read.
+const TEXT_HINT = /^hint:\s*(.+)$/m;
+
 /** oled writes `{"error":{…,"hint":"…"}}` on stderr in --json mode. */
 function hintOf(stderr: string): string | null {
   for (const row of parseNdjson(stderr)) {
@@ -85,21 +87,46 @@ function hintOf(stderr: string): string | null {
     const hint = (error as { hint?: unknown }).hint;
     if (typeof hint === "string" && hint) return hint;
   }
-  return null;
+  return TEXT_HINT.exec(stderr)?.[1]?.trim() ?? null;
+}
+
+/** The line a multi-row command closes with, and the only one that speaks for the whole run. */
+function summaryRow(stdout: string): Record<string, unknown> | null {
+  return parseNdjson(stdout).find((row) => row.type === "summary") ?? null;
 }
 
 /** `posted` appears only in the commit summary, which is what distinguishes it. */
 function commitCountersOf(stdout: string): CommitCounters | null {
-  for (const row of parseNdjson(stdout)) {
-    if (row.type !== "summary" || typeof row.posted !== "number") continue;
-    return {
-      posted: row.posted,
-      duplicates: numberAt(row, "duplicates"),
-      failed: numberAt(row, "failed"),
-      questionsRaised: numberAt(row, "raised_questions"),
-    };
+  const row = summaryRow(stdout);
+  if (!row || typeof row.posted !== "number") return null;
+  return {
+    posted: row.posted,
+    duplicates: numberAt(row, "duplicates"),
+    failed: numberAt(row, "failed"),
+    questionsRaised: numberAt(row, "raised_questions"),
+  };
+}
+
+/**
+ * PARTIAL means the command did some of the work, so the line that says how much
+ * is the summary — row 0 is one result among many and reads as the whole failure.
+ */
+function messageOf(exitCode: number, stdout: string, stderr: string): string {
+  if (exitCode === EXIT.PARTIAL) {
+    const summary = summaryRow(stdout);
+    if (summary) return JSON.stringify(summary);
   }
-  return null;
+  return firstLine(stderr) || firstLine(stdout);
+}
+
+/** `absent` stays silent — most commands prepare nothing. `unreadable` never does: that silence was the bug. */
+function hostArtifacts(scan: ArtifactScan, command: string): HostArtifacts {
+  if (scan.ok) return { artifacts: scan.value, notes: [] };
+  if (scan.reason === "absent") return { artifacts: null, notes: [] };
+  return {
+    artifacts: null,
+    notes: [{ operation: "artifacts_unreadable", detail: `${command}: ${scan.detail}` }],
+  };
 }
 
 function subcommandOf(argv: string[], fallback: string): string {
@@ -111,38 +138,35 @@ function subcommandOf(argv: string[], fallback: string): string {
   return words.join(" ") || fallback;
 }
 
-/** The single exit for every tool: the model's copy and the report's copy of it. */
 function toolResult(
   content: string,
   observation: Omit<ToolObservation, "result">,
-  artifacts: OpenLedgerArtifacts | null,
+  found: HostArtifacts = { artifacts: null, notes: [] },
 ): ToolResult {
   return {
+    ...found,
     content,
     observation: { ...observation, result: truncate(content, MAX_RESULT_ECHO) },
-    artifacts,
   };
 }
 
+/** A refused call ran nothing, so it sent no stdin and has no exit code of its own. */
 function refuse(
   type: RejectionType,
   spec: { tool: string; subcommand: string; args: string; command: string },
   message: string,
 ): ToolResult {
-  return toolResult(
+  return toolResult(message, {
+    ...spec,
+    ok: false,
+    exitCode: null,
+    rejected: type,
     message,
-    {
-      ...spec,
-      ok: false,
-      exitCode: null,
-      rejected: type,
-      message,
-      hint: null,
-      rows: null,
-      commit: null,
-    },
-    null,
-  );
+    hint: null,
+    stdin: false,
+    rows: null,
+    commit: null,
+  });
 }
 
 function parseArgs<T extends z.ZodType>(schema: T, rawArgs: string): Result<z.infer<T>> {
@@ -155,7 +179,6 @@ function parseArgs<T extends z.ZodType>(schema: T, rawArgs: string): Result<z.in
   return { ok: true, value: parsed.data as z.infer<T> };
 }
 
-/** Splits on whitespace outside quotes; quotes group a value and are dropped. */
 function tokenize(input: string): Result<string[]> {
   const tokens: string[] = [];
   let current = "";
@@ -190,8 +213,23 @@ function tokenize(input: string): Result<string[]> {
 /** Tolerates a leading `oled` and guarantees --json, so NDJSON is never optional. */
 function normalizeArgv(tokens: string[]): string[] {
   const argv = tokens[0] === "oled" ? tokens.slice(1) : tokens;
-  return argv.includes("--json") ? argv : [...argv, "--json"];
+  const missing = HOST_APPENDED_FLAGS.filter((flag) => !argv.includes(flag));
+  return [...argv, ...missing];
 }
+
+/** The noun oled dispatches on, before any flag or its value can be mistaken for one. */
+function nounOf(argv: string[]): string {
+  return argv.find((token) => !token.startsWith("-")) ?? "";
+}
+
+/**
+ * Commands whose effect lands outside the sandbox. The refusal says which
+ * machine it would have touched, so the model can tell it apart from a command
+ * that does not exist.
+ */
+const DENIED_NOUNS: Record<string, string> = {
+  open: "refused: `oled open` opens a file-manager window on the machine running this eval, which nobody is watching. Read what oled knows through its own commands instead.",
+};
 
 interface RunSpec {
   tool: string;
@@ -211,6 +249,7 @@ async function runArgv(runner: OpenLedgerRunner, spec: RunSpec): Promise<ToolRes
     subcommand: subcommandOf(spec.argv, spec.tool),
     args: spec.args,
     command,
+    stdin: spec.stdin !== undefined,
     rows: spec.rows,
   };
   const result = await runner.run(
@@ -218,23 +257,18 @@ async function runArgv(runner: OpenLedgerRunner, spec: RunSpec): Promise<ToolRes
     spec.stdin === undefined ? {} : { stdin: spec.stdin },
   );
   if (!result.ok) {
-    return toolResult(
-      JSON.stringify({ exit_code: null, stdout: "", stderr: result.message }),
-      {
-        ...base,
-        ok: false,
-        exitCode: null,
-        rejected: null,
-        message: `${result.reason}: ${result.message}`,
-        hint: null,
-        commit: null,
-      },
-      null,
-    );
+    return toolResult(JSON.stringify({ exit_code: null, stdout: "", stderr: result.message }), {
+      ...base,
+      ok: false,
+      exitCode: null,
+      rejected: null,
+      message: `${result.reason}: ${result.message}`,
+      hint: null,
+      commit: null,
+    });
   }
 
-  // Artifacts come from the untruncated stdout: what the host carries back must
-  // not depend on how much of the reply fit in the model's copy.
+  // Artifacts come from the untruncated stdout, so the host's copy doesn't depend on how much fit in the model's copy.
   const ran = result.value;
   return toolResult(
     truncate(
@@ -243,14 +277,17 @@ async function runArgv(runner: OpenLedgerRunner, spec: RunSpec): Promise<ToolRes
     ),
     {
       ...base,
-      ok: ran.exitCode === 0,
+      ok: ran.exitCode === EXIT.OK,
       exitCode: ran.exitCode,
       rejected: null,
-      message: firstLine(ran.stderr) || firstLine(ran.stdout),
+      message: messageOf(ran.exitCode, ran.stdout, ran.stderr),
       hint: hintOf(ran.stderr),
       commit: commitCountersOf(ran.stdout),
     },
-    ran.exitCode === 0 ? artifactsOf(ran.stdout) : null,
+    // PARTIAL as well as OK: a prepare that lost pages to OCR still names a usable document.
+    carriesOutput(ran.exitCode)
+      ? hostArtifacts(artifactsOf(ran.stdout), command)
+      : { artifacts: null, notes: [] },
   );
 }
 
@@ -267,12 +304,7 @@ function countRows(ndjson: string): number {
   return ndjson.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/**
- * A batch reaches `ingest commit` as NDJSON on stdin, so its line count is how
- * many rows the model sent — the one figure the commit summary cannot supply, and
- * what a posted count has to be read against. Null for every other command,
- * because stdin carries a password there, not rows.
- */
+/** Null outside `ingest commit`, because stdin carries a password there, not rows. */
 function batchRows(argv: string[], stdin: string | undefined): number | null {
   if (stdin === undefined) return null;
   if (subcommandOf(argv, "") !== COMMIT_SUBCOMMAND) return null;
@@ -291,15 +323,28 @@ function prepareRun(rawArgs: string): StagedRun {
 
   const args = truncate(parsed.value.args, MAX_ARGS_ECHO);
   const called = { ...spec, args, command: `oled ${args}` };
+  // Before the shell guard: `<...>` is made of metacharacters, so testing shell
+  // first would file every copied placeholder as an attempt to use a shell.
+  if (PLACEHOLDER.test(parsed.value.args)) {
+    return { ok: false, refusal: refuse("refused_placeholder", called, REFUSED_PLACEHOLDER) };
+  }
   if (SHELL_METACHARACTERS.test(parsed.value.args)) {
-    const message = PLACEHOLDER.test(parsed.value.args) ? REFUSED_PLACEHOLDER : REFUSED_SHELL;
-    return { ok: false, refusal: refuse("refused_shell", called, message) };
+    return { ok: false, refusal: refuse("refused_shell", called, REFUSED_SHELL) };
   }
 
   const tokens = tokenize(parsed.value.args);
   if (!tokens.ok) return { ok: false, refusal: refuse("bad_tool_args", called, tokens.error) };
 
   const argv = normalizeArgv(tokens.value);
+  const noun = nounOf(argv);
+  const denied = DENIED_NOUNS[noun];
+  if (denied) {
+    return {
+      ok: false,
+      refusal: refuse("refused_command", { ...called, subcommand: noun }, denied),
+    };
+  }
+
   return {
     ok: true,
     value: {

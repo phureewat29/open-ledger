@@ -5,18 +5,8 @@ import { tryExecute, type Result } from "../core/result.js";
 
 /**
  * What each statement says, read from the PDF once and checked in beside it as
- * fact. The example ships no PDF machinery of its own: reading a statement is the
- * model's job, through oled, and nothing here may become a second way to do
- * it. Fact files never enter the sandbox, so they cannot leak the answers.
- *
- * One statement, one fact file: `<name>.pdf` is described by `<name>.expected.json`
- * and by nothing else. A run seeds a list of statements and is scored against the
- * sum of their facts, so a second statement is a second pair of files, not a code
- * change.
- *
- * The facts are not trusted blindly. `groups` is what a run is scored against and
- * `summary` is the statement's own box; the loader reconciles them, so a typo in a
- * fact file fails setup instead of failing a model.
+ * fact. Reading a statement is the model's job, through oled; fact files never
+ * enter the sandbox, so they cannot leak the answers.
  */
 
 const GROUP = z.object({

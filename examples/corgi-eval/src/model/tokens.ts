@@ -1,16 +1,12 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-/**
- * One estimator for the whole run, so the trimmer and the reported token counts
- * cannot disagree. Attached bytes are counted at a flat rate per part: base64 is
- * not text, and charging it by the character would have the trimmer throw away
- * the model's own history to pay for one page image.
- */
+// One estimator for the whole run, so the trimmer and the reported counts
+// cannot disagree.
 
 const CHARS_PER_TOKEN = 4;
 
-// A statement page at 200 dpi costs roughly this much as an image; its base64
-// text is about ten times longer.
+// Attachments are charged flat, not per character — base64 isn't text, and
+// per-character charging would make the trimmer discard real history for one image.
 const TOKENS_PER_ATTACHED_PART = 1_600;
 
 export function estimateTextTokens(text: string): number {

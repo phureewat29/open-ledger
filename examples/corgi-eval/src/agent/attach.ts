@@ -8,52 +8,34 @@ import { tryExecute, type Result } from "../core/result.js";
 import {
   resolveCapabilities,
   type CapabilityQuery,
-  type Modality,
   type ModelCapabilities,
 } from "../model/capabilities.js";
-import type { OpenLedgerArtifacts } from "../oled/artifacts.js";
-import type { OperationalType } from "../report/events.js";
+import type { OpenLedgerArtifacts, PageImageArtifact } from "../oled/artifacts.js";
+import type { OperationalNote } from "../report/events.js";
 
 /**
- * The host's one job with a statement: hand back what the model asked oled
- * to produce, in a form the model accepts. That is the service Claude Code's
- * Read performs in examples/corgi-claude, and it stops there. Bytes travel
- * verbatim; nothing here opens, parses, extracts from, or summarizes a
- * statement, because doing the model's work would leave nothing to measure.
+ * Hands back exactly what oled produced, verbatim — no opening, parsing, or
+ * summarizing here. Doing the model's work here would leave nothing to measure.
  */
-
-const TRANSPORTS = ["file", "images"] as const;
-
-/** file: the PDF as one file part. images: one part per rasterized page. */
-export type TransportKind = (typeof TRANSPORTS)[number];
-
-const TRANSPORT_MODALITY: Record<TransportKind, Modality> = { file: "file", images: "image" };
 
 export interface TransportPlan {
   capabilities: ModelCapabilities;
-  /** Routes the model's input types allow, in the order they are tried. */
-  kinds: TransportKind[];
+  /** The extracted document, carried as one text part. */
+  text: boolean;
+  /** Page images, carried as one part each. */
+  images: boolean;
 }
 
-/** An operational note: what the host delivered, or what it could not. */
-export interface AttachmentNote {
-  operation: OperationalType;
-  detail: string;
-}
-
-export interface Attached {
+interface Attached {
   /** The message carrying the bytes, or null when no route applied. */
   message: ChatCompletionUserMessageParam | null;
-  notes: AttachmentNote[];
+  notes: OperationalNote[];
 }
 
-// A 6-page statement at --dpi 200 measures 1.9 MB, so these bound a runaway
-// (a long file at a high dpi) well clear of the expected path.
+// A 6-page statement rasterized at 200 dpi measures 1.9 MB, so these bound a
+// runaway (a long statement) well clear of the expected path.
 const MAX_ATTACHED_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHED_PAGES = 16;
-
-const IMAGE_MEDIA_TYPE = "image/png";
-const DOCUMENT_MEDIA_TYPE = "application/pdf";
 
 function dataUri(mediaType: string, bytes: Buffer): string {
   return `data:${mediaType};base64,${bytes.toString("base64")}`;
@@ -64,28 +46,38 @@ function count(total: number, noun: string): string {
 }
 
 /**
- * Resolves what the model accepts, then the routes to it. A model that takes
- * neither a file nor an image fails the run here, before any sandbox work: the
- * alternative is a report of zero rows that blames the model for the harness.
+ * Fails here when the model accepts neither text nor image, before any
+ * sandbox work — the alternative is a zero-row report that blames the model
+ * for the harness.
  */
 export async function planHostTransport(query: CapabilityQuery): Promise<Result<TransportPlan>> {
   const probed = await resolveCapabilities(query);
   if (!probed.ok) return probed;
 
   const capabilities = probed.value;
-  const kinds = TRANSPORTS.filter((kind) =>
-    capabilities.modalities.includes(TRANSPORT_MODALITY[kind]),
-  );
-  if (kinds.length === 0) {
+  const plan: TransportPlan = {
+    capabilities,
+    text: capabilities.modalities.includes("text"),
+    images: capabilities.modalities.includes("image"),
+  };
+  if (!plan.text && !plan.images) {
     return {
       ok: false,
       error:
         `${query.model} accepts ${capabilities.modalities.join(", ")} and nothing else (${capabilities.detail}). ` +
-        `OpenLedger hands a statement back as a PDF file or as PNG page images, and the model cannot be sent either, ` +
-        `so it cannot read the statement and cannot be scored on this task. Run a model that accepts image or file input.`,
+        `OpenLedger hands a statement back as extracted text or as page images, and the model cannot be sent either, ` +
+        `so it cannot read the statement and cannot be scored on this task. Run a model that accepts text or image input.`,
     };
   }
-  return { ok: true, value: { capabilities, kinds } };
+  return { ok: true, value: plan };
+}
+
+/** How a statement can reach this model, in the order the routes are tried. */
+export function transportNames(plan: TransportPlan): string[] {
+  const names: string[] = [];
+  if (plan.text) names.push("the extracted document as text");
+  if (plan.images) names.push("page images");
+  return names;
 }
 
 /** Names the files and where they came from. Anything more would be coaching. */
@@ -93,7 +85,13 @@ function sourceOf(paths: string[]): string {
   return `${paths.map((path) => basename(path)).join(", ")} in ${dirname(paths[0] ?? "")}`;
 }
 
-async function attachDocument(path: string): Promise<Attached> {
+/** Named in the note, never to the model: a hole in the document is the operator's problem to see. */
+function placeholders(failedPages: number[]): string {
+  if (failedPages.length === 0) return "";
+  return `, ${count(failedPages.length, "page")} carrying an OCR placeholder (${failedPages.join(", ")})`;
+}
+
+async function attachDocument(path: string, failedPages: number[]): Promise<Attached> {
   const read = await tryExecute(() => readFile(path));
   if (!read.ok) {
     return {
@@ -120,50 +118,49 @@ async function attachDocument(path: string): Promise<Attached> {
       content: [
         {
           type: "text",
-          text: `Attached: the PDF the command above produced, ${sourceOf([path])}.`,
+          text: `Attached: the document the command above produced, ${sourceOf([path])}.`,
         },
-        {
-          type: "file",
-          file: {
-            filename: basename(path),
-            file_data: dataUri(DOCUMENT_MEDIA_TYPE, read.value),
-          },
-        },
+        { type: "text", text: read.value.toString("utf8") },
       ],
     },
-    notes: [{ operation: "artifacts_attached", detail: `the PDF ${path}, ${bytes} bytes` }],
+    notes: [
+      {
+        operation: "artifacts_attached",
+        detail: `the document ${path}, ${bytes} bytes${placeholders(failedPages)}`,
+      },
+    ],
   };
 }
 
-async function attachPages(paths: string[]): Promise<Attached> {
-  const notes: AttachmentNote[] = [];
-  const wanted = paths.slice(0, MAX_ATTACHED_PAGES);
-  if (wanted.length < paths.length) {
+async function attachPages(pages: PageImageArtifact[]): Promise<Attached> {
+  const notes: OperationalNote[] = [];
+  const wanted = pages.slice(0, MAX_ATTACHED_PAGES);
+  if (wanted.length < pages.length) {
     notes.push({
       operation: "artifacts_capped",
-      detail: `${paths.length} pages produced, ${MAX_ATTACHED_PAGES}-page cap: attached the first ${wanted.length}`,
+      detail: `${pages.length} pages produced, ${MAX_ATTACHED_PAGES}-page cap: attached the first ${wanted.length}`,
     });
   }
 
   const parts: ChatCompletionContentPart[] = [];
   const attached: string[] = [];
   let bytes = 0;
-  for (const path of wanted) {
-    const read = await tryExecute(() => readFile(path));
+  for (const page of wanted) {
+    const read = await tryExecute(() => readFile(page.path));
     if (!read.ok) {
-      notes.push({ operation: "artifacts_unreadable", detail: `${path}: ${read.error}` });
+      notes.push({ operation: "artifacts_unreadable", detail: `${page.path}: ${read.error}` });
       continue;
     }
     if (bytes + read.value.byteLength > MAX_ATTACHED_BYTES) {
       notes.push({
         operation: "artifacts_capped",
-        detail: `${MAX_ATTACHED_BYTES}-byte cap reached: attached ${attached.length} of ${paths.length} pages`,
+        detail: `${MAX_ATTACHED_BYTES}-byte cap reached: attached ${attached.length} of ${pages.length} pages`,
       });
       break;
     }
     bytes += read.value.byteLength;
-    attached.push(path);
-    parts.push({ type: "image_url", image_url: { url: dataUri(IMAGE_MEDIA_TYPE, read.value) } });
+    attached.push(page.path);
+    parts.push({ type: "image_url", image_url: { url: dataUri(page.mediaType, read.value) } });
   }
 
   if (parts.length === 0) return { message: null, notes };
@@ -188,22 +185,23 @@ async function attachPages(paths: string[]): Promise<Attached> {
 }
 
 function describe(artifacts: OpenLedgerArtifacts): string {
-  if (artifacts.document) return `the PDF ${artifacts.document}`;
+  if (artifacts.document) return `the document ${artifacts.document}`;
   return count(artifacts.pages.length, "page image");
 }
 
 /**
- * A PDF goes as a file part when the model reads files, otherwise page images go
- * as images. Neither means nothing is attached: degrading from there is what
- * `oled ingest --help` tells the model to do, and whether it finds that is what
- * is being measured.
+ * Neither route applying means nothing is attached: degrading from there is
+ * what `oled ingest prepare --help` tells the model to do, and whether it
+ * finds that is what is being measured.
  */
 export async function attachArtifacts(
   plan: TransportPlan,
   artifacts: OpenLedgerArtifacts,
 ): Promise<Attached> {
-  if (artifacts.document && plan.kinds.includes("file")) return attachDocument(artifacts.document);
-  if (artifacts.pages.length > 0 && plan.kinds.includes("images")) return attachPages(artifacts.pages);
+  if (artifacts.document && plan.text) {
+    return attachDocument(artifacts.document, artifacts.failedPages);
+  }
+  if (artifacts.pages.length > 0 && plan.images) return attachPages(artifacts.pages);
   return {
     message: null,
     notes: [

@@ -1,18 +1,12 @@
+import { errorShapeOf, plainMessage, type ErrorShape } from "../oled/contract.js";
 import type { PhaseExit, PhaseId, RunEvent, ToolObservation } from "./events.js";
 import type { PhaseTally } from "./recorder.js";
 
-/**
- * Why a run stopped where it did, read off the same event stream as everything
- * else. Nothing here scores: it answers the one question the scorecard cannot,
- * which is whether the harness left the model anything to succeed with. Three
- * runs scored zero rows before anyone noticed the model had no way to read a
- * statement, and every fact needed to see it was already in these events.
- */
+// Diagnoses why a run stopped, without scoring — the question the scorecard doesn't answer.
 
-/** What the model reached for that does not exist. */
-export type MissingKind = "tool" | "command" | "flag" | "flag_value";
+export type MissingKind = "tool" | "command" | "flag";
 
-export interface MissingCapability {
+interface MissingCapability {
   kind: MissingKind;
   /** Verbatim, as the model asked for it. */
   asked: string;
@@ -22,7 +16,7 @@ export interface MissingCapability {
   command: string;
 }
 
-export interface SelfReportedBlocker {
+interface SelfReportedBlocker {
   phase: PhaseId;
   /** Which reply of the phase said it, counting from 1. */
   reply: number;
@@ -30,7 +24,7 @@ export interface SelfReportedBlocker {
   sentence: string;
 }
 
-export interface PhaseLedger {
+interface PhaseLedger {
   postedRows: number;
   filesIngested: number;
   questionsOpen: number;
@@ -66,44 +60,25 @@ export interface RunDiagnosis {
   progress: PhaseProgress[];
 }
 
-export interface DiagnosisInput {
+interface DiagnosisInput {
   events: RunEvent[];
   phases: PhaseTally[];
   snapshots: PhaseSnapshot[];
 }
 
-interface MissingRule {
-  kind: MissingKind;
-  pattern: RegExp;
-  asked: (match: RegExpExecArray) => string;
-}
-
 /**
- * Read from what the harness or the CLI said back, never guessed from the
- * arguments: a rule fires only when the reply names the thing that is absent.
- * Anything subtler stays out, because a false gap is worse than a missed one.
+ * Which of oled's error shapes names something the CLI does not have. A flag
+ * given a bad or empty value is not one — the flag exists, so it is friction
+ * over its value, and reporting it here read as a capability the CLI lacks.
  */
-const MISSING_RULES: MissingRule[] = [
-  { kind: "tool", pattern: /^unknown tool: (.+?)\./, asked: (match) => match[1] ?? "" },
-  { kind: "flag", pattern: /unknown option '?(--[a-z0-9-]+)'?/i, asked: (match) => match[1] ?? "" },
-  {
-    kind: "command",
-    pattern: /unknown command '?([a-z0-9:_-]+)'?/i,
-    asked: (match) => match[1] ?? "",
-  },
-  {
-    // Both forms the CLI writes: `(got "x")` and `, got "x"`.
-    kind: "flag_value",
-    pattern: /(--[a-z0-9-]+) must be .*?[(,]\s*got "([^"]+)"/i,
-    asked: (match) => `${match[1]} ${match[2]}`,
-  },
-];
+const MISSING_BY_SHAPE: Record<ErrorShape, MissingKind | null> = {
+  unknown_flag: "flag",
+  unknown_command: "command",
+  flag_value: null,
+};
 
-/**
- * First-person inability in the present tense. A sentence about the ledger being
- * empty is not a blocker, and neither is a conditional: "if I couldn't map a
- * category" describes a rule the model was explaining, not a wall it hit.
- */
+// First-person inability, present tense: a conditional like "if I couldn't map a
+// category" describes a rule the model was explaining, not a wall it hit.
 const BLOCKER_PATTERNS = [
   /\bI (?:cannot|can't|can not)\b/i,
   /\bI(?:'m| am) unable to\b/i,
@@ -116,21 +91,16 @@ const BLOCKER_PATTERNS = [
 
 const MAX_SENTENCE = 300;
 
-/** oled's `--json` errors arrive as a JSON line, so the quotes inside are escaped. */
-function plainMessage(message: string): string {
-  return message.replace(/\\"/g, '"');
-}
-
+/** The harness names the tool itself, so no message has to be read for that case. */
 function askedFor(observation: ToolObservation): { kind: MissingKind; asked: string } | null {
   if (observation.ok) return null;
-  const message = plainMessage(observation.message);
-  for (const rule of MISSING_RULES) {
-    const match = rule.pattern.exec(message);
-    if (!match) continue;
-    const asked = rule.asked(match);
-    if (asked) return { kind: rule.kind, asked };
+  if (observation.rejected === "unknown_tool") {
+    return { kind: "tool", asked: observation.tool };
   }
-  return null;
+  const shape = errorShapeOf(observation.message);
+  if (!shape) return null;
+  const kind = MISSING_BY_SHAPE[shape.shape];
+  return kind === null ? null : { kind, asked: shape.asked };
 }
 
 function blockerSentences(content: string): string[] {
@@ -187,7 +157,6 @@ function buildProgress(phases: PhaseTally[], snapshots: PhaseSnapshot[]): PhaseP
   }));
 }
 
-/** One pass, first match wins: the earliest wall is the one worth reading first. */
 function findFirstWall(events: RunEvent[]): Wall | null {
   const calls = new Map<PhaseId, number>();
   const replies = new Map<PhaseId, number>();

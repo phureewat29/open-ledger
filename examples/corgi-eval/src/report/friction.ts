@@ -1,49 +1,52 @@
+import { byExitCode, errorShapeOf, HOST_APPENDED_FLAGS } from "../oled/contract.js";
 import type { PhaseId, RunEvent, ToolObservation } from "./events.js";
 
 /**
- * Where the model and the OpenLedger contract collided, and whether the contract's
- * own error copy got the model unstuck. Nothing here is pass/fail: it is the
- * diagnostic feed for changing the CLI, so every item keeps enough context to
- * read as "the model tried X, oled said Y, the model then did Z".
+ * Not pass/fail: a diagnostic feed for changing the CLI. Every item keeps
+ * enough context to read as "the model tried X, oled said Y, then did Z".
  */
 
-export type FrictionType =
+type FrictionType =
   | "unknown_flag"
   | "unknown_command"
+  /** A flag that exists, given a value oled rejects — or left empty, swallowing the next token. */
+  | "flag_value"
   | "usage_error"
+  | "not_ready"
   | "input_required"
   | "not_found"
   | "invalid"
+  /** The command did part of the work: a commit with failed rows, or a document missing OCR pages. */
+  | "partial"
   | "command_error"
   | "bad_tool_args"
   | "unknown_tool"
   | "refused_shell"
+  | "refused_placeholder"
+  | "refused_command"
   | "bad_date_format"
   | "missed_hint"
-  /** Fits nothing above. Reported as itself, so the gap in this list is visible. */
+  /** Matches nothing above; reported as itself so a taxonomy gap stays visible. */
   | "unknown";
 
 /**
- * What the model did next at the same subcommand. `same_turn` is the absence of
- * an answer rather than an outcome: every other attempt was dispatched in the
- * same turn, before this result existed, so none of them can say whether the
- * error copy taught anything.
+ * `same_turn` isn't an outcome but the absence of one: every other attempt at
+ * this subcommand was dispatched before this result existed, so none of them
+ * can show whether the error copy taught anything.
  */
-export type RecoveryOutcome = "recovered" | "repeated" | "changed" | "abandoned" | "same_turn";
+type RecoveryOutcome = "recovered" | "repeated" | "changed" | "abandoned" | "same_turn";
 
-export interface NextAttempt {
+interface NextAttempt {
   command: string;
   args: string;
   ok: boolean;
   message: string;
-  /** true when this attempt did what the previous failure's hint asked. */
   followedHint: boolean;
 }
 
 export interface FrictionItem {
   type: FrictionType;
   phase: PhaseId;
-  /** The turn that dispatched the call, so concurrent siblings are visible. */
   turn: number;
   tool: string;
   subcommand: string;
@@ -51,22 +54,20 @@ export interface FrictionItem {
   command: string;
   exitCode: number | null;
   message: string;
-  /** oled's hint, verbatim. */
   hint: string | null;
-  /** The next attempt at this subcommand in a LATER turn; null when there was none. */
+  /** In a LATER turn only; null when there was none. */
   next: NextAttempt | null;
   /** null when the call succeeded and the friction is misuse rather than failure. */
   recovery: RecoveryOutcome | null;
 }
 
-export interface TypeCount {
+interface TypeCount {
   type: FrictionType;
   count: number;
 }
 
-export interface Recovery {
+interface Recovery {
   rows: RecoveryRow[];
-  /** Every failure the walk looked at. */
   encountered: number;
   /** Failures with a later turn to answer them: the rate's denominator. */
   judged: number;
@@ -78,7 +79,7 @@ export interface Recovery {
 }
 
 /** One row per friction type; the five outcome counts add up to `encountered`. */
-export interface RecoveryRow {
+interface RecoveryRow {
   type: FrictionType;
   encountered: number;
   recovered: number;
@@ -88,7 +89,7 @@ export interface RecoveryRow {
   sameTurn: number;
 }
 
-/** The actionable unit for changing the CLI: one row per subcommand touched. */
+/** One row per subcommand touched — the unit for changing the CLI. */
 export interface SubcommandRow {
   subcommand: string;
   calls: number;
@@ -105,7 +106,7 @@ export interface SubcommandRow {
   recoveryRate: number | null;
 }
 
-export interface HintEfficacy {
+interface HintEfficacy {
   /** Failures where oled emitted a hint. */
   emitted: number;
   /** Of those, hints whose "followed" is decidable: one naming a flag, or the help advice. */
@@ -129,28 +130,35 @@ export interface FrictionAnalysis {
   hints: HintEfficacy;
 }
 
-const EXIT_FRICTION: Record<number, FrictionType> = {
-  2: "usage_error",
-  4: "input_required",
-  5: "not_found",
-  6: "invalid",
-};
+/** One row per exit code oled can leave, so a new code fails to compile until it has a class. */
+const FRICTION_BY_EXIT = byExitCode<FrictionType>({
+  GENERIC: "command_error",
+  USAGE: "usage_error",
+  NOT_READY: "not_ready",
+  INPUT_REQUIRED: "input_required",
+  NOT_FOUND: "not_found",
+  INVALID: "invalid",
+  PARTIAL: "partial",
+});
 
-const UNKNOWN_OPTION = /unknown option/i;
-const UNKNOWN_COMMAND = /unknown command/i;
 const DATE_FLAG = /--(?:from|to)(?:=|\s+)"?([^\s"]+)"?/g;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HINT_FLAG = /--[a-z][a-z0-9-]*/g;
-const HINT_STDIN = /\bstdin\b/i;
+/**
+ * Offering the route: "on stdin", "pipe them". Never the word inside a flag
+ * name like `--password-stdin`, which `flags` already covers, and never
+ * "pipeline".
+ */
+const HINT_STDIN = /(?<![-\w])stdin\b|\bpipe[ds]?\b/i;
 const HELP_FLAGS = ["--help", "-h"];
 
-interface Attempt {
+export interface Attempt {
   phase: PhaseId;
   turn: number;
   observation: ToolObservation;
 }
 
-function toolCalls(events: RunEvent[]): Attempt[] {
+export function toolCalls(events: RunEvent[]): Attempt[] {
   const calls: Attempt[] = [];
   for (const event of events) {
     if (event.type !== "tool_call") continue;
@@ -170,21 +178,24 @@ function isHelpCall(args: string): boolean {
 }
 
 /**
- * What a hint asks for. The root CLI appends "append --help to the command" to
- * every usage error, which names no flag the call was missing: it is advice to go
- * read, so a help call and a working call both answer it, and nothing answers it
- * wrongly. `flags` is therefore empty for those, and only a hint naming a real
- * flag can be missed.
+ * What a hint asks for. A generic "append --help" hint names no flag, so
+ * it's advisory: a help call or a working call both satisfy it, and nothing
+ * can miss it. A hint naming a real flag, or offering stdin, can be missed.
  */
 interface HintAsk {
   flags: string[];
   advisory: boolean;
-  /** The hint offers stdin as a route, so a batch sent there follows it. */
+  /** The hint offers stdin as a route, so anything sent there follows it. */
   stdin: boolean;
 }
 
+/**
+ * Host-appended flags are dropped before anything else: this harness puts
+ * `--json` on every call, so a hint naming it is followed no matter what the
+ * model does and can decide nothing.
+ */
 function hintAsk(hint: string | null): HintAsk {
-  const named = hintFlags(hint);
+  const named = hintFlags(hint).filter((flag) => !HOST_APPENDED_FLAGS.includes(flag));
   const advisory = named.length > 0 && named.every((flag) => HELP_FLAGS.includes(flag));
   return {
     flags: advisory ? [] : named,
@@ -195,12 +206,12 @@ function hintAsk(hint: string | null): HintAsk {
 
 /** A hint that asks for nothing decidable is neither followed nor ignored. */
 function isActionable(ask: HintAsk): boolean {
-  return ask.advisory || ask.flags.length > 0;
+  return ask.advisory || ask.flags.length > 0 || ask.stdin;
 }
 
 function follows(ask: HintAsk, o: ToolObservation): boolean {
   if (ask.advisory) return isHelpCall(o.args) || o.ok;
-  if (ask.stdin && (o.rows ?? 0) > 0) return true;
+  if (ask.stdin && o.stdin) return true;
   return ask.flags.some((flag) => o.args.includes(flag));
 }
 
@@ -213,25 +224,19 @@ function badDateValue(args: string): boolean {
 }
 
 /**
- * One type per call, most specific first: a refusal outranks everything because
- * nothing ran, a misuse outranks the exit code because it says why the call was
- * wrong, and `missed_hint` outranks the exit code it would otherwise repeat.
- *
- * The last two arms are the floor. `command_error` is a command that ran and
- * failed on an exit code this list does not name; `unknown` is a failure with no
- * exit code, no refusal and no stderr this reader recognizes. Reporting it as
- * `unknown` says the taxonomy is short a type, which is worth knowing. Filing it
- * under the nearest neighbour would hide that.
+ * Ordered most specific first: a refusal outranks everything since nothing
+ * ran, misuse outranks the exit code since it explains the call, and
+ * `missed_hint` outranks the exit code it would otherwise repeat.
  */
 function classify(o: ToolObservation, missed: boolean): FrictionType | null {
   if (o.rejected) return o.rejected;
   if (badDateValue(o.args)) return "bad_date_format";
   if (o.ok) return null;
   if (missed) return "missed_hint";
-  if (UNKNOWN_OPTION.test(o.message)) return "unknown_flag";
-  if (UNKNOWN_COMMAND.test(o.message)) return "unknown_command";
+  const shape = errorShapeOf(o.message);
+  if (shape) return shape.shape;
   if (o.exitCode === null) return "unknown";
-  return EXIT_FRICTION[o.exitCode] ?? "command_error";
+  return FRICTION_BY_EXIT.get(o.exitCode) ?? "unknown";
 }
 
 /** The last failing attempt at a subcommand: what its hint asked for, and when. */
@@ -241,25 +246,22 @@ interface Outstanding {
 }
 
 /**
- * A hint can only be missed by a call the model sent after reading it. A sibling
- * dispatched in the same turn was already in flight, so it cannot have ignored
- * anything.
+ * Only missable by a later call: a sibling dispatched in the same turn was
+ * already in flight and can't have ignored anything.
  */
 function missedHint(call: Attempt, outstanding: Outstanding | undefined): boolean {
-  if (!outstanding || outstanding.ask.flags.length === 0) return false;
+  if (!outstanding) return false;
+  if (outstanding.ask.flags.length === 0 && !outstanding.ask.stdin) return false;
   if (outstanding.turn >= call.turn) return false;
   return !follows(outstanding.ask, call.observation);
 }
 
 /**
- * The other attempts at this call's subcommand, split by whether the model could
- * have read this result first. Turns rise with the event order, so a later turn
- * is always a later call.
+ * Other attempts at this subcommand, split by whether the model could have
+ * read this result first (turns rise with event order).
  */
 interface Followups {
-  /** Attempts in a later turn: the only ones that can show a reaction. */
   later: Attempt[];
-  /** true when another attempt shared this turn, so no reaction was possible. */
   concurrent: boolean;
 }
 
@@ -409,10 +411,6 @@ function buildSubcommands(calls: Attempt[], items: FrictionItem[]): SubcommandRo
   );
 }
 
-/**
- * A hint the model never got a later turn to act on is neither followed nor
- * ignored: `judged` is the only population "followed" can be read against.
- */
 function buildHintEfficacy(calls: Attempt[]): HintEfficacy {
   let emitted = 0;
   let actionable = 0;
@@ -446,8 +444,7 @@ function buildHintEfficacy(calls: Attempt[]): HintEfficacy {
   };
 }
 
-export function analyzeFriction(events: RunEvent[]): FrictionAnalysis {
-  const calls = toolCalls(events);
+export function analyzeFriction(calls: Attempt[]): FrictionAnalysis {
   const outstanding = new Map<string, Outstanding>();
   const items: FrictionItem[] = [];
 
@@ -487,17 +484,13 @@ export function analyzeFriction(events: RunEvent[]): FrictionAnalysis {
 }
 
 /**
- * Commands the model sent more than once. Two kinds are excluded. Calls carrying
- * a batch on stdin have an argv that is identical by design
- * (`ingest commit --file <sf:id>`) while the rows differ, so counting them here
- * would report five distinct batches as four repeats; re-sending the same batch
- * shows up in `redundantCommits`, which reads what oled actually posted. Help
- * calls are the contract working: the skill sends the model to `--help`, and
- * reading the same page twice is not flailing.
+ * Excludes stdin-batch calls (`ingest commit --file <sf:id>` shares an
+ * identical argv by design while its rows differ — see `redundantCommits`)
+ * and help calls (the contract working as intended, not flailing).
  */
-export function repeatedCommands(events: RunEvent[]): number {
+export function repeatedCommands(calls: Attempt[]): number {
   const seen = new Map<string, number>();
-  for (const call of toolCalls(events)) {
+  for (const call of calls) {
     if (call.observation.rows !== null) continue;
     if (isHelpCall(call.observation.args)) continue;
     seen.set(call.observation.command, (seen.get(call.observation.command) ?? 0) + 1);
@@ -505,14 +498,13 @@ export function repeatedCommands(events: RunEvent[]): number {
   return [...seen.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
 }
 
-/** Calls that asked for `--help`, whatever the subcommand. */
-export function helpCalls(events: RunEvent[]): number {
-  return toolCalls(events).filter((call) => isHelpCall(call.observation.args)).length;
+export function helpCalls(calls: Attempt[]): number {
+  return calls.filter((call) => isHelpCall(call.observation.args)).length;
 }
 
 /** Commits that posted nothing because every row already existed. */
-export function redundantCommits(events: RunEvent[]): number {
-  return toolCalls(events).filter((call) => {
+export function redundantCommits(calls: Attempt[]): number {
+  return calls.filter((call) => {
     const commit = call.observation.commit;
     return commit !== null && commit.posted === 0 && commit.duplicates > 0;
   }).length;

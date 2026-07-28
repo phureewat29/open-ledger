@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx --env-file-if-exists=.env src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "chalk": "^5.6.2",

@@ -1,28 +1,26 @@
 import { spawn } from "node:child_process";
 
 /**
- * The only module in the walkthrough that starts a process. A non-zero exit is
- * data (`CommandOk.exitCode`), not a failure — the harness has to score it.
- * A failure is reserved for a command that never ran or never finished.
+ * A non-zero exit is data (`CommandOk.exitCode`), not a failure — the harness
+ * scores it. Failure means the command never ran or never finished.
  */
 
-export interface CommandOk {
+interface CommandOk {
   argv: string[];
   exitCode: number;
   stdout: string;
   stderr: string;
 }
 
-/** Callers read `kind` to tell a command that never started from one that hung. */
-export interface CommandFailure {
+interface CommandFailure {
   ok: false;
   reason: "spawn_failed" | "timeout";
   message: string;
 }
 
-export type CommandResult = { ok: true; value: CommandOk } | CommandFailure;
+type CommandResult = { ok: true; value: CommandOk } | CommandFailure;
 
-export interface ExecOptions {
+interface ExecOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   stdin?: string;

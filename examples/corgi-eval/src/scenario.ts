@@ -11,11 +11,8 @@ const STATEMENT_PASSWORD = "password";
 /** Statements a run seeds, from `fixtures/`; each `<name>.pdf` has a `<name>.expected.json` beside it. */
 export const STATEMENT_FIXTURES = ["card-statement-2026-05.pdf"];
 
-/**
- * One continuous conversation: the phases share a message history. The prompts
- * mirror the tasks the root README tells a user to give their agent, plus the
- * two things a scored run needs: the fixture's password and a row-count claim.
- */
+// One continuous conversation: the phases share a message history; prompts
+// ask for exactly what scoring needs (password used, rows posted).
 export const SCENARIO: Phase[] = [
   {
     id: "ingest",
@@ -35,10 +32,9 @@ export const SCENARIO: Phase[] = [
 ];
 
 /**
- * Environment facts the model cannot infer, and nothing else. Every rule about
- * using oled is deliberately absent: SKILL.md and `oled <noun> --help`
- * are the surface under test, so repeating their advice here would measure this
- * text instead of the harness.
+ * Environment facts the model cannot infer, and nothing else. Usage rules for
+ * `oled` are deliberately absent — SKILL.md and `--help` are the surface under
+ * test, so repeating their advice here would measure this text instead.
  */
 export const ENVIRONMENT_ADAPTER = `## This environment
 

@@ -5,21 +5,22 @@ import {
   helpCalls,
   redundantCommits,
   repeatedCommands,
+  toolCalls,
   type FrictionAnalysis,
 } from "./friction.js";
 import type { OperationalType, PhaseId } from "./events.js";
 import type { PhaseTally, RunMetrics } from "./recorder.js";
 
 /**
- * The verdict and the diagnostics behind it. Only two sections decide the
- * verdict: what the pairing accomplished, and whether the model's prose matches
- * the ledger. Friction, recovery, and volume are reported, never scored.
+ * Only two sections decide `passed`: what the pairing accomplished, and
+ * whether the model's prose matches the ledger. Friction, recovery, and
+ * volume are reported, never scored.
  */
 
 /** not_applicable: the reading has no meaning yet, so it cannot pass or fail. */
 export type CheckStatus = "pass" | "fail" | "not_applicable";
 
-export interface Check {
+interface Check {
   id: string;
   label: string;
   status: CheckStatus;
@@ -27,7 +28,6 @@ export interface Check {
   actual: string;
 }
 
-/** match: the claim is true. mismatch: it contradicts the ledger. not_stated: no claim found. */
 export type ClaimStatus = "match" | "mismatch" | "not_stated";
 
 export interface Claim {
@@ -39,7 +39,7 @@ export interface Claim {
   passed: boolean;
 }
 
-export interface Profile {
+interface Profile {
   modelCalls: number;
   toolCalls: number;
   /** Of those, calls that asked for `--help`. The skill sends the model there. */
@@ -66,7 +66,7 @@ export interface Scorecard {
   passed: boolean;
 }
 
-export interface ScorecardInput {
+interface ScorecardInput {
   metrics: RunMetrics;
   ledger: LedgerProbe;
   expected: ExpectedLedger;
@@ -145,11 +145,10 @@ function uncategorizedCheck(ledger: LedgerProbe): Check {
 }
 
 /**
- * The expected count is the sum of the statement's charge, refund and payment
- * groups, so the ledger side has to be the same three groups. Counting every row
- * instead failed a run for an opening balance: a row the statement's own totals do
- * not cover, which `oled transactions --help` shows how to post, and the reason
- * the money checks passed while this one did not.
+ * Expected is the sum of the statement's charge, refund and payment groups,
+ * so the ledger side must be the same three groups — counting every row
+ * instead failed a run for an opening balance, a row the statement's totals
+ * don't cover.
  */
 function rowsCheck(ledger: LedgerProbe, expected: number): Check {
   const grouped = groupedRows(ledger.money);
@@ -278,19 +277,21 @@ export function buildScorecard(input: ScorecardInput): Scorecard {
   const { metrics, ledger } = input;
   const outcome = outcomeChecks(input);
   const claims = truthfulness(input);
+  // One pass over the event log: every reading below is taken from the same calls.
+  const calls = toolCalls(metrics.events);
 
   return {
     outcome,
-    friction: analyzeFriction(metrics.events),
+    friction: analyzeFriction(calls),
     truthfulness: claims,
     profile: {
       modelCalls: metrics.llmCalls,
       toolCalls: metrics.toolCalls,
-      helpCalls: helpCalls(metrics.events),
+      helpCalls: helpCalls(calls),
       toolCallsPerPostedRow:
         ledger.postedRows > 0 ? metrics.toolCalls / ledger.postedRows : null,
-      repeatedCommands: repeatedCommands(metrics.events),
-      redundantCommits: redundantCommits(metrics.events),
+      repeatedCommands: repeatedCommands(calls),
+      redundantCommits: redundantCommits(calls),
       contextTrims: metrics.contextTrims,
       tokensIn: metrics.tokensIn,
       tokensOut: metrics.tokensOut,

@@ -2,14 +2,11 @@ import * as z from "zod";
 import { tryExecute, type Result } from "../core/result.js";
 
 /**
- * What the endpoint says a model can take: which input types, and how big a
- * window. The host has to know both before the run starts. OpenLedger hands a
- * statement back as a PDF or as PNG pages, so a model that accepts neither
- * cannot be scored on this task; and a budget set above the model's real window
- * turns an endpoint error into what reads like a model failure.
+ * Modalities and context budget must both be known before the run starts:
+ * getting either wrong misattributes an endpoint failure to the model.
  */
 
-export const MODALITIES = ["text", "image", "file"] as const;
+export const MODALITIES = ["text", "image"] as const;
 
 export type Modality = (typeof MODALITIES)[number];
 
@@ -19,9 +16,7 @@ export type ModalitySource = "env" | "openrouter" | "assumed";
 export interface ModelCapabilities {
   modalities: Modality[];
   source: ModalitySource;
-  /** The model's window in tokens, when the endpoint reports one. */
   contextLength: number | null;
-  /** How the answer was arrived at, kept verbatim in the report. */
   detail: string;
 }
 
@@ -34,15 +29,10 @@ export interface CapabilityQuery {
 
 export const MODALITIES_ENV = "LLM_INPUT_MODALITIES";
 
-export const BUDGET_ENV = "CONTEXT_BUDGET_TOKENS";
-
-/**
- * Appended to every failure to resolve the input types, so the operator always
- * has the way out. A model this host cannot deliver to is a different failure.
- */
+// Appended to every resolution failure, so the operator always has a way out.
 const DECLARE_INSTEAD =
-  `OpenLedger hands a statement back as a PDF or as PNG pages, so the eval has to know which of them the model can take. ` +
-  `Set ${MODALITIES_ENV}=text,image (add file for a model that reads PDFs directly) and run again.`;
+  `OpenLedger hands a statement back as extracted text or as page images, so the eval has to know which of them the model can take. ` +
+  `Set ${MODALITIES_ENV}=text,image and run again.`;
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const PROBE_TIMEOUT_MS = 15_000;
@@ -56,7 +46,7 @@ const MODEL_ROW = z.object({
   context_length: z.number().positive().optional(),
 });
 
-/** In MODALITIES order, without the types this host cannot send (video, audio). */
+// Ordered per MODALITIES; drops types this host can't send (file, audio, video).
 function known(values: string[]): Modality[] {
   return MODALITIES.filter((modality) => values.includes(modality));
 }
@@ -105,10 +95,7 @@ function findRow(rows: unknown[], model: string): ModelRow | null {
   return null;
 }
 
-/**
- * A failure here means the model's limits are unknown, never that the model is
- * unfit: the two read differently and the operator acts on them differently.
- */
+// A failure here means the model's limits are unknown, never that it's unfit — the operator acts on those differently.
 export async function resolveCapabilities(
   query: CapabilityQuery,
 ): Promise<Result<ModelCapabilities>> {
@@ -163,14 +150,16 @@ export async function resolveCapabilities(
   };
 }
 
-/** explicit: the operator's. derived / clamped: from the model's window. default: nothing to go on. */
-export type BudgetSource = "explicit" | "derived" | "clamped" | "default";
+/** explicit: declared by hand. derived: a share of the model's own window. default: the endpoint reported none. */
+export type BudgetSource = "explicit" | "derived" | "default";
 
 export interface ContextBudget {
   tokens: number;
   source: BudgetSource;
   detail: string;
 }
+
+export const BUDGET_ENV = "CONTEXT_BUDGET_TOKENS";
 
 // Room for the reply, and for a chars/4 estimate that runs under the truth.
 const WINDOW_SHARE = 0.8;
@@ -179,37 +168,29 @@ const WINDOW_SHARE = 0.8;
 const DEFAULT_BUDGET_TOKENS = 28_000;
 
 /**
- * The budget the trimmer works against. An explicit value above the model's own
- * window is clamped rather than obeyed: overflowing the window returns an
- * endpoint error, which a report would otherwise read as the model's failure.
+ * The model's own window decides where one is published. An explicit value is
+ * obeyed rather than checked against it: an endpoint that publishes no window
+ * falls to the default, which a smaller model overflows with no other way out.
  */
 export function resolveContextBudget(
   capabilities: ModelCapabilities,
   explicit: number | null,
 ): ContextBudget {
-  const window = capabilities.contextLength;
-  const share = (tokens: number): number => Math.floor(tokens * WINDOW_SHARE);
-
-  if (window !== null && explicit !== null && explicit > window) {
-    return {
-      tokens: share(window),
-      source: "clamped",
-      detail: `${BUDGET_ENV}=${explicit} is over the model's ${window}-token window; clamped to ${WINDOW_SHARE * 100}% of it`,
-    };
-  }
   if (explicit !== null) {
     return { tokens: explicit, source: "explicit", detail: `${BUDGET_ENV}=${explicit}` };
   }
-  if (window !== null) {
+
+  const window = capabilities.contextLength;
+  if (window === null) {
     return {
-      tokens: share(window),
-      source: "derived",
-      detail: `${WINDOW_SHARE * 100}% of the model's ${window}-token window`,
+      tokens: DEFAULT_BUDGET_TOKENS,
+      source: "default",
+      detail: `${capabilities.detail}, so no window to derive from; used the ${DEFAULT_BUDGET_TOKENS}-token default`,
     };
   }
   return {
-    tokens: DEFAULT_BUDGET_TOKENS,
-    source: "default",
-    detail: `no window reported and no ${BUDGET_ENV}; used the ${DEFAULT_BUDGET_TOKENS}-token default`,
+    tokens: Math.floor(window * WINDOW_SHARE),
+    source: "derived",
+    detail: `${WINDOW_SHARE * 100}% of the model's ${window}-token window`,
   };
 }

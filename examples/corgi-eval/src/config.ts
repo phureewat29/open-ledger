@@ -15,13 +15,13 @@ export interface Config {
 }
 
 /** main reads `kind`: help prints and exits 0, usage exits 2. */
-export interface ConfigFailure {
+interface ConfigFailure {
   ok: false;
   reason: "help" | "usage";
   message: string;
 }
 
-export type ConfigResult = { ok: true; value: Config } | ConfigFailure;
+type ConfigResult = { ok: true; value: Config } | ConfigFailure;
 
 export const HELP = `corgi-eval — an eval of how well a model and the OpenLedger contract work together
 
@@ -35,9 +35,9 @@ export const HELP = `corgi-eval — an eval of how well a model and the OpenLedg
 Endpoint settings come from .env (see .env.example): LLM_BASE_URL, LLM_API_KEY,
 LLM_MODEL, LLM_STREAM, LLM_TIMEOUT_MS, LLM_INPUT_MODALITIES, CONTEXT_BUDGET_TOKENS.
 
-The model must accept image or file input, because a statement reaches it as PNG
-pages or as a PDF. On OpenRouter both that and the model's window are read from
-the model list; on any other endpoint set LLM_INPUT_MODALITIES=text,image.
+A statement reaches the model as extracted text, or as page images when the harness
+has no text to give. On OpenRouter the input types and the model's window are read
+from the model list; on any other endpoint set LLM_INPUT_MODALITIES=text,image.
 `;
 
 /** A comma list, so one bad value fails at startup instead of mid-run. */

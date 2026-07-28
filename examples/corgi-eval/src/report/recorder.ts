@@ -1,10 +1,6 @@
 import type { OperationalType, PhaseExit, PhaseId, RunEvent } from "./events.js";
 
-/**
- * The only subscriber that keeps state. It tallies volume and keeps the raw
- * event stream, so the scorecard can re-derive every analysis from the recorded
- * run and the JSON report can be re-read offline.
- */
+// Keeps the raw event stream (not just tallies) so the report can be re-derived offline.
 
 export interface PhaseTally {
   phase: PhaseId;
@@ -29,11 +25,11 @@ export interface RunMetrics {
   contextTrims: number;
   /** One count per operational event, so a new kind cannot go unreported. */
   operational: Record<OperationalType, number>;
-  /** Questions oled raised across every commit. */
+  /** Summed across every commit, not just the latest. */
   questionsRaised: number;
 }
 
-export interface Recorder {
+interface Recorder {
   observe(event: RunEvent): void;
   snapshot(): RunMetrics;
 }
