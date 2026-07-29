@@ -145,9 +145,8 @@ const DATE_FLAG = /--(?:from|to)(?:=|\s+)"?([^\s"]+)"?/g;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HINT_FLAG = /--[a-z][a-z0-9-]*/g;
 /**
- * Offering the route: "on stdin", "pipe them". Never the word inside a flag
- * name like `--password-stdin`, which `flags` already covers, and never
- * "pipeline".
+ * Offering the route: "on stdin", "pipe them". A flag named in the same hint
+ * (`--input <file>`) is `flags`' job, and "pipeline" never matches.
  */
 const HINT_STDIN = /(?<![-\w])stdin\b|\bpipe[ds]?\b/i;
 const HELP_FLAGS = ["--help", "-h"];

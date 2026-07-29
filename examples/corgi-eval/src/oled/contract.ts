@@ -56,9 +56,9 @@ interface ErrorRule {
 }
 
 /**
- * Matched against oled's own message, never guessed from the arguments: a false
- * reading is worse than a missed one. Lenient about the punctuation around the
- * name, so one row reads commander's plain text and the reporter's JSON line.
+ * Matched against oled's own message, not the arguments: a false reading is
+ * worse than a missed one. Lenient about the punctuation around the name, so
+ * one row reads commander's plain text and the reporter's JSON line.
  */
 const ERROR_RULES: ErrorRule[] = [
   {

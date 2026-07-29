@@ -90,18 +90,18 @@ test("a hint naming only a host-appended flag decides nothing", () => {
   assert.equal(hints.followed, 0);
 });
 
-/** The first is `vault add`'s verbatim copy; the second is the wording it replaced. */
+/** The first is `ingest commit`'s verbatim empty-input copy; the second is a paraphrase. */
 const STDIN_HINTS = [
-  "the password is read from stdin, e.g. `printf %s 'secret' | oled vault add <pattern>`",
-  "pipe the password in, e.g. `printf %s 'secret' | oled vault add <pattern>`",
+  "pass NDJSON rows via --input <file> or pipe them on stdin",
+  "pipe the rows in on stdin, or point --input at a file",
 ];
 
 test("a hint offering stdin is followed by a call that sends stdin", () => {
   for (const hint of STDIN_HINTS) {
     const { hints } = analyzeFriction(
       toolCalls([
-        toolCall(1, { subcommand: "vault add", exitCode: 4, hint }),
-        toolCall(2, { subcommand: "vault add", ok: true, exitCode: 0, stdin: true }),
+        toolCall(1, { subcommand: "ingest commit", exitCode: 2, hint }),
+        toolCall(2, { subcommand: "ingest commit", ok: true, exitCode: 0, stdin: true }),
       ]),
     );
     assert.equal(hints.actionable, 1, hint);

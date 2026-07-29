@@ -304,7 +304,7 @@ function countRows(ndjson: string): number {
   return ndjson.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** Null outside `ingest commit`, because stdin carries a password there, not rows. */
+/** Null outside `ingest commit` — the only subcommand that reads stdin at all. */
 function batchRows(argv: string[], stdin: string | undefined): number | null {
   if (stdin === undefined) return null;
   if (subcommandOf(argv, "") !== COMMIT_SUBCOMMAND) return null;

@@ -17,7 +17,6 @@ import {
   runOpenLedger,
   stringField,
   truncate,
-  vaultAddPassword,
   writeBinShim,
   type StepResult,
   type WorkspacePaths,
@@ -29,11 +28,10 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..", "..", "..");
 const STATEMENT_SOURCE = resolve(SCRIPT_DIR, "..", "fixtures", "card-statement-2026-05.pdf");
 const STATEMENT_PASSWORD = "password";
-const VAULT_PATTERN = "^card-statement";
 const DEMO_TOOLS = "Bash(oled:*),Read,Write,Glob,Grep,TodoWrite,Skill";
 
 const TURN_PROMPTS = [
-  "ingest my new statements, then give me a quick summary of what you found",
+  `ingest my new statements — the statement is password-protected; the password is: ${STATEMENT_PASSWORD} — then give me a quick summary of what you found`,
   "resolve any open questions using your own judgment, and capture the card's statement metadata (masked number, points, due day) onto the account",
   "how much did I spend this billed period, what were my top merchants, and what should I watch next month?",
 ];
@@ -48,10 +46,8 @@ interface DemoOutcome {
   paths: WorkspacePaths | null;
 }
 
-/**
- * `doctor`'s own `ok` covers the hard checks only, so a failure report names
- * every check that is not ok rather than guessing which one sank the run.
- */
+// `doctor`'s own `ok` covers the hard checks only, so a failure report
+// names every check that is not ok.
 function failedChecks(payload: Record<string, unknown> | undefined): string[] {
   const checks = payload?.checks;
   if (!Array.isArray(checks)) return [];
@@ -90,17 +86,20 @@ async function discoversStatement(env: NodeJS.ProcessEnv, cwd: string): Promise<
 }
 
 /**
- * The contract every turn depends on: a vault-locked PDF with a text layer
- * prepares into one document whose pages carry 1-based `--- page N ---` markers.
- * No password is passed, deliberately — the stored vault entry has to open it,
- * which is the only route the agent itself ever has.
+ * The contract every turn depends on: a locked PDF with a text layer prepares
+ * into one document with 1-based `--- page N ---` markers. The CLI keeps no
+ * passwords, so every run passes --password.
  */
 async function preparesTextDocument(
   env: NodeJS.ProcessEnv,
   cwd: string,
   statementPath: string,
 ): Promise<StepResult> {
-  const res = await runOpenLedger(["ingest", "prepare", statementPath, "--json"], env, cwd);
+  const res = await runOpenLedger(
+    ["ingest", "prepare", statementPath, "--password", STATEMENT_PASSWORD, "--json"],
+    env,
+    cwd,
+  );
   if (!res.ok) return exitStatus(res);
 
   const [payload] = parseNdjson(res.stdout);
@@ -176,11 +175,6 @@ export async function runDemo(
 
   const skillOk = await step("install skill", () => installSkill(env, ws.cwd));
   if (!skillOk) return { pass: false, paths: ws };
-
-  const vaultOk = await step("vault add password", async () =>
-    exitStatus(await vaultAddPassword(VAULT_PATTERN, STATEMENT_PASSWORD, env, ws.cwd)),
-  );
-  if (!vaultOk) return { pass: false, paths: ws };
 
   const readyOk = await step("doctor readiness gate", () => doctorReady(env, ws.cwd));
   if (!readyOk) return { pass: false, paths: ws };

@@ -105,7 +105,7 @@ export interface StepResult {
 function runCommand(
   command: string,
   args: string[],
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -131,7 +131,6 @@ function runCommand(
       resolve({ ok: code === 0, code, stdout, stderr });
     });
 
-    if (opts.input != null) child.stdin.write(opts.input);
     child.stdin.end();
   });
 }
@@ -161,9 +160,8 @@ export function runOpenLedger(
   args: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
-  input?: string,
 ): Promise<RunResult> {
-  return runCommand("oled", args, { cwd, env, input });
+  return runCommand("oled", args, { cwd, env });
 }
 
 /** `--host claude` lands the pack at `<cwd>/.claude/skills/open-ledger`, where
@@ -180,17 +178,6 @@ export async function installSkill(
   const path = Array.isArray(installed) ? stringField(installed[0], "path") : "";
   if (!path) return { ok: false, detail: `no installed path in ${truncate(res.stdout, DETAIL_MAX)}` };
   return { ok: true, detail: path };
-}
-
-/** `oled vault add <pattern> --json`, piping the password over stdin (never as
- *  an argv value). */
-export function vaultAddPassword(
-  pattern: string,
-  password: string,
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-): Promise<RunResult> {
-  return runOpenLedger(["vault", "add", pattern, "--json"], env, cwd, password);
 }
 
 /** Invalid lines are skipped rather than throwing. */

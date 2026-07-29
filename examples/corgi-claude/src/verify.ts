@@ -129,7 +129,7 @@ function checkPlainReporter(problems: string[]): void {
   const out = captureLog(() => {
     const reporter = makePlainReporter();
     reporter.step("build open-ledger", true);
-    reporter.step("vault add password", false, "exit 2: no such pattern");
+    reporter.step("ingest prepare smoke", false, "exit 4: the PDF is locked and no password was given");
     reporter.turnStart(1, 1, "ingest my new statements");
     reporter.turnActivity("> oled ingest list --json");
     reporter.turnAnswer("**Done** - see `oled report`\n\n| Merchant | Amount |\n| --- | --- |\n| Foo | 1 |");
@@ -144,7 +144,7 @@ function checkPlainReporter(problems: string[]): void {
 
   const missing = [
     "[ ok ] build open-ledger",
-    "[fail] vault add password  exit 2: no such pattern",
+    "[fail] ingest prepare smoke  exit 4: the PDF is locked and no password was given",
     "turn 1/1: ingest my new statements",
     "> oled ingest list --json",
     "Done - see oled report",

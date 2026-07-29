@@ -57,7 +57,7 @@ watches for.
 
 - Models invented `--format text` to ask for text they could read. Fixed at the
   source: `ingest prepare` now extracts the text itself and returns it whenever it
-  can, and the format flags it was guessing at are gone.
+  can, and there is no format flag left to invent.
 - `skills/SKILL.md` step 5 told an agent to stage its batch to a file, which an
   agent with no file writes cannot do. Fixed: standard input takes a batch, and
   `ingest commit --help` and the empty-batch hint both say so.
