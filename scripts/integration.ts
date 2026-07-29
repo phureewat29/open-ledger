@@ -59,7 +59,6 @@ const READ_CASES: Case[] = [
   { label: "config show", args: ["config", "show"] },
   { label: "ingest list", args: ["ingest", "list"] },
   { label: "files list", args: ["files", "list"] },
-  { label: "vault list", args: ["vault", "list"] },
   { label: "transactions list", args: ["transactions", "list"] },
   { label: "transactions list --group", args: ["transactions", "list", "--group"] },
   { label: "transactions dedupe", args: ["transactions", "dedupe"] },
@@ -93,7 +92,7 @@ const READ_CASES: Case[] = [
   { label: "unknown subcommand", args: ["ingest", "bogus"], expectExit: 2 },
   { label: "missing required argument", args: ["transactions", "show"], expectExit: 2 },
   // A verbless noun: commander's help screen on stderr would fail the same check.
-  { label: "noun without a subcommand", args: ["vault"], expectExit: 2 },
+  { label: "noun without a subcommand", args: ["files"], expectExit: 2 },
 ];
 
 function checkNdjson(text: string): string | null {
@@ -202,7 +201,7 @@ function shOk(ctx: Ctx, args: string[], opts: { stdin?: string } = {}): { stdout
 }
 
 /** Hand-crafted, not parsed from the fixture PDF (which only exercises
- *  discovery/vault unlock/prepare); re-committed verbatim later to prove idempotency. */
+ *  discovery/prepare); re-committed verbatim later to prove idempotency. */
 function lifecycleItems(): Record<string, unknown>[] {
   return [
     {
@@ -284,25 +283,22 @@ function stepPlaceStatement(ctx: Ctx): void {
   ctx.statementPath = outPath;
 }
 
-function stepVaultAddIngestList(ctx: Ctx): void {
-  const add = shOk(ctx, ["vault", "add", "^card-statement"], {
-    stdin: FIXTURE_PASSWORD,
-  });
-  const addResult = parseOne(add.stdout);
-  assert(addResult.pattern === "^card-statement", `unexpected vault add result: ${JSON.stringify(addResult)}`);
-
+function stepIngestListEncrypted(ctx: Ctx): void {
   const list = shOk(ctx, ["ingest", "list"]);
   const objs = parseNdjson(list.stdout);
   const files = objs.filter((o) => o.type === "file");
   assert(files.length === 1, `expected exactly 1 ingest file, got ${files.length}`);
   const f = files[0];
   assert(f.encrypted === true, `expected the statement to be reported encrypted: ${JSON.stringify(f)}`);
-  assert(f.vault_candidates === 1, `expected 1 vault candidate, got ${f.vault_candidates}`);
+  assert(!("vault_candidates" in f), `unexpected vault_candidates key on ingest list row: ${JSON.stringify(f)}`);
   assert(f.path === ctx.statementPath, `ingest list path mismatch: ${f.path} !== ${ctx.statementPath}`);
 }
 
 function stepIngestPrepare(ctx: Ctx): void {
-  const res = shOk(ctx, ["ingest", "prepare", ctx.statementPath]);
+  const locked = sh(ctx, ["ingest", "prepare", ctx.statementPath]);
+  assert(locked.code === 4, `expected exit 4 (INPUT_REQUIRED) for the locked PDF without a password, got ${locked.code}`);
+
+  const res = shOk(ctx, ["ingest", "prepare", ctx.statementPath, "--password", FIXTURE_PASSWORD]);
   const result = parseOne(res.stdout);
   assert(typeof result.file_id === "string" && result.file_id.startsWith("sf:"), `bad file_id: ${JSON.stringify(result)}`);
   assert(result.page_count === 6, `expected page_count 6, got ${result.page_count}`);
@@ -607,8 +603,8 @@ const STAGE2_STEPS: { label: string; fn: (ctx: Ctx) => void }[] = [
   { label: "lifecycle: config --generate-key", fn: stepConfigInit },
   { label: "lifecycle: config show reflects encryption key", fn: stepConfigShowEncrypted },
   { label: "lifecycle: place encrypted statement fixture", fn: stepPlaceStatement },
-  { label: "lifecycle: vault add + ingest list (encrypted)", fn: stepVaultAddIngestList },
-  { label: "lifecycle: ingest prepare (vault unlock)", fn: stepIngestPrepare },
+  { label: "lifecycle: ingest list (encrypted)", fn: stepIngestListEncrypted },
+  { label: "lifecycle: ingest prepare (locked, then --password)", fn: stepIngestPrepare },
   { label: "lifecycle: ingest commit (salary/dogfood/grooming)", fn: stepIngestCommit },
   { label: "lifecycle: ingest re-commit is idempotent", fn: stepIngestReCommitDuplicate },
   { label: "lifecycle: questions list + answer", fn: stepQuestions },
