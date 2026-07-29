@@ -81,7 +81,7 @@ Every row becomes a *transaction*: it debits one account and credits another by 
 This is the loop the skill teaches an agent to run:
 
 1. **Discover**: `oled ingest list --json` to find new/pending files.
-2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it, unlocking encrypted PDFs via `oled vault`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. With no text layer and no OCR endpoint, it comes back as one image per page.
+2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it. A locked PDF exits 4 until the agent re-runs with `--password <password>`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. With no text layer and no OCR endpoint, it comes back as one image per page.
 3. **Read**: the agent reads what prepare returned, either the text document or the page images, and picks out every transaction row.
 4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, fuzzy account match, uncategorized fallback, cross-currency row).
 5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
@@ -98,7 +98,6 @@ oled config         # Configuration
 
 oled ingest         # Ingest pipeline: list / prepare / commit / done / fail
 oled files          # Browse ingested files (list / show / drop)
-oled vault          # Manage file-password patterns for encrypted statements
 
 oled transactions   # Transactions: list / show / add / update / delete / recategorize / dedupe / merge
 oled accounts       # Manage the chart of accounts
@@ -116,7 +115,7 @@ oled open           # Open the data folder in file explorer
 
 - All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.oled/db.sqlite`.
 - The config file (`~/.oled/config.json`) carries `0600` permissions. It holds two secrets at most, the database encryption key and the OCR endpoint API key; `config show` surfaces a fingerprint of each and `status` one of the database key, never the plaintext.
-- Encrypted-PDF passwords sit AES-GCM-encrypted in `db.sqlite` under a filename pattern; plaintext never touches disk.
+- Statement passwords are never stored. The caller keeps them and passes one per run with `--password` — a command-line argument, so it shows up in shell history and process listings.
 - A decrypted statement stays in memory. Only what an agent has to read is written to `cache/`: the extracted text, or the page images.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
 - No telemetry, no analytics. OpenLedger makes no network calls of its own. The exception is opt-in and goes only to the OCR endpoint you configure: `ingest prepare` sends it the page images to read, and `doctor` asks it which models it serves.

@@ -150,6 +150,29 @@ describe("transactions CLI integration (subprocess)", () => {
   );
 
   it(
+    "transactions add: an empty account flag fails USAGE (exit 2), not NOT_FOUND",
+    async () => {
+      const result = await runCli([
+        "transactions",
+        "add",
+        "--debit-account",
+        "",
+        "--credit-account",
+        "asset:bank",
+        "--amount",
+        "10",
+        "--json",
+      ]);
+      expect(result.code).toBe(2);
+      expect(result.stdout.trim()).toBe("");
+      const parsed = JSON.parse(result.stderr.trim());
+      expect(parsed.error.code).toBe("E_USAGE");
+      expect(parsed.error.message).toContain("cannot be empty");
+    },
+    30000,
+  );
+
+  it(
     "transactions add --resolve silently auto-creates a well-formed placeholder path (no question)",
     async () => {
       const result = await runCli([

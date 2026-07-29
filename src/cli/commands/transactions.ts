@@ -8,7 +8,6 @@ import {
   emitSummary,
   fail,
   mapNotFoundError,
-  readStdinToEnd,
   requireYes,
   runAction,
   type Column,
@@ -35,7 +34,6 @@ import {
   type DuplicateTransactionRow,
 } from "../../db/queries/transactions-dedup.js";
 import { findAccountById } from "../../db/queries/accounts.js";
-import type { MerchantUpsertInput } from "../../db/queries/merchants.js";
 import {
   commitTransaction,
   defaultTransactionCommitHooks,
@@ -50,7 +48,7 @@ import { newBatchId } from "../../lib/ids.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import { todayIso } from "../../lib/date.js";
 import * as z from "zod";
-import { parseInput, str, num, json } from "../../lib/validate.js";
+import { parseInput, str, num } from "../../lib/validate.js";
 
 // Amounts are minor units in the DB; this module converts to/from decimals at the CLI boundary.
 
@@ -258,76 +256,28 @@ const ADD_TRANSACTION_FLAGS_OPTS = {
   aliases: { debit_account_id: ["debitAccount"], credit_account_id: ["creditAccount"] },
 };
 
-// Deliberately loose (debit/credit default to "", amount passes through
-// unchecked) — addTransaction's strict/resolve checks own exit codes and messages.
-const ADD_TRANSACTION_STDIN_SPEC = z.object({
-  date: str().default(""),
-  description: str().optional(),
-  debit_account_id: str().default(""),
-  credit_account_id: str().default(""),
-  currency: str().nullable().default(null),
-  merchant: json<MerchantUpsertInput>().nullable().default(null),
-  merchant_id: str().nullable().default(null),
-  raw_descriptor: str().nullable().default(null),
-  source_page: num().nullable().default(null),
-  code: str().nullable().default(null),
-});
-
-const ADD_TRANSACTION_STDIN_ALIASES = {
-  debit_account_id: ["debit_account"],
-  credit_account_id: ["credit_account"],
-};
-
 // Decimal amount, no account validation — that's the caller's job.
-async function buildRawTransaction(opts: AddTransactionOpts): Promise<RawTransactionInput> {
-  const anyFlag =
-    opts.debitAccount !== undefined || opts.creditAccount !== undefined || opts.amount !== undefined;
-
-  if (anyFlag) {
-    const parsed = parseInput(
-      ADD_TRANSACTION_FLAGS_SPEC,
-      opts as Record<string, unknown>,
-      ADD_TRANSACTION_FLAGS_OPTS,
-    );
-
-    const raw: RawTransactionInput = {
-      date: parsed.date ?? todayIso(),
-      description: parsed.description ?? opts.merchantName ?? "Manual entry",
-      debit_account_id: parsed.debit_account_id,
-      credit_account_id: parsed.credit_account_id,
-      amount: parsed.amount,
-      currency: null,
-    };
-    if (opts.merchantName) raw.merchant = { canonical_name: opts.merchantName };
-    return raw;
+function buildRawTransaction(opts: AddTransactionOpts): RawTransactionInput {
+  const parsed = parseInput(
+    ADD_TRANSACTION_FLAGS_SPEC,
+    opts as Record<string, unknown>,
+    ADD_TRANSACTION_FLAGS_OPTS,
+  );
+  // str() accepts "" — an empty account id must fail USAGE here, not NOT_FOUND downstream.
+  if (!parsed.debit_account_id || !parsed.credit_account_id) {
+    fail("USAGE", "--debit-account and --credit-account cannot be empty");
   }
 
-  const stdin = await readStdinToEnd();
-  if (!stdin.trim()) {
-    fail(
-      "USAGE",
-      "provide --debit-account/--credit-account/--amount, or pipe a transaction JSON object on stdin",
-    );
-  }
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(stdin);
-  } catch (err) {
-    fail("USAGE", `invalid JSON on stdin: ${(err as Error).message}`);
-  }
-  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
-    fail("USAGE", "stdin must contain a single JSON transaction object (not an array)");
-  }
-  const record = decoded as Record<string, unknown>;
-  const parsed = parseInput(ADD_TRANSACTION_STDIN_SPEC, record, {
-    aliases: ADD_TRANSACTION_STDIN_ALIASES,
-  });
-  return {
-    ...parsed,
-    description: parsed.description ?? parsed.merchant?.canonical_name ?? "Manual entry",
-    // Un-coerced by design: record.amount, not parsed.amount — the validators below own the number check.
-    amount: record.amount as number,
+  const raw: RawTransactionInput = {
+    date: parsed.date ?? todayIso(),
+    description: parsed.description ?? opts.merchantName ?? "Manual entry",
+    debit_account_id: parsed.debit_account_id,
+    credit_account_id: parsed.credit_account_id,
+    amount: parsed.amount,
+    currency: null,
   };
+  if (opts.merchantName) raw.merchant = { canonical_name: opts.merchantName };
+  return raw;
 }
 
 function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
@@ -353,13 +303,6 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
 }
 
 function addStrict(db: Database.Database, raw: RawTransactionInput): void {
-  if (!raw.debit_account_id || !raw.credit_account_id) {
-    fail("USAGE", "debit_account_id and credit_account_id are required");
-  }
-  if (typeof raw.amount !== "number" || !Number.isFinite(raw.amount)) {
-    fail("USAGE", "amount must be a number");
-  }
-
   const accountHint =
     "create it with `oled accounts create`, or find a close match with `oled accounts match --query <name>`, or re-run with --resolve";
   const debit = findAccountById(db, raw.debit_account_id);
@@ -405,7 +348,7 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
 
 async function addTransaction(opts: AddTransactionOpts): Promise<void> {
   const db = await openDb();
-  const raw = await buildRawTransaction(opts);
+  const raw = buildRawTransaction(opts);
 
   if (opts.resolve) return addViaResolve(db, raw);
   return addStrict(db, raw);

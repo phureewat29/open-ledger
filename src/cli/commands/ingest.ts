@@ -9,7 +9,6 @@ import {
   emitObject,
   emitSummary,
   fail,
-  readSecretFromStdin,
   runAction,
 } from "../output.js";
 import { openDb } from "../db.js";
@@ -29,7 +28,7 @@ type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
 
 const INGEST_COLUMNS: Column<IngestEntry>[] = [
   { header: "Status", value: (r) => r.status },
-  { header: "Enc", value: (r) => (r.encrypted ? `yes(${r.vaultCandidates})` : "no") },
+  { header: "Enc", value: (r) => (r.encrypted ? "yes" : "no") },
   { header: "File ID", value: (r) => r.fileId ?? "-" },
   { header: "Path", value: (r) => r.relPath },
   { header: "Note", value: (r) => r.note ?? "" },
@@ -74,7 +73,6 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
         file_id: e.fileId,
         status: e.status,
         encrypted: e.encrypted,
-        vault_candidates: e.vaultCandidates,
         note: e.note ?? null,
       });
     }
@@ -91,15 +89,14 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
 }
 
 interface PrepareIngestOpts {
-  passwordStdin?: boolean;
+  password?: string;
   force?: boolean;
   rescan?: boolean;
   /** commander's `--no-ocr` negation: false only when the flag was passed. */
   ocr?: boolean;
 }
 
-const PASSWORD_HINT =
-  "pipe the password with --password-stdin, or store it once via `oled vault add <pattern>`";
+const PASSWORD_HINT = "re-run with --password <password>";
 
 const ACCEPTED_EXTS = SUPPORTED_EXTS.join(" ");
 const SIZE_LIMIT = `${MAX_SOURCE_BYTES / (1024 * 1024)} MB`;
@@ -146,9 +143,8 @@ async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise
   const db = await openDb();
   const { prepareFile } = await import("../../ingest/prepare.js");
 
-  const password = opts.passwordStdin ? await readSecretFromStdin() : undefined;
   const result = await prepareFile(db, pathOrId, {
-    password,
+    password: opts.password,
     force: !!opts.force,
     rescan: !!opts.rescan,
     noOcr: opts.ocr === false,
@@ -214,7 +210,7 @@ export function registerIngest(program: Command): void {
         "",
         "Behavior: the statement pipeline, list the files waiting, prepare one for reading, commit its rows, mark it done or failed.",
         "Typical flow: list, prepare <id>, read what prepare returns, commit --file <sf:id> with the rows on stdin (or --input <batch>), then done <sf:id>.",
-        `Accepts ${ACCEPTED_EXTS}, up to ${SIZE_LIMIT}. Locked PDFs exit 4: pass the password with --password-stdin, or store it once with vault add <pattern>.`,
+        `Accepts ${ACCEPTED_EXTS}, up to ${SIZE_LIMIT}. Locked PDFs exit 4: pass the password with --password <password>.`,
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     );
@@ -228,7 +224,7 @@ export function registerIngest(program: Command): void {
   ingest
     .command("prepare <pathOrId>")
     .description("Extract a statement file into text (or page images) to read")
-    .option("--password-stdin", "read the password for a locked PDF from stdin")
+    .option("--password <password>", "password for a locked PDF")
     .option("--force", "re-register the file, dropping the prior ingest's rows and artifacts")
     .option("--rescan", "ignore the text layer and read the page images instead")
     .option("--no-ocr", "ignore the OCR server and return the page images to you")
@@ -240,7 +236,7 @@ export function registerIngest(program: Command): void {
         'Output kind "text": one `document` path to read. Inside it, pages are separated by `--- page N ---` markers; cite the row\'s page as source_page on commit. Page numbers count from 1 everywhere — the markers, the pages[] entries, and source_page.',
         'Output kind "images": one path per page under pages[], in order — read them yourself.',
         "Escape hatches: --rescan ignores a garbled text layer and reads the pages instead; --no-ocr ignores the OCR server and returns the page images. Both together always return images.",
-        "Exits: 2 the file type is not supported, 3 the OCR server is misconfigured or unreachable, 4 the PDF needs a password, 5 nothing at that path or id, 6 the file is too large or corrupt, 7 the OCR server failed on some pages — each carries a `[page N: OCR failed]` line in the document and is listed in failed_pages; re-run with --no-ocr to read those pages yourself.",
+        "Exits: 2 the file type is not supported, 3 the OCR server is misconfigured or unreachable, 4 the PDF needs a password (re-run with --password), 5 nothing at that path or id, 6 the file is too large or corrupt, 7 the OCR server failed on some pages — each carries a `[page N: OCR failed]` line in the document and is listed in failed_pages; re-run with --no-ocr to read those pages yourself.",
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     )

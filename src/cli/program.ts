@@ -11,7 +11,6 @@ import { registerSetup } from "./commands/setup.js";
 import { registerConfig } from "./commands/config.js";
 import { registerIngest } from "./commands/ingest.js";
 import { registerFiles } from "./commands/files.js";
-import { registerVault } from "./commands/vault.js";
 import { registerTransactions } from "./commands/transactions.js";
 import { registerAccounts } from "./commands/accounts.js";
 import { registerMerchants } from "./commands/merchants.js";
@@ -28,7 +27,6 @@ export const COMMANDS = [
   { name: "config", desc: "Configuration" },
   { name: "ingest", desc: "Ingest pipeline: list / prepare / commit / done / fail" },
   { name: "files", desc: "Browse ingested files (list / show / drop)" },
-  { name: "vault", desc: "Manage file-password patterns for encrypted statements" },
   { name: "transactions", desc: "Transactions: list / show / add / update / delete / recategorize / dedupe / merge" },
   { name: "accounts", desc: "Manage the chart of accounts" },
   { name: "merchants", desc: "Manage merchants and their default accounts" },
@@ -106,7 +104,6 @@ export function buildProgram(): Command {
   registerConfig(program);
   registerIngest(program);
   registerFiles(program);
-  registerVault(program);
   registerTransactions(program);
   registerAccounts(program);
   registerMerchants(program);

@@ -33,12 +33,13 @@ describe("cli integration (subprocess)", () => {
   }, 30000);
 
   it("a guarded command without confirmation exits non-zero with a JSON error on stderr", async () => {
-    const { stdout, stderr, code } = await runCli(["vault", "rm", "some-pattern", "--json"]);
+    // requireYes fires before the id lookup, so the nonexistent id never matters.
+    const { stdout, stderr, code } = await runCli(["transactions", "delete", "tx:none", "--json"]);
     expect(code).not.toBe(0);
     expect(stdout.trim()).toBe("");
     const parsed = JSON.parse(stderr.trim());
     expect(parsed.error).toBeDefined();
-    expect(parsed.error.code).toMatch(/^E_/);
+    expect(parsed.error.code).toBe("E_INPUT_REQUIRED");
     expect(typeof parsed.error.message).toBe("string");
   }, 30000);
 

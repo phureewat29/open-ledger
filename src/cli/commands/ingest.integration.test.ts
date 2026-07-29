@@ -509,16 +509,16 @@ describe("ingest prepare (subprocess)", () => {
     expect(JSON.parse(missing.stderr.trim()).error.code).toBe("E_NOT_FOUND");
   }, 30000);
 
-  it("exits INPUT_REQUIRED for a locked PDF, then extracts it with the piped password", async () => {
+  it("exits INPUT_REQUIRED for a locked PDF, then extracts it with --password", async () => {
     const path = stage("statements/locked.pdf", await encryptedPdf("secret"));
 
     const locked = await runCli(["ingest", "prepare", path, "--json"]);
     expect(locked.code).toBe(4); // EXIT.INPUT_REQUIRED
-    expect(JSON.parse(locked.stderr.trim()).error.code).toBe("E_INPUT_REQUIRED");
+    const { error } = JSON.parse(locked.stderr.trim());
+    expect(error.code).toBe("E_INPUT_REQUIRED");
+    expect(error.hint).toContain("--password");
 
-    const unlocked = await runCli(["ingest", "prepare", path, "--password-stdin", "--json"], {
-      stdin: "secret",
-    });
+    const unlocked = await runCli(["ingest", "prepare", path, "--password", "secret", "--json"]);
     expect(unlocked.code).toBe(0);
     const obj = JSON.parse(unlocked.stdout.trim());
     expect(obj).toMatchObject({ kind: "text", source: "text-layer" });
@@ -528,7 +528,8 @@ describe("ingest prepare (subprocess)", () => {
   it("--force keeps the prior ingest's transactions when the re-read fails", async () => {
     const path = stage("statements/force-locked.pdf", await encryptedPdf("secret"));
 
-    // Registered by hash without unlocking it, so a successful prepare (which would vault the password) is what lets the re-read open the file.
+    // Registered by hash without unlocking it; the forced re-read below carries a
+    // wrong password, so it must fail and leave the prior row and its transactions.
     const source = loadSource(path);
     if (!source.ok) throw new Error(source.message);
     const fileId = "sf:force-locked";
@@ -550,9 +551,7 @@ describe("ingest prepare (subprocess)", () => {
     expect(commit.code).toBe(0);
     const txId = parseNdjson(commit.stdout).find((o) => o.type === "result").transaction_id;
 
-    const forced = await runCli(["ingest", "prepare", path, "--force", "--password-stdin", "--json"], {
-      stdin: "nope",
-    });
+    const forced = await runCli(["ingest", "prepare", path, "--force", "--password", "nope", "--json"]);
     expect(forced.code).toBe(4); // EXIT.INPUT_REQUIRED
 
     // The files row survived too, or its deletion would have cascaded this transaction away.
@@ -622,40 +621,6 @@ describe("ingest list (subprocess)", () => {
     expect(oversized.status).toBe("unreadable");
     expect(oversized.note).toBeTruthy();
     expect(objs.find((o) => o.type === "summary").unreadable).toBe(1);
-  }, 30000);
-});
-
-describe("vault (subprocess)", () => {
-  it("add/list/rm round-trips a piped password without leaking plaintext", async () => {
-    const pattern = "^kbank-.*";
-
-    const add = await runCli(["vault", "add", pattern, "--json"], {
-      stdin: "hunter2",
-    });
-    expect(add.code).toBe(0);
-    const addObj = JSON.parse(add.stdout.trim());
-    expect(addObj.pattern).toBe(pattern);
-    expect(typeof addObj.id).toBe("string");
-
-    const list = await runCli(["vault", "list", "--json"]);
-    expect(list.code).toBe(0);
-    const rows = parseNdjson(list.stdout);
-    const row = rows.find((r) => r.pattern === pattern);
-    expect(row).toBeDefined();
-    expect(JSON.stringify(row)).not.toContain("hunter2");
-    expect(row.password_encrypted).toBeUndefined();
-
-    const rm = await runCli(["vault", "rm", pattern, "--yes", "--json"]);
-    expect(rm.code).toBe(0);
-    expect(JSON.parse(rm.stdout.trim()).removed).toBe(true);
-
-    const list2 = await runCli(["vault", "list", "--json"]);
-    const rows2 = parseNdjson(list2.stdout);
-    expect(rows2.find((r) => r.pattern === pattern)).toBeUndefined();
-
-    const gone = await runCli(["vault", "rm", pattern, "--yes", "--json"]);
-    expect(gone.code).toBe(5); // EXIT.NOT_FOUND
-    expect(JSON.parse(gone.stderr.trim()).error.code).toBe("E_NOT_FOUND");
   }, 30000);
 });
 

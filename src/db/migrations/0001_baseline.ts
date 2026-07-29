@@ -110,14 +110,5 @@ export function up(db: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS file_passwords (
-      id TEXT PRIMARY KEY,
-      pattern TEXT NOT NULL UNIQUE,
-      password_encrypted TEXT NOT NULL,
-      last_used_at TEXT,
-      use_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
   `);
 }

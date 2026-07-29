@@ -14,7 +14,7 @@ import { findCountryDefaults, availableCountries } from "../../datasets/defaults
 import { generateKey } from "../../db/encryption.js";
 import { getContextPath } from "../../context.js";
 import { printKeyValues } from "../format.js";
-import { currentMode, emit, fail, readSecretFromStdin, runAction, type OutputMode } from "../output.js";
+import { currentMode, emit, fail, runAction, type OutputMode } from "../output.js";
 import * as z from "zod";
 import { parseInput, str, bool } from "../../lib/validate.js";
 
@@ -23,7 +23,7 @@ type SecretKey = (typeof CONFIG_SECRETS)[number];
 type RedactedConfig = Omit<OpenLedgerConfig, SecretKey> &
   Record<SecretKey, { set: boolean; fingerprint?: string }>;
 
-/** Every CONFIG_SECRETS key surfaces as {set, fingerprint}, never plaintext (which would land in shells/logs/bug reports). */
+/** Every CONFIG_SECRETS key surfaces as {set, fingerprint}, never plaintext — config output is safe to paste into shells/logs/bug reports. */
 function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
   const redacted = { ...cfg } as Record<string, unknown>;
   for (const key of CONFIG_SECRETS) {
@@ -65,7 +65,7 @@ const CONVERGE_FLAGS_SPEC = z.object({
   data_dir: str().optional(),
   db: str().optional(),
   generate_key: bool().optional(),
-  encryption_key_stdin: bool().optional(),
+  encryption_key: str().optional(),
   locale: str().optional(),
   currency: str().optional(),
   user_name: str().optional(),
@@ -120,10 +120,16 @@ function resolveConvergedConfig(flags: ConvergeFlags): ConvergedConfig {
  * --generate-key means once a key exists: minting a new one over a live key
  * would orphan the encrypted db.
  */
-async function resolveEncryptionKey(flags: ConvergeFlags): Promise<string | undefined> {
+function resolveEncryptionKey(flags: ConvergeFlags): string | undefined {
   if (flags.generate_key) return appConfig.dbEncryptionKey ? undefined : generateKey();
-  if (flags.encryption_key_stdin) return readSecretFromStdin();
-  return undefined;
+  if (flags.encryption_key === undefined) return undefined;
+  // Same shape generateKey mints; anything else silently weakens the cipher.
+  if (!/^[0-9a-f]{64}$/i.test(flags.encryption_key)) {
+    fail("USAGE", "--encryption-key must be 64 hex characters", {
+      hint: "use --generate-key to mint one",
+    });
+  }
+  return flags.encryption_key;
 }
 
 /**
@@ -136,7 +142,7 @@ function guardKeyChange(key: string | undefined, dbPath: string): void {
   // rather than talking about changing a key the caller never set.
   const change = appConfig.dbEncryptionKey ? "changing its encryption key" : "encrypting it now";
   fail("INVALID", `database ${dbPath} already exists; ${change} would make it unreadable`, {
-    hint: "drop --generate-key / --encryption-key-stdin to keep using this database, or move it aside (keep a backup) and re-run to start an encrypted one",
+    hint: "drop --generate-key / --encryption-key to keep using this database, or move it aside (keep a backup) and re-run to start an encrypted one",
   });
 }
 
@@ -167,14 +173,14 @@ async function applyConvergedConfig(
  * singleton, so converging with no new flags is a no-op.
  */
 async function convergeConfig(flags: ConvergeFlags): Promise<void> {
-  if (flags.generate_key && flags.encryption_key_stdin) {
-    fail("USAGE", "--generate-key and --encryption-key-stdin are mutually exclusive");
+  if (flags.generate_key && flags.encryption_key !== undefined) {
+    fail("USAGE", "--generate-key and --encryption-key are mutually exclusive");
   }
 
   const converged = resolveConvergedConfig(flags);
   mkdirSync(converged.dataDir, { recursive: true });
 
-  const dbEncryptionKey = await resolveEncryptionKey(flags);
+  const dbEncryptionKey = resolveEncryptionKey(flags);
   guardKeyChange(dbEncryptionKey, converged.dbPath);
   await applyConvergedConfig(converged, dbEncryptionKey);
 
@@ -205,7 +211,7 @@ export function registerConfig(program: Command): void {
     .option("--data-dir <dir>", "data directory")
     .option("--db <path>", "database path")
     .option("--generate-key", "generate a new encryption key")
-    .option("--encryption-key-stdin", "read an encryption key from stdin")
+    .option("--encryption-key <key>", "set the database encryption key")
     .option("--locale <locale>", "locale")
     .option("--currency <code>", "default currency code")
     .option("--country <code>", "seed locale/currency from a country's defaults (default: th)")

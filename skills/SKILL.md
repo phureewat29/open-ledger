@@ -5,7 +5,7 @@ description: A local double-entry personal-finance harness driven through the `o
 
 # OpenLedger
 
-`oled` is a deterministic CLI over a local, encrypted, double-entry ledger; you supply the intelligence. The CLI is the manual: `oled --help` lists the commands and the output contract, `oled <noun> --help` gives each command's behavior, flow, and flags, and every error carries a code and a message, often a `hint`. When you do not understand something, ask the CLI before guessing — never invent flags, subcommands, or ids.
+`oled` is a deterministic CLI over a local, encrypted, double-entry ledger; you supply the intelligence. The CLI is the manual: `oled --help` lists the commands and the output contract, `oled <noun> --help` gives each command's behavior, flow, and flags, and every error carries a code and a message, often a `hint`. When you do not understand something, ask the CLI: never invent flags, subcommands, or ids.
 
 Pass `--json` on every command. With a shell, run `oled` yourself, one command per call. Human is your terminal: send one command per message, wait for the pasted output; ask for uploads instead of reading files.
 
@@ -15,4 +15,4 @@ Pass `--json` on every command. With a shell, run `oled` yourself, one command p
 
 ## Commands
 
-Start with `oled status --json`; descriptions live in `oled --help`. commands: `oled doctor --json` · `oled setup --force` · `oled config show --json` · `oled ingest list --json` · `oled files list --json` · `oled vault add <pattern>` · `oled transactions list --json` · `oled accounts tree --json` · `oled merchants list --json` · `oled questions list --json` · `oled report --from <date> --to <date> --json` · `oled notes list --json` · `oled datasets --json` · `oled open`.
+Start with `oled status --json`; descriptions live in `oled --help`. commands: `oled doctor --json` · `oled setup --force` · `oled config show --json` · `oled ingest list --json` · `oled files list --json` · `oled transactions list --json` · `oled accounts tree --json` · `oled merchants list --json` · `oled questions list --json` · `oled report --from <date> --to <date> --json` · `oled notes list --json` · `oled datasets --json` · `oled open`. A locked PDF exits 4: re-run `oled ingest prepare <path> --password <password> --json`.

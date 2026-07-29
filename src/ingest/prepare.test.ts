@@ -15,13 +15,11 @@ import {
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type Database from "libsql";
-import { generateKey } from "../db/encryption.js";
 import { config } from "../config.js";
 import { createAccount } from "../accounts/accounts.js";
 import { upsertMerchant } from "../db/queries/merchants.js";
 import { insertTransaction, countTransactionsBySourceFile } from "../db/queries/transactions.js";
 import { findFileById } from "../db/queries/files.js";
-import { upsertPassword } from "../db/queries/vault.js";
 import { PAGE_RENDER } from "../extract/extract.js";
 import { MAX_SOURCE_BYTES, loadSource, type LoadedSource } from "../extract/source.js";
 import {
@@ -58,7 +56,6 @@ beforeEach(() => {
   cacheDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-cache-"));
   outsideDir = mkdtempSync(resolve(tmpdir(), "oled-ingest-outside-"));
   config.dataDir = dataDir;
-  config.dbEncryptionKey = generateKey();
   // A developer's own OLED_OCR_* env would otherwise route these tests at a live endpoint.
   config.ocrBaseUrl = "";
   config.ocrModel = "";
@@ -95,7 +92,7 @@ describe("discoverFiles", () => {
     const first = await discoverFiles(db);
     expect(first).toHaveLength(2);
     expect(first.every((e) => e.status === "new" && e.fileId === null)).toBe(true);
-    expect(first.every((e) => !e.encrypted && e.vaultCandidates === 0)).toBe(true);
+    expect(first.every((e) => !e.encrypted)).toBe(true);
     expect(first.map((e) => e.relPath).sort()).toEqual(["a.pdf", "sub/b.pdf"]);
 
     const target = first.find((e) => e.relPath === "a.pdf")!;
@@ -150,21 +147,14 @@ describe("discoverFiles", () => {
     expect(entry.note).toBeTruthy();
   });
 
-  it("reports encryption and matching vault candidates, and never asks the vault about an image", async () => {
+  it("reports encryption and never probes an image", async () => {
     const db = freshDb();
     write("kbank.pdf", await encryptedPdf("secret"));
     write("kbank.png", png);
-    upsertPassword(db, "^kbank.*", "secret", config.dbEncryptionKey);
 
     const entries = await discoverFiles(db);
-    expect(entries.find((e) => e.relPath === "kbank.pdf")).toMatchObject({
-      encrypted: true,
-      vaultCandidates: 1,
-    });
-    expect(entries.find((e) => e.relPath === "kbank.png")).toMatchObject({
-      encrypted: false,
-      vaultCandidates: 0,
-    });
+    expect(entries.find((e) => e.relPath === "kbank.pdf")).toMatchObject({ encrypted: true });
+    expect(entries.find((e) => e.relPath === "kbank.png")).toMatchObject({ encrypted: false });
   });
 });
 
@@ -487,7 +477,7 @@ describe("prepareFile: --force", () => {
   it("keeps the prior row and its transactions when the password does not open it", async () => {
     const db = freshDb();
     const path = write("kbank.pdf", await encryptedPdf("secret"));
-    // Registered without ever unlocking it, so no learned vault password can open the re-read.
+    // Registered by hash without ever unlocking it, so only the wrong password below is tried.
     const { fileId } = registerPendingFile(db, loaded(path));
     commitRow(db, fileId);
 

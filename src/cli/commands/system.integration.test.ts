@@ -119,6 +119,56 @@ describe("system CLI integration (subprocess)", () => {
   );
 
   it(
+    "config --encryption-key imports a caller-held key on a fresh env, redacted in output",
+    async () => {
+      const isolated = createSandbox("oled-system-import-key-it-");
+      try {
+        const key = "0123456789abcdef".repeat(4);
+        const setup = await runCli(
+          ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--encryption-key", key, "--json"],
+          { env: isolated.env, cwd: isolated.root },
+        );
+        expect(setup.code).toBe(0);
+        const result = parseOne(setup.stdout);
+        expect(result.dbEncryptionKey).toMatchObject({ set: true });
+        expect(result.dbEncryptionKey.fingerprint).toMatch(/^sha256:[0-9a-f]{8}$/);
+        expect(/[0-9a-f]{64}/i.test(setup.stdout)).toBe(false);
+      } finally {
+        isolated.cleanup();
+      }
+    },
+    30000,
+  );
+
+  it(
+    "config rejects --generate-key with --encryption-key, and a non-hex key (USAGE)",
+    async () => {
+      const isolated = createSandbox("oled-system-key-usage-it-");
+      try {
+        const key = "0123456789abcdef".repeat(4);
+        const both = await runCli(["config", "--generate-key", "--encryption-key", key, "--json"], {
+          env: isolated.env,
+          cwd: isolated.root,
+        });
+        expect(both.code).toBe(2);
+        expect(JSON.parse(both.stderr.trim()).error.code).toBe("E_USAGE");
+
+        const short = await runCli(["config", "--encryption-key", "hunter2", "--json"], {
+          env: isolated.env,
+          cwd: isolated.root,
+        });
+        expect(short.code).toBe(2);
+        const err = JSON.parse(short.stderr.trim());
+        expect(err.error.code).toBe("E_USAGE");
+        expect(err.error.message).toContain("64 hex");
+      } finally {
+        isolated.cleanup();
+      }
+    },
+    30000,
+  );
+
+  it(
     "config --generate-key refuses to key an existing keyless db (INVALID) and leaves it usable",
     async () => {
       const isolated = createSandbox("oled-system-plain-db-it-");
@@ -185,9 +235,9 @@ describe("system CLI integration (subprocess)", () => {
         {
           // A noun reached without a verb: commander answers with the noun's
           // help screen on stderr, which is not a line the contract allows.
-          args: ["vault"],
-          message: "oled vault needs a subcommand",
-          hint: "one of: add, list, rm",
+          args: ["files"],
+          message: "oled files needs a subcommand",
+          hint: "one of: list, show, drop",
         },
       ];
 
@@ -212,7 +262,7 @@ describe("system CLI integration (subprocess)", () => {
     async () => {
       const [text, noun, help, version] = await Promise.all([
         runCli(["ingest", "list", "--nope"]),
-        runCli(["vault"]),
+        runCli(["files"]),
         runCli(["--help"]),
         runCli(["--version"]),
       ]);
@@ -225,7 +275,7 @@ describe("system CLI integration (subprocess)", () => {
       // Help-first: a verbless noun still answers with its help screen, unchanged.
       expect(noun.code).toBe(1);
       expect(noun.stdout).toBe("");
-      expect(noun.stderr).toContain("Usage: oled vault");
+      expect(noun.stderr).toContain("Usage: oled files");
 
       expect(help.code).toBe(0);
       expect(help.stdout).toContain("Usage");

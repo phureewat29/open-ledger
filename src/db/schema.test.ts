@@ -41,7 +41,6 @@ describe("migrate", () => {
     // The baseline is the whole schema, so this list is exhaustive.
     expect(tableNames(db).sort()).toEqual([
       "accounts",
-      "file_passwords",
       "files",
       "merchant_aliases",
       "merchants",

@@ -186,7 +186,7 @@ export function requireYes(opts: { yes?: boolean }, what: string): void {
 }
 
 /** Empty string when stdin is a TTY (no pipe). */
-export async function readStdinToEnd(): Promise<string> {
+async function readStdinToEnd(): Promise<string> {
   if (process.stdin.isTTY) return "";
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -195,14 +195,13 @@ export async function readStdinToEnd(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Trims a single trailing newline, CRLF-aware. */
-export async function readSecretFromStdin(): Promise<string> {
-  const raw = await readStdinToEnd();
-  return raw.replace(/\r?\n$/, "");
-}
-
-/** Auto-detects a JSON array (first non-ws char is `[`) vs NDJSON. Row validation is the caller's job. */
+/**
+ * Reads batch rows from `--input <file>` or stdin — the CLI's only stdin
+ * read, kept because batches outgrow argv. Auto-detects a JSON array (first
+ * non-ws char is `[`) vs NDJSON; row validation is the caller's job.
+ */
 export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
+  const from = inputPath ?? "stdin";
   let source: string;
   if (inputPath) {
     try {
@@ -218,18 +217,15 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   const raw = source.replace(/^\uFEFF/, "");
   const firstNonWs = raw.match(/\S/);
   if (!firstNonWs)
-    fail("USAGE", inputPath ? `no transaction data in ${inputPath}` : "no transaction data on stdin", {
+    fail("USAGE", `${from}: no rows`, {
       hint: "pass NDJSON rows via --input <file> or pipe them on stdin",
     });
 
   if (firstNonWs[0] === "[") {
     try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) fail("USAGE", "stdin JSON must be an array of transactions");
-      return parsed;
+      return JSON.parse(raw) as unknown[];
     } catch (err) {
-      if (err instanceof CliError) throw err;
-      fail("USAGE", `invalid JSON array on stdin: ${(err as Error).message}`);
+      fail("USAGE", `${from}: invalid JSON array: ${(err as Error).message}`);
     }
   }
 
@@ -241,7 +237,7 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
     try {
       out.push(JSON.parse(line));
     } catch (err) {
-      fail("USAGE", `invalid JSON on line ${i + 1}: ${(err as Error).message}`, {
+      fail("USAGE", `${from}: invalid JSON on line ${i + 1}: ${(err as Error).message}`, {
         details: { line: i + 1 },
       });
     }

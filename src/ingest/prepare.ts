@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type Database from "libsql";
-import { config, getCacheDir, getDataDir } from "../config.js";
+import { getCacheDir, getDataDir } from "../config.js";
 import {
   findFileByHash,
   findFileById,
@@ -12,11 +12,10 @@ import {
 } from "../db/queries/files.js";
 import { extractFile, type Extraction, type TextPage } from "../extract/extract.js";
 import { resolveOcr } from "../extract/ocr.js";
-import { isEncryptedPdf } from "../extract/pdf.js";
+import { isEncryptedPdf, unlockPdf } from "../extract/pdf.js";
 import type { TextLayer } from "../extract/route.js";
 import { SOURCES, loadSource, type LoadedSource } from "../extract/source.js";
 import { tryExecute, type Result } from "../lib/result.js";
-import { findCandidates, unlockNonInteractive } from "./vault.js";
 
 type IngestStatus = "new" | "pending" | "ingested" | "failed" | "unreadable";
 
@@ -29,7 +28,6 @@ export interface IngestEntry {
   fileId: string | null;
   status: IngestStatus;
   encrypted: boolean;
-  vaultCandidates: number;
   note?: string;
 }
 
@@ -60,31 +58,14 @@ function walk(dir: string, root: string, out: WalkedFile[]): void {
   }
 }
 
-interface Encryption {
-  encrypted: boolean;
-  vaultCandidates: number;
-}
-
-const UNLOCKED: Encryption = { encrypted: false, vaultCandidates: 0 };
-
 /** Only a PDF can be locked, and only a PDF can be unopenable — an image needs neither probe. */
-async function encryptionOf(db: Database.Database, source: LoadedSource): Promise<Result<Encryption>> {
-  if (source.kind !== "pdf") return { ok: true, value: UNLOCKED };
-
-  const probe = await tryExecute(() => isEncryptedPdf(source.bytes));
-  if (!probe.ok) return probe;
-  if (!probe.value) return { ok: true, value: UNLOCKED };
-  return {
-    ok: true,
-    value: {
-      encrypted: true,
-      vaultCandidates: findCandidates(db, source.path, config.dbEncryptionKey).length,
-    },
-  };
+async function encryptionOf(source: LoadedSource): Promise<Result<boolean>> {
+  if (source.kind !== "pdf") return { ok: true, value: false };
+  return tryExecute(() => isEncryptedPdf(source.bytes));
 }
 
 function unreadableEntry(file: WalkedFile, note: string): IngestEntry {
-  return { ...file, hash: null, fileId: null, status: "unreadable", ...UNLOCKED, note };
+  return { ...file, hash: null, fileId: null, status: "unreadable", encrypted: false, note };
 }
 
 /**
@@ -108,7 +89,7 @@ export async function discoverFiles(
       entries.push(unreadableEntry(file, loaded.message));
       continue;
     }
-    const encryption = await encryptionOf(db, loaded.value);
+    const encryption = await encryptionOf(loaded.value);
     if (!encryption.ok) {
       entries.push(unreadableEntry(file, encryption.error));
       continue;
@@ -120,7 +101,7 @@ export async function discoverFiles(
       hash: loaded.value.hash,
       fileId: known?.id ?? null,
       status: known ? known.status : "new",
-      ...encryption.value,
+      encrypted: encryption.value,
     });
   }
   return entries;
@@ -247,30 +228,31 @@ type UnlockedBytes =
       message: string;
     };
 
-const UNLOCK_FAILED: Record<"password_required" | "wrong_password", string> = {
-  password_required: "the PDF is locked and no stored password opened it",
-  wrong_password: "the supplied password did not open the PDF",
-};
-
 /** Images are never locked; decrypted PDF bytes stay in memory — only extracted text is written to disk. */
-async function readableBytes(
-  db: Database.Database,
-  source: LoadedSource,
-  password?: string,
-): Promise<UnlockedBytes> {
+async function readableBytes(source: LoadedSource, password?: string): Promise<UnlockedBytes> {
   if (source.kind !== "pdf") return { ok: true, bytes: source.bytes };
 
-  // Passes an already-unlocked source through untouched; throws on bytes mupdf can't open at all.
-  const attempt = await tryExecute(() =>
-    unlockNonInteractive(db, source.bytes, source.path, { password }),
-  );
-  if (!attempt.ok) return { ok: false, reason: "pdf_unreadable", message: attempt.error };
-
-  const unlocked = attempt.value;
-  if (!unlocked.ok) {
-    return { ok: false, reason: unlocked.reason, message: UNLOCK_FAILED[unlocked.reason] };
+  const probe = await tryExecute(() => isEncryptedPdf(source.bytes));
+  if (!probe.ok) return { ok: false, reason: "pdf_unreadable", message: probe.error };
+  if (!probe.value) return { ok: true, bytes: source.bytes };
+  if (!password) {
+    return {
+      ok: false,
+      reason: "password_required",
+      message: "the PDF is locked and no password was given",
+    };
   }
-  return { ok: true, bytes: unlocked.decrypted };
+
+  const attempt = await tryExecute(() => unlockPdf(source.bytes, password));
+  if (!attempt.ok) return { ok: false, reason: "pdf_unreadable", message: attempt.error };
+  if (!attempt.value.ok) {
+    return {
+      ok: false,
+      reason: "wrong_password",
+      message: "the supplied password did not open the PDF",
+    };
+  }
+  return { ok: true, bytes: attempt.value.decrypted };
 }
 
 const DOCUMENT_FILE = "document.txt";
@@ -375,7 +357,7 @@ export async function prepareFile(
   const prior = opts.force ? findFileByHash(db, source.hash) : null;
   const fileId = prior ? newFileId() : registerPendingFile(db, source).fileId;
 
-  const readable = await readableBytes(db, source, opts.password);
+  const readable = await readableBytes(source, opts.password);
   if (!readable.ok) return readable;
 
   const extracted = await extractFile(
