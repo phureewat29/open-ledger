@@ -42,11 +42,11 @@ export function banner(): string {
 }
 
 const DISCLAIMER =
-  "OpenLedger is an assistant, it only summarizes financial statements — verify amounts against your statements before relying on them.";
+  "OpenLedger is a tool, it only summarizes financial statements — verify amounts against your statements before relying on them.";
 
 const SCENARIO = [
-  "Drop bank statements in a folder; your AI posts each row to a local encrypted ledger.",
-  "Ask for net worth, spending, subscriptions, or debt payoff. Answers come from the ledger, not guesses.",
+  "Place financial statements in a folder; your AI posts each row to a local encrypted ledger.",
+  "Ask for net worth, spending, subscriptions, or debt payoff. Answers always come from the ledger.",
   "Every entry is double-entry and stays on your machine.",
 ];
 
