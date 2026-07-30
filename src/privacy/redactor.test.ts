@@ -8,6 +8,7 @@ vi.mock("../context.js", () => ({
   readContext: vi.fn().mockReturnValue(
     `## Family
 - Partner: Corgi
+- User
 
 ## Income
 - 80,000 THB/month from Zentry Thailand Co.
@@ -63,6 +64,17 @@ describe("applyRedaction (masking patterns)", () => {
     expect(redact("The weather is hot in Bangkok today")).toBe(
       "The weather is hot in Bangkok today",
     );
+  });
+
+  it("never rewrites a path: the default name is not a term, and terms respect boundaries", () => {
+    // The mocked context's Family section carries "- User"; the default-name
+    // guard must refuse to turn it into a term at all.
+    expect(redact("/Users/phureewat/.oled/db.sqlite")).toBe("/Users/phureewat/.oled/db.sqlite");
+  });
+
+  it("matches whole words only: Corgi inside Corgis stays put", () => {
+    expect(redact("Corgis are a breed")).toBe("Corgis are a breed");
+    expect(redact("Payment to Corgi")).toBe("Payment to [PARTNER]");
   });
 });
 

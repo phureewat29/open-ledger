@@ -24,7 +24,10 @@ function writeContext(content: string): void {
 
 export function createContextTemplate(userName: string): void {
   if (existsSync(getContextPath())) return;
+  // Family is for OTHER people; seeding it with the user's own name would let the
+  // redactor promote that name into a [PARTNER] term and rewrite it inside
+  // unrelated text (e.g. a "User" match inside a file path).
   writeContext(
-    `# OpenLedger context for ${userName}\n\n## Family\n- ${userName}\n\n## Income\n- (Optional: add your primary income source so OpenLedger can mark it as PII when sending data to the model.)\n\n## Notes\n- (Free-form notes about your accounts, bank preferences, or anything OpenLedger should keep in mind when ingesting.)\n`,
+    `# OpenLedger context for ${userName}\n\n## Family\n(add family members as "- Name (relation)" lines)\n\n## Income\n- (Optional: add your primary income source so OpenLedger can mark it as PII when sending data to the model.)\n\n## Notes\n- (Free-form notes about your accounts, bank preferences, or anything OpenLedger should keep in mind when ingesting.)\n`,
   );
 }

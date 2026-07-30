@@ -150,6 +150,11 @@ describe("system CLI integration (subprocess)", () => {
         expect(report.db.reachable).toBe(true);
         expect(report.db).not.toHaveProperty("encrypted");
         expect(report.db).not.toHaveProperty("key_fingerprint");
+        // Paths are home-relativized facts, never redaction fodder. Only
+        // config_path sits under HOME in this sandbox; db/data are siblings.
+        expect(report.config_path.startsWith("~/")).toBe(true);
+        expect(JSON.stringify(report)).not.toContain("[USER");
+        expect(JSON.stringify(report)).not.toContain("[PARTNER");
       } finally {
         isolated.cleanup();
       }

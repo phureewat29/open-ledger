@@ -2,11 +2,20 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { config, getConfigPath, getDataDir } from "../../config.js";
 import { existsSync } from "fs";
+import { homedir } from "os";
+import { sep } from "path";
 import { formatAmount } from "../currency.js";
 import { banner, visibleLength, ANSI_RE, formatInt } from "../format.js";
 import { currentMode, emit, runAction } from "../output.js";
 import { tryExecute } from "../../lib/result.js";
 import { openDb } from "../db.js";
+
+/** Rewrites a leading home-directory prefix to "~/"; any other string passes through
+ *  unchanged, so calling it on non-path values (e.g. error prose) is a safe no-op. */
+function homeRelative(p: string): string {
+  const prefix = homedir() + sep;
+  return p.startsWith(prefix) ? "~" + sep + p.slice(prefix.length) : p;
+}
 
 interface Counts {
   accounts: number;
@@ -43,13 +52,13 @@ async function buildReport(): Promise<StatusReport> {
     // A converge has run, which is what `oled config --init` does; a db file on
     // its own says nothing about configuration.
     configured: existsSync(getConfigPath()),
-    config_path: getConfigPath(),
-    data_dir: getDataDir(),
+    config_path: homeRelative(getConfigPath()),
+    data_dir: homeRelative(getDataDir()),
     locale: config.displayLocale,
     currency: config.displayCurrency,
     user_name: config.userName,
     db: {
-      path: config.dbPath,
+      path: homeRelative(config.dbPath),
       reachable: false,
       error: null,
     },
@@ -78,7 +87,7 @@ async function buildReport(): Promise<StatusReport> {
   // Opening the db is the only reachability check; a failing count query must not read as not-ready.
   const opened = await tryExecute(() => openDb());
   if (!opened.ok) {
-    report.db.error = opened.error;
+    report.db.error = homeRelative(opened.error);
     return report;
   }
   const db = opened.value;
@@ -99,8 +108,9 @@ async function buildReport(): Promise<StatusReport> {
   return report;
 }
 
-// Fields that can leak the username or home dir ("error" can embed the db path).
-const STATUS_REDACT_FIELDS = ["config_path", "data_dir", "path", "error", "user_name"] as const;
+// Paths are home-relativized facts, not free text: only error prose and the
+// user name can still carry PII by the time redaction runs.
+const STATUS_REDACT_FIELDS = ["error", "user_name"] as const;
 
 /** Redaction is on unless `--no-redact` explicitly turned it off, so bare `oled`
  *  (which has no such flag) masks the same fields `oled status` does. */

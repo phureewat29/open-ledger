@@ -71,6 +71,10 @@ function applyRule(rule: SectionRule, context: string, userName: string, push: (
       if (rule.stripParen) name = name.replace(/\s*\(.*\)/, "").trim();
       if (!name) break;
       if (rule.skipIfUser && name.toLowerCase() === userName.toLowerCase()) break;
+      // The default name must never become a redaction term: it seeds context.md's
+      // Family section (src/context.ts), and turning it into [PARTNER] would rewrite
+      // the literal word inside unrelated text such as file paths.
+      if (name.toLowerCase() === "user") break;
       push(name, rule.token);
       break;
     }
@@ -111,14 +115,28 @@ function buildRedactions(): RedactionEntry[] {
   return entries;
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /** Builds name rules from config.userName + context.md once, returning a reusable
  *  masker that amortizes that cost across many values. */
 function createRedactor(): (text: string) => string {
   const redactions = buildRedactions();
+  // ASCII lookarounds, not \b: an employer term may end in punctuation (e.g. "Co."
+  // at the end of a string), and Thai text has no spaces so a Unicode letter
+  // boundary would lose recall there. This still stops "User" from matching inside
+  // "Users" or "Corgi" from matching inside "Corgis".
+  const patterns = redactions.map(
+    ({ real, token }): [RegExp, string] => [
+      new RegExp("(?<![A-Za-z0-9_])" + escapeRegExp(real) + "(?![A-Za-z0-9_])", "gu"),
+      token,
+    ],
+  );
   return (text: string): string => {
     let result = text;
-    for (const { real, token } of redactions) {
-      result = result.replaceAll(real, token);
+    for (const [pattern, token] of patterns) {
+      result = result.replace(pattern, token);
     }
     for (const [pattern, replacement] of NUMERIC_PII_PATTERNS) {
       result = result.replace(pattern, replacement);
