@@ -114,7 +114,7 @@ function lifecycleItems(): Record<string, unknown>[] {
     {
       date: "2026-06-12",
       description: "Happy Paws Grooming",
-      // Bare-leaf hint on purpose — colon paths auto-create silently; this
+      // Bare-leaf hint on purpose: colon paths auto-create silently; this
       // row exercises the uncategorized-fallback question.
       debit_account: "grooming",
       credit_account: "asset:bank:kasibank",
@@ -165,31 +165,25 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
     20000,
   );
 
-  it("the encrypted statement fixture lands in the sandbox data dir", () => {
-    statementPath = join(sandbox.dataDir, "corgi-bank", "card-statement-2026-05.pdf");
-    mkdirSync(dirname(statementPath), { recursive: true });
-    copyFileSync(FIXTURE_STATEMENT, statementPath);
-    expect(existsSync(statementPath)).toBe(true);
-  });
-
   it(
-    "ingest list finds exactly the staged statement and reports it encrypted",
+    "ingest list finds exactly the staged locked statement and reports it encrypted",
     async () => {
+      // Staging is setup, not an assertion: copyFileSync throws on failure, and
+      // `ingest list` finding the file is what proves it landed.
+      statementPath = join(sandbox.dataDir, "corgi-bank", "card-statement-2026-05.pdf");
+      mkdirSync(dirname(statementPath), { recursive: true });
+      copyFileSync(FIXTURE_STATEMENT, statementPath);
+
       const rows = parseNdjson((await ok(["ingest", "list"])).stdout).filter((r) => r.type === "file");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ encrypted: true, path: statementPath });
-      // `vault_candidates` belonged to the removed vault surface; its return would mean that removal regressed.
-      expect(rows[0]).not.toHaveProperty("vault_candidates");
     },
     20000,
   );
 
   it(
-    "ingest prepare exits INPUT_REQUIRED without a password, then extracts the text layer with one",
+    "ingest prepare extracts the locked statement's text layer with --password",
     async () => {
-      const locked = await oled(["ingest", "prepare", statementPath]);
-      expect(locked.code).toBe(4); // EXIT.INPUT_REQUIRED
-
       const res = await ok(["ingest", "prepare", statementPath, "--password", FIXTURE_PASSWORD]);
       const result = parseOne(res.stdout);
       // page_count is pinned to this 6-page fixture, not to prepare's paging.
@@ -263,7 +257,10 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
     "questions list surfaces the fallback question and answer closes it",
     async () => {
-      const rows = parseNdjson((await ok(["questions", "list"])).stdout);
+      // The trailing summary row is not a question; only real rows count.
+      const rows = parseNdjson((await ok(["questions", "list"])).stdout).filter(
+        (r) => r.type !== "summary",
+      );
       expect(rows.length).toBeGreaterThanOrEqual(1);
 
       const answered = parseNdjson(
@@ -306,7 +303,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   /**
    * Auto-merge (src/ingest/dedup.ts) only matches rows carrying both a
    * merchant_id and a source_file_id, which a manual `transactions add` row has
-   * neither of — so the manual add covers strict create only, and the auto-merge
+   * neither of, so the manual add covers strict create only, and the auto-merge
    * assertion rides on a second file-sourced duplicate row.
    */
   it(

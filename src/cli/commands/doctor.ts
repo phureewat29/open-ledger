@@ -2,10 +2,10 @@ import type { Command } from "commander";
 import type Database from "libsql";
 import chalk from "chalk";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
-import { getConfigPath, getDataDir } from "../../config.js";
+import { config, getConfigPath, getDataDir } from "../../config.js";
 import { listMissingTables } from "../../db/schema.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
@@ -23,11 +23,19 @@ interface Check {
 const HARD_CHECKS = new Set(["db_open", "schema_tables_present"]);
 const REQUIRED_TABLES = ["accounts", "transactions", "questions"];
 
+/** Diagnosing must not provision: doctor reports what is missing and points at
+ *  `config --init`, the same look-don't-create rule `status` follows. */
+const INIT_HINT = "run `oled config --init` to create it";
+
 function configCheck(): Check {
-  return { name: "config_exists", ok: existsSync(getConfigPath()) };
+  const ok = existsSync(getConfigPath());
+  return ok ? { name: "config_exists", ok } : { name: "config_exists", ok, detail: INIT_HINT };
 }
 
 async function dbOpenCheck(): Promise<{ check: Check; db: Database.Database | null }> {
+  if (!existsSync(config.dbPath)) {
+    return { check: { name: "db_open", ok: false, detail: `no ledger yet: ${INIT_HINT}` }, db: null };
+  }
   try {
     const db = await openDb();
     return { check: { name: "db_open", ok: true }, db };
@@ -37,9 +45,11 @@ async function dbOpenCheck(): Promise<{ check: Check; db: Database.Database | nu
 }
 
 function dataDirWritableCheck(): Check {
+  const dir = getDataDir();
+  if (!existsSync(dir)) {
+    return { name: "data_dir_writable", ok: false, detail: `missing: ${INIT_HINT}` };
+  }
   try {
-    const dir = getDataDir();
-    mkdirSync(dir, { recursive: true });
     const probe = join(dir, `.doctor-probe-${randomUUID()}`);
     writeFileSync(probe, "ok");
     rmSync(probe, { force: true });
@@ -138,7 +148,7 @@ function skillPackCheck(): Check {
     return {
       name,
       ok: false,
-      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g @aquartier/openledger@latest)`,
+      detail: `installed ${installed} (${where}), cli ${cli}: refresh the skill (oled setup --force) or upgrade the CLI (npm install -g @aquartier/openledger@latest)`,
     };
   }
   return { name, ok: true, detail: `installed ${installed} (${where})` };

@@ -15,7 +15,7 @@ interface Counts {
   notes: number;
 }
 
-interface StatusReport {
+export interface StatusReport {
   type: "status";
   configured: boolean;
   config_path: string;
@@ -106,6 +106,9 @@ const STATUS_REDACT_FIELDS = ["config_path", "data_dir", "path", "error", "user_
  *  (which has no such flag) masks the same fields `oled status` does. */
 export async function showStatus(opts: { redact?: boolean } = {}): Promise<void> {
   let report = await buildReport();
+  // Decided before redaction: the redacted report's paths and error prose are
+  // display strings, not facts to branch on.
+  const ledgerMissing = !report.db.reachable && !existsSync(config.dbPath);
   if (opts.redact !== false) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
     report = applyRedaction(report, true, STATUS_REDACT_FIELDS);
@@ -116,7 +119,7 @@ export async function showStatus(opts: { redact?: boolean } = {}): Promise<void>
     return;
   }
   if (mode.tty) {
-    renderTty(report, mode.color);
+    renderTty(report, mode.color, ledgerMissing);
     return;
   }
   renderPlain(report);
@@ -167,7 +170,9 @@ function renderPlain(r: StatusReport): void {
 
 const LABEL_WIDTH = 18;
 
-function renderTty(r: StatusReport, color: boolean): void {
+/** Exported for the display test: this renderer runs only on a real TTY, so no
+ *  subprocess suite can ever execute it. */
+export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false): void {
   const dim = (s: string) => (color ? chalk.dim(s) : s);
   const bold = (s: string) => (color ? chalk.bold.yellow(s) : s);
 
@@ -191,17 +196,16 @@ function renderTty(r: StatusReport, color: boolean): void {
     ["Data dir", dim(r.data_dir)],
     [
       "Database",
-      r.db.reachable ? "ready" : dim(r.db.error ? `not ready — ${r.db.error}` : "not ready"),
+      r.db.reachable ? "ready" : dim(r.db.error ? `not ready: ${r.db.error}` : "not ready"),
     ],
   ]);
 
   // status always exits 0, so an unreachable db needs a pointer to whatever
   // resolves it: creating the ledger, or diagnosing one that will not open.
   if (!r.db.reachable) {
-    const next =
-      r.db.error === NO_LEDGER
-        ? "run `oled config --init` to create one"
-        : "run `oled doctor` for details";
+    const next = ledgerMissing
+      ? "run `oled config --init` to create one"
+      : "run `oled doctor` for details";
     process.stdout.write(dim(`  ${next}`) + "\n\n");
   }
 

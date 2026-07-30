@@ -5,14 +5,15 @@ let sandbox: Sandbox;
 let runCli: CliRunner;
 
 /**
- * One sandbox for every case below: they only read, and the first db-touching
- * case migrates the empty db the rest observe. They must stay sequential —
- * `.concurrent` would race that migration.
+ * One sandbox for every case below: they only read, against a ledger seeded by
+ * one explicit `config --init`: doctor and status create nothing on their own.
  */
-beforeAll(() => {
+beforeAll(async () => {
   sandbox = createSandbox("oled-e2e-read-");
   runCli = makeRunCli(sandbox, "dist");
-});
+  const init = await runCli(["config", "--init", "--json"]);
+  if (init.code !== 0) throw new Error(`config --init failed: ${init.stderr}`);
+}, 30000);
 
 afterAll(() => {
   sandbox.cleanup();

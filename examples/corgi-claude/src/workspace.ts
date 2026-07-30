@@ -163,6 +163,14 @@ export function runOpenLedger(
   return runCommand("oled", args, { cwd, env });
 }
 
+/** Doctor and status never create the ledger, so the runner initializes it
+ *  deterministically instead of leaving that to the agent's first turn. */
+export async function initLedger(env: NodeJS.ProcessEnv, cwd: string): Promise<StepResult> {
+  const res = await runOpenLedger(["config", "--init", "--json"], env, cwd);
+  if (!res.ok) return exitStatus(res);
+  return { ok: true, detail: "config, db and data dir created" };
+}
+
 /** `--dir .claude/skills` resolves against the run's cwd, landing the pack at
  *  `<cwd>/.claude/skills/openledger`, where `claude` discovers it; the reported
  *  path is the one setup says it wrote. */

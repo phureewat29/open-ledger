@@ -117,16 +117,30 @@ describe("system CLI integration (subprocess)", () => {
         const before = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(before.code).toBe(0);
         const blank = parseOne(before.stdout);
+        // The wire discriminator agents read the payload by; a rename breaks them.
+        expect(blank.type).toBe("status");
         expect(blank.configured).toBe(false);
         expect(blank.db.reachable).toBe(false);
-        // Orienting must not bring a ledger into existence — the trap this closes.
+        expect(blank.db.error).toBe("no ledger yet");
+        // Orienting must not bring a ledger into existence.
         expect(existsSync(isolated.dbPath)).toBe(false);
         expect(existsSync(join(isolated.home, ".oled", "config.json"))).toBe(false);
 
-        const init = await runCli(
-          ["config", "--init", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--json"],
-          { env: isolated.env, cwd: isolated.root },
+        // Doctor diagnoses the same state without provisioning it either.
+        const virginDoctor = await runCli(["doctor", "--json"], { env: isolated.env, cwd: isolated.root });
+        expect(virginDoctor.code).toBe(3); // EXIT.NOT_READY
+        const dbOpen = parseOne(virginDoctor.stdout).checks.find(
+          (c: { name: string }) => c.name === "db_open",
         );
+        expect(dbOpen.ok).toBe(false);
+        expect(dbOpen.detail).toContain("no ledger yet");
+        expect(existsSync(isolated.dbPath)).toBe(false);
+
+        // Bare --init, no companion flags: the env-resolved paths suffice.
+        const init = await runCli(["config", "--init", "--json"], {
+          env: isolated.env,
+          cwd: isolated.root,
+        });
         expect(init.code).toBe(0);
 
         const after = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
@@ -342,7 +356,7 @@ describe("system CLI integration (subprocess)", () => {
           file_id: null,
           account_id: "expense:food",
           kind: "duplicate",
-          prompt: "Possible duplicate — snooze for later review?",
+          prompt: "Possible duplicate: snooze for later review?",
         });
       } finally {
         raw.close();
@@ -358,6 +372,23 @@ describe("system CLI integration (subprocess)", () => {
         context: { rule_key: "merchant:acme-foodmart" },
       });
       expect(rows.find((r) => r.id === q2)).toMatchObject({ kind: "duplicate", context: null });
+
+      // The cap has to announce itself: without the summary, a batch larger than
+      // the cap reads as complete. `returned` is checked against the rows actually
+      // emitted, so reporting nothing cannot pass; the db is shared, hence the
+      // floor on total.
+      const summary = rows.find((r) => r.type === "summary")!;
+      expect(summary.returned).toBe(rows.length - 1);
+      expect(summary.total).toBeGreaterThanOrEqual(2);
+      expect(summary).toMatchObject({ has_more: false, limit: 200 });
+
+      const capped = parseNdjson((await runCli(["questions", "list", "--limit", "1", "--json"])).stdout);
+      expect(capped.filter((r) => r.type !== "summary")).toHaveLength(1);
+      expect(capped.find((r) => r.type === "summary")).toMatchObject({
+        returned: 1,
+        has_more: true,
+        limit: 1,
+      });
 
       const answer = await runCli(["questions", "answer", q1, "--answer", "expense:food:groceries", "--json"]);
       expect(answer.code).toBe(0);

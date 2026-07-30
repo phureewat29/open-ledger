@@ -22,7 +22,7 @@ type SecretKey = (typeof CONFIG_SECRETS)[number];
 type RedactedConfig = Omit<OpenLedgerConfig, SecretKey> &
   Record<SecretKey, { set: boolean; fingerprint?: string }>;
 
-/** Every CONFIG_SECRETS key surfaces as {set, fingerprint}, never plaintext — config output is safe to paste into shells/logs/bug reports. */
+/** Every CONFIG_SECRETS key surfaces as {set, fingerprint}, never plaintext: config output is safe to paste into shells/logs/bug reports. */
 function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
   const redacted = { ...cfg } as Record<string, unknown>;
   for (const key of CONFIG_SECRETS) {
@@ -137,7 +137,8 @@ async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
  */
 async function convergeConfig(flags: ConvergeFlags): Promise<void> {
   const converged = resolveConvergedConfig(flags);
-  mkdirSync(converged.dataDir, { recursive: true });
+  // 0700: the data dir holds the raw statements, the most sensitive files here.
+  mkdirSync(converged.dataDir, { recursive: true, mode: 0o700 });
 
   await applyConvergedConfig(converged);
 
@@ -167,7 +168,7 @@ export function registerConfig(program: Command): void {
     .description("Configuration")
     .option("--data-dir <dir>", "data directory")
     .option("--db <path>", "database path")
-    .option("--init", "create the config file, database, and data directory")
+    .option("--init", "initialize the harness (config, database, data dir); any other setting flag initializes too")
     .option("--locale <locale>", "locale")
     .option("--currency <code>", "default currency code")
     .option("--country <code>", "seed locale/currency from a country's defaults (default: th)")

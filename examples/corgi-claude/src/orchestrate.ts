@@ -10,6 +10,7 @@ import {
   DETAIL_MAX,
   exitStatus,
   failureDetail,
+  initLedger,
   installSkill,
   numberField,
   parseNdjson,
@@ -31,7 +32,7 @@ const STATEMENT_PASSWORD = "password";
 const DEMO_TOOLS = "Bash(oled:*),Read,Write,Glob,Grep,TodoWrite,Skill";
 
 const TURN_PROMPTS = [
-  `ingest my new statements — the statement is password-protected; the password is: ${STATEMENT_PASSWORD} — then give me a quick summary of what you found`,
+  `ingest my new statements, the statement is password-protected; the password is: ${STATEMENT_PASSWORD}, then give me a quick summary of what you found`,
   "resolve any open questions using your own judgment, and capture the card's statement metadata (masked number, points, due day) onto the account",
   "how much did I spend this billed period, what were my top merchants, and what should I watch next month?",
 ];
@@ -175,6 +176,9 @@ export async function runDemo(
 
   const skillOk = await step("install skill", () => installSkill(env, ws.cwd));
   if (!skillOk) return { pass: false, paths: ws };
+
+  const initOk = await step("init ledger", () => initLedger(env, ws.cwd));
+  if (!initOk) return { pass: false, paths: ws };
 
   const readyOk = await step("doctor readiness gate", () => doctorReady(env, ws.cwd));
   if (!readyOk) return { pass: false, paths: ws };
