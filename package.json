@@ -1,6 +1,6 @@
 {
   "name": "@aquartier/openledger",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "OpenLedger — The Harness Layer for Personal Finance",
   "keywords": [
     "finance",
@@ -31,7 +31,7 @@
     "datasets/"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && tsc && chmod +x dist/cli/index.js",
     "test": "vitest run --typecheck --typecheck.tsconfig ./tsconfig.typecheck.json",
     "dev": "tsx src/cli/index.ts",
     "release": "tsx scripts/release.ts",
