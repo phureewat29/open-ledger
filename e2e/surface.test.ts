@@ -25,6 +25,8 @@ interface SurfaceCase {
   label: string;
   args: string[];
   exit: number;
+  /** A list read: its last stdout line must be the summary row. */
+  list?: boolean;
 }
 
 /**
@@ -36,22 +38,23 @@ const SURFACE_CASES: SurfaceCase[] = [
   { label: "status", args: ["status"], exit: 0 },
   { label: "doctor", args: ["doctor"], exit: 0 },
   { label: "config show", args: ["config", "show"], exit: 0 },
-  { label: "ingest list", args: ["ingest", "list"], exit: 0 },
-  { label: "files list", args: ["files", "list"], exit: 0 },
-  { label: "transactions list", args: ["transactions", "list"], exit: 0 },
-  { label: "transactions list --group", args: ["transactions", "list", "--group"], exit: 0 },
-  { label: "transactions dedupe", args: ["transactions", "dedupe"], exit: 0 },
-  { label: "accounts list", args: ["accounts", "list"], exit: 0 },
-  { label: "accounts tree", args: ["accounts", "tree"], exit: 0 },
-  { label: "merchants list", args: ["merchants", "list"], exit: 0 },
-  { label: "questions list", args: ["questions", "list"], exit: 0 },
+  { label: "ingest list", args: ["ingest", "list"], exit: 0, list: true },
+  { label: "files list", args: ["files", "list"], exit: 0, list: true },
+  { label: "transactions list", args: ["transactions", "list"], exit: 0, list: true },
+  { label: "transactions list --group", args: ["transactions", "list", "--group"], exit: 0, list: true },
+  { label: "transactions dedupe", args: ["transactions", "dedupe"], exit: 0, list: true },
+  { label: "accounts list", args: ["accounts", "list"], exit: 0, list: true },
+  { label: "accounts tree", args: ["accounts", "tree"], exit: 0, list: true },
+  { label: "merchants list", args: ["merchants", "list"], exit: 0, list: true },
+  { label: "questions list", args: ["questions", "list"], exit: 0, list: true },
   { label: "report", args: ["report", "--from", "2026-01-01", "--to", "2026-01-31"], exit: 0 },
-  { label: "notes list", args: ["notes", "list"], exit: 0 },
-  { label: "datasets", args: ["datasets"], exit: 0 },
+  { label: "notes list", args: ["notes", "list"], exit: 0, list: true },
+  { label: "datasets", args: ["datasets"], exit: 0, list: true },
   {
     label: "datasets institutions --country th",
     args: ["datasets", "institutions", "--country", "th"],
     exit: 0,
+    list: true,
   },
   {
     label: "transactions show tx:nonexistent",
@@ -65,30 +68,45 @@ const SURFACE_CASES: SurfaceCase[] = [
   },
 ];
 
-/** Blank lines carry no contract; every other line on either stream must be one JSON value. */
-function nonJsonLines(stream: string): string[] {
+/**
+ * The wire contract: blank lines carry nothing; every other line must parse to
+ * one JSON object. A top-level array or scalar is a contract breach even though
+ * it would JSON.parse.
+ */
+function nonObjectLines(stream: string): string[] {
   return stream.split("\n").filter((line) => {
     if (line.trim().length === 0) return false;
     try {
-      JSON.parse(line);
-      return false;
+      const value = JSON.parse(line);
+      return value === null || typeof value !== "object" || Array.isArray(value);
     } catch {
       return true;
     }
   });
 }
 
+function lastLine(stream: string): string {
+  const lines = stream.split("\n").filter((line) => line.trim().length > 0);
+  return lines[lines.length - 1] ?? "";
+}
+
 describe("CLI surface on a virgin ledger (dist subprocess)", () => {
   it.each(SURFACE_CASES)(
     "oled $label exits $exit with NDJSON-only, ANSI-free output on both streams",
-    async ({ args, exit }) => {
+    async ({ args, exit, list }) => {
       const { stdout, stderr, code } = await runCli([...args, "--json"]);
 
       expect(code, `stderr: ${stderr}`).toBe(exit);
-      expect(nonJsonLines(stdout), "stdout lines that are not JSON").toEqual([]);
-      expect(nonJsonLines(stderr), "stderr lines that are not JSON").toEqual([]);
+      expect(nonObjectLines(stdout), "stdout lines that are not one JSON object").toEqual([]);
+      expect(nonObjectLines(stderr), "stderr lines that are not one JSON object").toEqual([]);
       expect(stdout, "ANSI escape bytes on stdout").not.toMatch(ESC);
       expect(stderr, "ANSI escape bytes on stderr").not.toMatch(ESC);
+
+      // A list read always ends with its summary, so an empty result is one
+      // summary line, never zero bytes.
+      if (list) {
+        expect(JSON.parse(lastLine(stdout)).type, "last stdout line").toBe("summary");
+      }
     },
     20000,
   );

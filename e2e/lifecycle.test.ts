@@ -279,7 +279,10 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       expect(result).toMatchObject({ status: "ingested", cache_removed: [cacheSubdir] });
       expect(existsSync(cacheSubdir)).toBe(false);
 
-      expect(parseNdjson((await ok(["files", "list", "--status", "ingested"])).stdout)).toHaveLength(1);
+      const ingested = parseNdjson(
+        (await ok(["files", "list", "--status", "ingested"])).stdout,
+      ).filter((r) => r.type !== "summary");
+      expect(ingested).toHaveLength(1);
     },
     30000,
   );

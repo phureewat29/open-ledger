@@ -118,6 +118,16 @@ export function emitSummary(fields: Record<string, unknown> = {}): void {
   if (currentMode().json) writeLine(process.stdout, { type: "summary", ...fields });
 }
 
+/** The summary a capped list ends with; the fields a pager loops on. */
+export function emitCappedSummary(
+  total: number,
+  returned: number,
+  limit: number,
+  offset: number,
+): void {
+  emitSummary({ total, returned, has_more: offset + returned < total, limit, offset });
+}
+
 export interface Column<T = unknown> {
   header: string;
   value: (row: T) => string;

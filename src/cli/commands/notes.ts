@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import type { NoteRow } from "../../db/queries/notes.js";
-import { emitList, fail, requireYes, runAction, type Column } from "../output.js";
+import { emitList, emitSummary, fail, requireYes, runAction, type Column } from "../output.js";
 import { openDb } from "../db.js";
 import * as z from "zod";
 import { parseInput, str, num } from "../../lib/validate.js";
@@ -31,6 +31,7 @@ async function listNotes(opts: ListNotesOpts): Promise<void> {
     rows = applyRedaction(rows, true, NOTE_REDACT_FIELDS);
   }
   emitList(rows, NOTE_COLUMNS);
+  emitSummary({ total: rows.length, returned: rows.length });
 }
 
 const ADD_NOTE_SPEC = z.object({
@@ -47,7 +48,9 @@ async function addNote(opts: Record<string, unknown>): Promise<void> {
   const saved = queryNotes(db)
     .filter((m) => m.content === parsed.content && m.category === parsed.category)
     .sort((a, b) => b.id - a.id)[0];
-  emitList(saved ? [saved] : [], NOTE_COLUMNS);
+  // A silent write with empty output would read as failure; say which row landed.
+  if (!saved) fail("GENERIC", "note was written but could not be read back");
+  emitList([saved], NOTE_COLUMNS);
 }
 
 // Positional `<id>` args aren't commander opts; parsed through the same spec

@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { emitList, fail, runAction, type Column } from "../output.js";
+import { emitList, emitSummary, fail, runAction, type Column } from "../output.js";
 import {
   listDatasets,
   readDataset,
@@ -46,7 +46,9 @@ function datasets(name: string | undefined, opts: DatasetsOpts): void {
     if (opts.country || opts.kind) {
       fail("USAGE", "--country/--kind need a dataset name (e.g. `oled datasets institutions --country th`)");
     }
-    emitList(listDatasets(), DATASET_COLUMNS);
+    const sets = listDatasets();
+    emitList(sets, DATASET_COLUMNS);
+    emitSummary({ returned: sets.length });
     return;
   }
 
@@ -59,6 +61,7 @@ function datasets(name: string | undefined, opts: DatasetsOpts): void {
   }
   const rows = readDataset(name, { country: opts.country, kind: opts.kind });
   emitList(rows, COLUMNS_BY_DATASET[name] ?? GENERIC_COLUMNS);
+  emitSummary({ returned: rows.length });
 }
 
 export function registerDatasets(program: Command): void {

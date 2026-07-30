@@ -52,6 +52,7 @@ const SCENARIO = [
 
 const CONTRACT = [
   "Exit codes: 0 ok · 1 error · 2 usage · 3 not ready · 4 input required · 5 not found · 6 invalid · 7 partial.",
+  'Under --json every stdout line is one JSON object, and list reads end with a {"type":"summary"} row.',
   "Errors are one stderr JSON object with a hint; read output masks PII as [USER]/[CARD], masks are not data.",
 ];
 

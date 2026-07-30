@@ -173,6 +173,7 @@ async function listAccounts(opts: ListAccountsOpts): Promise<void> {
     ACCOUNT_REDACT_FIELDS,
   );
   emitList(rows, ACCOUNT_COLUMNS);
+  emitSummary({ total: rows.length, returned: rows.length });
 }
 
 interface TreeAccountsOpts {
@@ -186,7 +187,9 @@ async function treeAccounts(opts: TreeAccountsOpts): Promise<void> {
   const roots = applyRedaction(buildAccountTree(db, type), !!opts.redact, ACCOUNT_REDACT_FIELDS);
   const mode = currentMode();
   if (mode.json) {
-    emit(roots);
+    // One object per root so every stdout line stays a single JSON object.
+    for (const root of roots) emit(root);
+    emitSummary({ roots: roots.length });
     return;
   }
   if (mode.tty) {
@@ -461,6 +464,7 @@ async function matchAccounts(opts: Record<string, unknown>): Promise<void> {
   const db = await openDb();
   const matches = findAccountsByFuzzyName(db, parsed.query);
   emitList(matches, MATCH_COLUMNS);
+  emitSummary({ returned: matches.length });
 }
 
 const UPDATE_ACCOUNT_SPEC = z.object({

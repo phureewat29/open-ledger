@@ -3,6 +3,7 @@ import {
   type Column,
   emitList,
   emitObject,
+  emitSummary,
   fail,
   requireYes,
   runAction,
@@ -41,7 +42,9 @@ async function listFiles(opts: ListFilesOpts): Promise<void> {
   const db = await openDb();
   const { listFiles: queryFiles } = await import("../../db/queries/files.js");
   const rows = queryFiles(db);
-  emitList(status ? rows.filter((r) => r.status === status) : rows, FILE_COLUMNS);
+  const shown = status ? rows.filter((r) => r.status === status) : rows;
+  emitList(shown, FILE_COLUMNS);
+  emitSummary({ total: rows.length, returned: shown.length });
 }
 
 async function showFile(id: string): Promise<void> {
