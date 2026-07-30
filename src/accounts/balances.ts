@@ -71,7 +71,7 @@ export function getNetWorth(db: Database.Database): NetWorth {
 }
 
 /**
- * Income (credits − debits) and expenses (debits − credits) over a date range.
+ * Income (credits - debits) and expenses (debits - credits) over a date range.
  * Grouped by (type, currency) so each currency converts with its own exponent.
  */
 export function getPeriodTotals(
@@ -116,7 +116,7 @@ interface AdjustAccountBalanceOpts {
 interface AdjustAccountBalanceResult {
   /** Id of the balancing transaction, or null when already at target (no-op). */
   transactionId: string | null;
-  /** target − current, decimal, natural sign. 0 on no-op. */
+  /** target - current, decimal, natural sign. 0 on no-op. */
   delta: number;
 }
 

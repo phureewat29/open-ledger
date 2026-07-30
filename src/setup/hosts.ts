@@ -13,7 +13,7 @@ interface SkillHost {
 
 /**
  * Any coding agent compatible with the shared .agents/skills dir (Codex,
- * OpenCode, Pi, Kimi global, …) is served by this default entry; only hosts
+ * OpenCode, Pi, Kimi global, and so on) is served by this default entry; only hosts
  * that cannot read it get their own.
  */
 const agents: SkillHost = {

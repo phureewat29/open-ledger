@@ -16,7 +16,7 @@ const toStringInput = (value: unknown): unknown =>
   typeof value === "string" || value === undefined ? value : String(value);
 
 /** Non-finite results pass the raw value through so z.number rejects it and the
- *  formatter echoes the original in `got "…"`; "" and null coerce to 0 via Number(). */
+ *  formatter echoes the original in `got "<value>"`; "" and null coerce to 0 via Number(). */
 const toNumberInput = (value: unknown): unknown => {
   if (typeof value === "number") return value;
   const n = Number(value);
@@ -117,7 +117,7 @@ interface Issue {
 }
 
 /** Render one non-missing issue into the pinned `<label> <constraint>` clause,
- *  echoing the raw pre-coercion value in `got "…"`. */
+ *  echoing the raw pre-coercion value in `got "<value>"`. */
 function constraintClause(label: string, issue: Issue, raw: unknown): string {
   if (issue.code === "custom") return `${label} must be valid JSON: ${issue.message}`;
   if (issue.code === "invalid_value") {

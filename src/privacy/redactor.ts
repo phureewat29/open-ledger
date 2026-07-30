@@ -10,7 +10,7 @@ interface SectionRule {
   heading: string;
   token: string;
   patterns: RegExp[];
-  /** Trim a trailing parenthesised qualifier, e.g. "Corgi (partner)" → "Corgi". */
+  /** Trim a trailing parenthesised qualifier, e.g. "Corgi (partner)" becomes "Corgi". */
   stripParen?: boolean;
   skipIfUser?: boolean;
 }
