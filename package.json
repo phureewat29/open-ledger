@@ -1,6 +1,6 @@
 {
   "name": "@aquartier/openledger",
-  "version": "0.14.6",
+  "version": "0.15.0",
   "description": "OpenLedger — The Harness Layer for Personal Finance",
   "keywords": [
     "finance",
@@ -22,12 +22,8 @@
   "license": "Apache-2.0",
   "author": "Phureewat A",
   "type": "module",
-  "main": "index.js",
   "bin": {
     "oled": "dist/cli/index.js"
-  },
-  "directories": {
-    "example": "examples"
   },
   "files": [
     "dist/",
