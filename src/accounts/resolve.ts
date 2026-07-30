@@ -20,10 +20,11 @@ export interface ResolvedMerchant {
 export type AccountHint =
   | { readonly type: "placeholder_created"; readonly accountId: string }
   | { readonly type: "uncategorized_fallback"; readonly accountId: string }
+  /** The account was created as asked and an existing lookalike was found. */
   | {
-      readonly type: "similar_matched";
-      readonly originalId: string;
-      readonly matchedId: string;
+      readonly type: "similar_account";
+      readonly accountId: string;
+      readonly similarId: string;
     };
 
 /**
@@ -39,50 +40,63 @@ export function resolveMerchantId(
   return { merchantId: null, attemptedUnknownId: merchantId };
 }
 
-interface ResolveOnePostingOptions {
-  /** Used by the commit pipeline's fuzzy-collapse guard, to re-resolve a
-   *  side without repeating the fuzzy match that caused the collapse. */
-  skipFuzzy?: boolean;
-}
-
-/** `hint` is null on an exact match; `uncategorized_fallback` is the ambiguous case the commit pipeline turns into a question. */
+/**
+ * `hint` is null on an exact match. A lookalike never moves the posting: the
+ * requested id is created and the lookalike reported as `similar_account`, so
+ * money can only land on the account the input actually named.
+ */
 export function resolveOnePosting<T extends { account_id: string }>(
   db: Database.Database,
   posting: T,
-  opts: ResolveOnePostingOptions = {},
 ): { posting: T; hint: AccountHint | null } {
   if (findAccountById(db, posting.account_id)) {
     return { posting, hint: null };
   }
-  if (!opts.skipFuzzy) {
-    const matched = bestFuzzyMatch(db, posting.account_id);
-    if (matched) {
-      return {
-        posting: { ...posting, account_id: matched },
-        hint: {
-          type: "similar_matched",
-          originalId: posting.account_id,
-          matchedId: matched,
-        },
-      };
-    }
-  }
+  const similarId = bestFuzzyMatch(db, posting.account_id);
   const placeholder = ensurePlaceholderAccount(db, posting.account_id);
   return {
     posting: { ...posting, account_id: placeholder.accountId },
-    hint: placeholder.fellBack
-      ? { type: "uncategorized_fallback", accountId: placeholder.accountId }
-      : { type: "placeholder_created", accountId: placeholder.accountId },
+    hint: accountHint(placeholder, similarId),
   };
+}
+
+/** One hint per side. A fallback outranks a lookalike: the money really did land
+ *  on `expense:uncategorized`, so recategorizing it is the caller's next move. */
+function accountHint(placeholder: PlaceholderResult, similarId: string | null): AccountHint {
+  if (placeholder.fellBack) {
+    return { type: "uncategorized_fallback", accountId: placeholder.accountId };
+  }
+  if (similarId) {
+    return { type: "similar_account", accountId: placeholder.accountId, similarId };
+  }
+  return { type: "placeholder_created", accountId: placeholder.accountId };
 }
 
 const FUZZY_THRESHOLD = 0.7;
 
+/**
+ * The closest existing account to a requested id, or null: advisory only, it
+ * never changes where money posts. A child account shares its parent's type
+ * and extends its id, so a candidate of another type or one on the same
+ * lineage is parentage, not a lookalike. The leaf of `asset:bank:kbank`
+ * contains its own parent's name "Bank", and `income:transfers:p2p` has an
+ * exact-name expense twin across roots; neither is worth a question.
+ */
 function bestFuzzyMatch(db: Database.Database, accountId: string): string | null {
+  const type = accountId.split(":")[0] as AccountType;
+  if (!TOP_LEVEL_TYPES.includes(type)) return null;
   const leaf = leafSegment(accountId).replace(/[-_]+/g, " ");
   if (!leaf) return null;
   const matches = findAccountsByFuzzyName(db, leaf, FUZZY_THRESHOLD);
-  return matches[0]?.account.id ?? null;
+  const candidate = matches.find(
+    (m) => m.account.type === type && !sharesLineage(m.account.id, accountId),
+  );
+  return candidate?.account.id ?? null;
+}
+
+/** The same account, or one of the two an ancestor of the other. */
+function sharesLineage(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}:`) || b.startsWith(`${a}:`);
 }
 
 function leafSegment(id: string): string {
@@ -145,7 +159,7 @@ function ensurePlaceholderAccount(db: Database.Database, accountId: string): Pla
 
 interface EnsureAccountAncestorsResult {
   /** The immediate parent id the leaf should be created under, or null for a
-   *  single-segment id (a bare top-level root — nothing to auto-create). */
+   *  single-segment id (a bare top-level root, nothing to auto-create). */
   parentId: string | null;
   /** Ancestor ids created as a side effect, root-to-leaf order; empty when
    *  every ancestor along the chain already existed. */

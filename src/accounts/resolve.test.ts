@@ -52,6 +52,51 @@ describe("resolveOnePosting", () => {
     expect(findAccountById(db, "groceries:organic")).toBeNull();
   });
 
+  // The guards' two target shapes: a leaf whose name contains its own parent's
+  // ("kbank" contains "Bank") and an exact name match across roots ("p2p" vs the
+  // expense twin). Neither is a lookalike, so neither may raise a question.
+  it("never matches a leaf to its own ancestor: creates asset:bank:kbank", () => {
+    createAccount(db, { id: "asset:bank", name: "Bank", type: "asset", parent_id: "asset" });
+
+    const { posting, hint } = resolveOnePosting(db, { account_id: "asset:bank:kbank" });
+    expect(posting.account_id).toBe("asset:bank:kbank");
+    expect(hint).toEqual({ type: "placeholder_created", accountId: "asset:bank:kbank" });
+    expect(findAccountById(db, "asset:bank:kbank")).toBeTruthy();
+  });
+
+  it("never matches across roots: creates income:transfers:p2p beside the expense twin", () => {
+    createAccount(db, { id: "income", name: "Income", type: "income", parent_id: null });
+    createAccount(db, { id: "expense:transfers", name: "Transfers", type: "expense", parent_id: "expense" });
+    createAccount(db, {
+      id: "expense:transfers:p2p",
+      name: "P2p",
+      type: "expense",
+      parent_id: "expense:transfers",
+    });
+
+    const { posting, hint } = resolveOnePosting(db, { account_id: "income:transfers:p2p" });
+    expect(posting.account_id).toBe("income:transfers:p2p");
+    expect(hint).toEqual({ type: "placeholder_created", accountId: "income:transfers:p2p" });
+  });
+
+  it("a same-type lookalike is reported, never posted to", () => {
+    createAccount(db, { id: "asset:bank", name: "Bank", type: "asset", parent_id: "asset" });
+    createAccount(db, {
+      id: "asset:bank:ttb",
+      name: "TTB Savings",
+      type: "asset",
+      parent_id: "asset:bank",
+    });
+
+    const { posting, hint } = resolveOnePosting(db, { account_id: "asset:bank:ttb-saving" });
+    expect(posting.account_id).toBe("asset:bank:ttb-saving");
+    expect(hint).toEqual({
+      type: "similar_account",
+      accountId: "asset:bank:ttb-saving",
+      similarId: "asset:bank:ttb",
+    });
+  });
+
   it("ancestor-type-mismatch during the walk: uncategorized_fallback", () => {
     // Raw INSERT creates a type-mismatched ancestor (bypassing createAccount's own
     // invariants) so the walk hits the mismatch that resolution swallows.

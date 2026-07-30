@@ -256,14 +256,14 @@ const ADD_TRANSACTION_FLAGS_OPTS = {
   aliases: { debit_account_id: ["debitAccount"], credit_account_id: ["creditAccount"] },
 };
 
-// Decimal amount, no account validation — that's the caller's job.
+// Decimal amount, no account validation: that's the caller's job.
 function buildRawTransaction(opts: AddTransactionOpts): RawTransactionInput {
   const parsed = parseInput(
     ADD_TRANSACTION_FLAGS_SPEC,
     opts as Record<string, unknown>,
     ADD_TRANSACTION_FLAGS_OPTS,
   );
-  // str() accepts "" — an empty account id must fail USAGE here, not NOT_FOUND downstream.
+  // str() accepts "": an empty account id must fail USAGE here, not NOT_FOUND downstream.
   if (!parsed.debit_account_id || !parsed.credit_account_id) {
     fail("USAGE", "--debit-account and --credit-account cannot be empty");
   }
@@ -314,7 +314,7 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
    * The same both-legs-one-currency rule commitTransaction enforces, applied
    * inline: this strict path requires both accounts to pre-exist and raises no
    * questions, so it can't delegate to commitTransaction's currency_mismatch
-   * path — only CURRENCY_MISMATCH_HINT is shared.
+   * path; only CURRENCY_MISMATCH_HINT is shared.
    */
   const currency = debit.currency || getDisplayCurrency();
   const creditCurrency = credit.currency || getDisplayCurrency();
@@ -448,7 +448,7 @@ export function registerTransactions(program: Command): void {
   transactions
     .command("add")
     .description("Add a manual transaction; statement rows belong in `ingest commit`")
-    .option("--resolve", "fuzzy-resolve account/merchant hints and raise questions instead of failing")
+    .option("--resolve", "create missing account paths and raise questions instead of failing")
     .option("--debit-account <id>", "debit account id")
     .option("--credit-account <id>", "credit account id")
     .option("--amount <n>", "transaction amount (decimal)")

@@ -147,6 +147,61 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(placeholderFlag).toBe(0);
   }, 30000);
 
+  it("reports a lookalike side and an unknown merchant truthfully, one question each", async () => {
+    const ndjson = [
+      JSON.stringify({
+        date: "2026-01-05",
+        description: "Grab food run",
+        debit_account: "expense:food-delivery", // lookalike of expense:food, posts as asked
+        credit_account: "asset:cash",
+        amount: 75,
+      }),
+      JSON.stringify({
+        date: "2026-01-06",
+        description: "Mystery merchant charge",
+        debit_account: "expense:food",
+        credit_account: "asset:cash",
+        amount: 30,
+        merchant_id: "m:does-not-exist",
+      }),
+    ].join("\n");
+
+    const { stdout, code } = await runCli(["ingest", "commit", "--json"], { stdin: ndjson });
+    expect(code).toBe(0);
+
+    const objs = parseNdjson(stdout);
+    const [rA, rB] = objs.filter((o) => o.type === "result");
+
+    // The side report must name where the money actually posted; the lookalike
+    // rides along as similar_to, never as the destination.
+    expect(rA.raised_questions).toBe(1);
+    expect(rA.sides[0]).toEqual({
+      side: "debit",
+      requested: "expense:food-delivery",
+      resolved: "expense:food-delivery",
+      how: "similar_account",
+      similar_to: "expense:food",
+    });
+
+    // A merchant id that resolves to nothing links nothing and asks instead.
+    expect(rB.raised_questions).toBe(1);
+    expect(rB.merchant).toEqual({ how: "unknown" });
+
+    const db = readDb();
+    try {
+      const kinds = db
+        .prepare(`SELECT kind FROM questions WHERE batch_id = ? ORDER BY kind`)
+        .all(objs.find((o) => o.type === "summary").batch_id) as { kind: string }[];
+      expect(kinds.map((k) => k.kind)).toEqual(["similar_accounts", "unknown_merchant"]);
+      const row = db
+        .prepare(`SELECT merchant_id FROM transactions WHERE id = ?`)
+        .get(rB.transaction_id) as { merchant_id: string | null };
+      expect(row.merchant_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  }, 30000);
+
   it("reads the batch from a file via --input (agent file-staging path)", async () => {
     const { writeFileSync, mkdtempSync } = await import("node:fs");
     const { join } = await import("node:path");

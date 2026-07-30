@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
 import { findAccountById } from "../db/queries/accounts.js";
-import { createAccount } from "../accounts/accounts.js";
+import { createAccount, mergeAccounts } from "../accounts/accounts.js";
 import { getAccountBalances } from "../accounts/balances.js";
 import { countTransactions, findTransactionById } from "../db/queries/transactions.js";
 import { deriveTransactionId, deriveGroupId } from "../lib/ids.js";
-import { listQuestions, countQuestions } from "../db/queries/questions.js";
+import { listQuestions, countQuestions, closeQuestion } from "../db/queries/questions.js";
 import {
   commitTransaction,
   commitLinkedTransactions,
@@ -68,7 +68,7 @@ describe("commitTransaction", () => {
     expect(countQuestions(db)).toBe(0);
   });
 
-  it("auto-creates a well-formed placeholder silently — no question, no has_question flag", () => {
+  it("auto-creates a well-formed placeholder silently: no question, no has_question flag", () => {
     const out = commitTransaction(
       db,
       CTX,
@@ -108,9 +108,9 @@ describe("commitTransaction", () => {
     expect(countTransactions(db)).toBe(1);
   });
 
-  it("raises similar_accounts when a hint fuzzy-matches an existing account", () => {
-    // Leaf "fod" is one edit from "Food" (expense:food) -> fuzzy match >= 0.7,
-    // so it resolves onto the existing account and asks to confirm the merge.
+  it("posts to the requested account and raises similar_accounts for the lookalike", () => {
+    // Leaf "fod" is one edit from "Food" (expense:food), so it is reported as a
+    // possible duplicate - but the money stays on the account the input named.
     const out = commitTransaction(
       db,
       CTX,
@@ -119,16 +119,67 @@ describe("commitTransaction", () => {
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.raisedQuestions).toBe(1);
-    expect(findTransactionById(db, out.transactionId)!.debit_account_id).toBe("expense:food");
+    expect(findTransactionById(db, out.transactionId)!.debit_account_id).toBe("expense:fod");
 
     const qs = listQuestions(db);
     expect(qs).toHaveLength(1);
     expect(qs[0].kind).toBe("similar_accounts");
+    // Anchored on the lookalike so the recommended merge cannot cascade it away.
+    expect(qs[0].account_id).toBe("expense:food");
     expect(JSON.parse(qs[0].context_json!)).toMatchObject({
-      original_id: "expense:fod",
-      matched_id: "expense:food",
+      created_id: "expense:fod",
+      similar_id: "expense:food",
       side: "debit",
     });
+  });
+
+  it("the similar_accounts question survives its own remedy and still answers", () => {
+    const out = commitTransaction(db, CTX, raw({ debit_account_id: "expense:fod", row_index: 8 }));
+    expect(out.ok).toBe(true);
+
+    // The prompt's advice: merge the created account into the lookalike. The
+    // created row dies; the question, anchored on the survivor, must not.
+    mergeAccounts(db, "expense:fod", "expense:food");
+
+    const qs = listQuestions(db);
+    expect(qs).toHaveLength(1);
+    const closed = closeQuestion(db, qs[0].id, "merged");
+    expect(closed?.rule_key).toBe("account-pair:expense:fod|expense:food");
+  });
+
+  it("flags a stated currency the accounts overrule, and stays quiet when they agree", () => {
+    // Accounts derive THB; the row claims USD. The accounts win, since currency
+    // is never trusted from input, and the override is reported.
+    const overridden = commitTransaction(db, CTX, raw({ currency: "USD", row_index: 10 }));
+    expect(overridden.ok).toBe(true);
+    if (!overridden.ok) return;
+    expect(overridden.currencyOverridden).toBe(true);
+    expect(findTransactionById(db, overridden.transactionId)!.currency).toBe("THB");
+
+    const agreeing = commitTransaction(db, CTX, raw({ currency: "THB", row_index: 11 }));
+    expect(agreeing.ok).toBe(true);
+    if (!agreeing.ok) return;
+    expect(agreeing.currencyOverridden).toBe(false);
+  });
+
+  it("raises one similar_accounts question per side when both sides have lookalikes", () => {
+    // "fod" pairs with Food (expense:food); "cash 1" pairs with Cash (asset:cash),
+    // a sibling, not a lineage relation.
+    const out = commitTransaction(
+      db,
+      CTX,
+      raw({ debit_account_id: "expense:fod", credit_account_id: "asset:cash-1", row_index: 9 }),
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.raisedQuestions).toBe(2);
+
+    const row = findTransactionById(db, out.transactionId)!;
+    expect(row.debit_account_id).toBe("expense:fod");
+    expect(row.credit_account_id).toBe("asset:cash-1");
+
+    const anchors = listQuestions(db).map((q) => q.account_id).sort();
+    expect(anchors).toEqual(["asset:cash", "expense:food"]);
   });
 
   it("drops a cross-currency transaction and raises currency_mismatch (no insert)", () => {
@@ -170,7 +221,7 @@ describe("commitTransaction", () => {
     expect(countQuestions(db, { includeDeferred: true })).toBe(0);
   });
 
-  it("fuzzy-collapse guard: a fuzzy match onto the other side's account creates a placeholder instead of failing", () => {
+  it("a cross-type lookalike raises nothing: the asset path is created beside the liability card", () => {
     // Existing account whose name shares the "ttb" token with the debit hint below.
     createAccount(db, { id: "liability", name: "Liabilities", type: "liability", parent_id: null });
     createAccount(db, { id: "liability:credit_card", name: "Credit Cards", type: "liability", parent_id: "liability" });
@@ -197,15 +248,16 @@ describe("commitTransaction", () => {
     expect(row.debit_account_id).toBe("asset:bank:ttb");
     expect(row.credit_account_id).toBe("liability:credit_card:ttb");
 
-    // asset:bank:ttb is a well-formed multi-segment path, so the re-resolved placeholder is created silently, no question.
+    // The liability card is a different type, so it is not a lookalike; the
+    // well-formed asset path is created silently, no question.
     expect(out.raisedQuestions).toBe(0);
     expect(listQuestions(db)).toHaveLength(0);
     expect(findAccountById(db, "asset:bank:ttb")).toBeTruthy();
   });
 
-  it("keeps the dirty_input failure when debit and credit collapse with no fuzzy match involved", () => {
-    // "bogus"/"also-bogus" have no known account-type prefix, so both fall straight to
-    // expense:uncategorized — a genuine collision, not a fuzzy one.
+  it("keeps the dirty_input failure when both malformed sides fall back to expense:uncategorized", () => {
+    // "bogus"/"also-bogus" have no known account-type prefix, so both fall straight
+    // to expense:uncategorized and collide as debit == credit.
     const out = commitTransaction(
       db,
       CTX,

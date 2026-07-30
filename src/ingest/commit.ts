@@ -100,10 +100,12 @@ export interface TransactionCommitHooks {
   /** A hint couldn't be built into a well-formed path and fell back to
    *  `expense:uncategorized`. Raises the `uncategorized` question. */
   onUncategorizedFallback(side: TransactionSide, accountId: string, transactionId: string): void;
+  /** The side posted to `accountId`, created as asked; `similarId` is an
+   *  existing lookalike the caller may want to merge. Raises `similar_accounts`. */
   onSimilarAccount(
     side: TransactionSide,
-    originalId: string,
-    matchedId: string,
+    accountId: string,
+    similarId: string,
     transactionId: string,
   ): void;
   onCurrencyMismatch(
@@ -187,18 +189,22 @@ export function defaultTransactionCommitHooks(
         context: { rule_key: accountIdKey(accountId), placeholder_id: accountId, side },
       }),
 
-    onSimilarAccount: (side, originalId, matchedId, transactionId) =>
+    // Anchored on the lookalike, not the created account: the natural repair is
+    // `accounts merge --from <created> --to <lookalike>`, which deletes the
+    // created row; anchoring there would cascade this question away unanswered.
+    onSimilarAccount: (side, accountId, similarId, transactionId) =>
       raise({
         transaction_id: transactionId,
-        account_id: matchedId,
+        account_id: similarId,
         kind: "similar_accounts",
         prompt:
-          `The ingest input referenced "${originalId}" for the ${side} side — the closest ` +
-          `existing account is "${matchedId}". Confirm they are the same, or split them apart.`,
+          `The ${side} side posted to "${accountId}", created as asked, but "${similarId}" ` +
+          `already looks like the same account. Merge them with \`accounts merge\`, or leave ` +
+          `them apart if they are different.`,
         context: {
-          rule_key: accountPairKey(originalId, matchedId),
-          original_id: originalId,
-          matched_id: matchedId,
+          rule_key: accountPairKey(accountId, similarId),
+          created_id: accountId,
+          similar_id: similarId,
           side,
         },
       }),
@@ -211,7 +217,7 @@ export function defaultTransactionCommitHooks(
         prompt:
           `Transaction "${input.description}" on ${input.date} moves money between ` +
           `${debit.id} (${debit.currency}) and ${credit.id} (${credit.currency}), which use ` +
-          `different currencies. A single transaction can't cross currencies — record it as a ` +
+          `different currencies. A single transaction can't cross currencies: record it as a ` +
           `linked conversion pair (one transaction out of ${debit.currency}, one into ` +
           `${credit.currency}, sharing a group) so the FX conversion is explicit.`,
         context: { debit, credit, date: input.date, description: input.description },
@@ -264,33 +270,26 @@ function accountCurrency(db: Database.Database, id: string): string {
   return findAccountCurrency(db, id) || config.displayCurrency;
 }
 
-/** Inputs are distinct (validated upstream), so both sides landing on one account
- *  means fuzzy matching over-collapsed them: that side is re-resolved with `skipFuzzy`.
- *  A non-fuzzy collision is left for the dirty_input backstop to catch. */
+/** Resolution never redirects a side, so two distinct inputs land on one account
+ *  only when both fell back to `expense:uncategorized`, left to the dirty_input
+ *  backstop, the same as before. */
 function resolveTransactionAccounts(
   db: Database.Database,
   debitAccountId: string,
   creditAccountId: string,
 ): { debitId: string; creditId: string; hints: { side: TransactionSide; hint: AccountHint }[] } {
-  let debitRes = resolveOnePosting(db, { account_id: debitAccountId });
-  let creditRes = resolveOnePosting(db, { account_id: creditAccountId });
-  let debitId = debitRes.posting.account_id;
-  let creditId = creditRes.posting.account_id;
-
-  if (debitId === creditId && debitRes.hint?.type === "similar_matched") {
-    debitRes = resolveOnePosting(db, { account_id: debitAccountId }, { skipFuzzy: true });
-    debitId = debitRes.posting.account_id;
-  }
-  if (debitId === creditId && creditRes.hint?.type === "similar_matched") {
-    creditRes = resolveOnePosting(db, { account_id: creditAccountId }, { skipFuzzy: true });
-    creditId = creditRes.posting.account_id;
-  }
+  const debitRes = resolveOnePosting(db, { account_id: debitAccountId });
+  const creditRes = resolveOnePosting(db, { account_id: creditAccountId });
 
   const hints: { side: TransactionSide; hint: AccountHint }[] = [];
   if (debitRes.hint) hints.push({ side: "debit", hint: debitRes.hint });
   if (creditRes.hint) hints.push({ side: "credit", hint: creditRes.hint });
 
-  return { debitId, creditId, hints };
+  return {
+    debitId: debitRes.posting.account_id,
+    creditId: creditRes.posting.account_id,
+    hints,
+  };
 }
 
 /** Currency comes from the resolved accounts, never from input.
@@ -315,7 +314,7 @@ function deriveTransactionCurrency(
 }
 
 /** Doesn't touch the transactions table, but resolving may create placeholder
- *  accounts — on a currency mismatch those side effects remain with nothing inserted. */
+ *  accounts; on a currency mismatch those side effects remain with nothing inserted. */
 function prepareTransaction(
   db: Database.Database,
   ctx: TransactionCommitContext,
@@ -374,13 +373,39 @@ function prepareTransaction(
     user_ref: input.user_ref ?? null,
   };
 
-  // Backstop: resolution can collapse two ids onto one account, which
+  // Backstop: both sides can still fall back to `expense:uncategorized`, which
   // validateTransaction catches as debit == credit.
   const v = validateTransaction(built);
   if (!v.ok) return { ok: false, reason: "dirty_input", message: v.reason };
 
   return { ok: true, prepared: { input: built, hints, merchant, currencyOverridden, raw: input } };
 }
+
+interface HintDispatchArgs {
+  hooks: TransactionCommitHooks;
+  side: TransactionSide;
+  transactionId: string;
+}
+
+/** This union is also dispatched in cli/commands/ingest-commit.ts, so a new
+ *  variant must be handled in both; the Record makes the compiler enforce it
+ *  here. Returns the number of questions raised. */
+const HINT_DISPATCH: {
+  [K in AccountHint["type"]]: (hint: Extract<AccountHint, { type: K }>, args: HintDispatchArgs) => number;
+} = {
+  placeholder_created: (hint, { hooks, side, transactionId }) => {
+    hooks.onPlaceholderAccount(side, hint.accountId, transactionId);
+    return 0;
+  },
+  uncategorized_fallback: (hint, { hooks, side, transactionId }) => {
+    hooks.onUncategorizedFallback(side, hint.accountId, transactionId);
+    return 1;
+  },
+  similar_account: (hint, { hooks, side, transactionId }) => {
+    hooks.onSimilarAccount(side, hint.accountId, hint.similarId, transactionId);
+    return 1;
+  },
+};
 
 function applyTransactionHints(
   hooks: TransactionCommitHooks,
@@ -393,17 +418,7 @@ function applyTransactionHints(
     raised++;
   }
   for (const { side, hint } of prepared.hints) {
-    if (hint.type === "placeholder_created") {
-      hooks.onPlaceholderAccount(side, hint.accountId, transactionId);
-      continue;
-    }
-    if (hint.type === "uncategorized_fallback") {
-      hooks.onUncategorizedFallback(side, hint.accountId, transactionId);
-      raised++;
-      continue;
-    }
-    hooks.onSimilarAccount(side, hint.originalId, hint.matchedId, transactionId);
-    raised++;
+    raised += HINT_DISPATCH[hint.type](hint as never, { hooks, side, transactionId });
   }
   return raised;
 }

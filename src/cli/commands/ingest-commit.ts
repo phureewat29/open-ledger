@@ -21,14 +21,14 @@ interface CommitIngestOpts {
 
 type SideHow =
   | "exact"
-  | "fuzzy_matched"
+  | "similar_account"
   | "placeholder_created"
   | "uncategorized_fallback"
   | "as_committed";
 
 type CommitEvent =
   | { kind: "placeholder"; side: TransactionSide; accountId: string }
-  | { kind: "fuzzy"; side: TransactionSide; originalId: string; matchedId: string }
+  | { kind: "similar"; side: TransactionSide; accountId: string; similarId: string }
   | { kind: "uncategorized"; side: TransactionSide; accountId: string }
   | { kind: "unknown_merchant"; attemptedId: string }
   | { kind: "dirty"; reason: string }
@@ -57,9 +57,9 @@ function makeRecordingHooks(base: TransactionCommitHooks, events: CommitEvent[])
       base.onUncategorizedFallback(side, accountId, id);
       events.push({ kind: "uncategorized", side, accountId });
     },
-    onSimilarAccount: (side, originalId, matchedId, id) => {
-      base.onSimilarAccount(side, originalId, matchedId, id);
-      events.push({ kind: "fuzzy", side, originalId, matchedId });
+    onSimilarAccount: (side, accountId, similarId, id) => {
+      base.onSimilarAccount(side, accountId, similarId, id);
+      events.push({ kind: "similar", side, accountId, similarId });
     },
     onCurrencyMismatch: (input, debit, credit) => {
       base.onCurrencyMismatch(input, debit, credit);
@@ -69,20 +69,23 @@ function makeRecordingHooks(base: TransactionCommitHooks, events: CommitEvent[])
 }
 
 interface SideResolution {
+  /** Where the money actually posted. */
   resolved: string;
   how: SideHow;
+  /** An existing lookalike a `similar_accounts` question was raised for. */
+  similar_to?: string;
 }
 
 // Maps the resolver's own vocabulary (via the hooks) to the reported one.
 const SIDE_RESOLUTIONS: {
   [K in SideEvent["kind"]]: (event: Extract<SideEvent, { kind: K }>) => SideResolution;
 } = {
-  fuzzy: (event) => ({ resolved: event.matchedId, how: "fuzzy_matched" }),
+  similar: (event) => ({ resolved: event.accountId, how: "similar_account", similar_to: event.similarId }),
   placeholder: (event) => ({ resolved: event.accountId, how: "placeholder_created" }),
   uncategorized: (event) => ({ resolved: event.accountId, how: "uncategorized_fallback" }),
 };
 
-// No event means the side resolved by exact match — every other route raises one.
+// No event means the side resolved by exact match: every other route raises one.
 function classifySide(requested: string, side: TransactionSide, events: CommitEvent[]): SideResolution {
   const event = events.find((e): e is SideEvent => "side" in e && e.side === side);
   if (!event) return { resolved: requested, how: "exact" };
@@ -209,7 +212,7 @@ function makeFileHashCache(
   };
 }
 
-// A pre-pipeline reject (bad JSON shape) never throws — it reuses the per-row failure shape.
+// A pre-pipeline reject (bad JSON shape) never throws: it reuses the per-row failure shape.
 function failRow(counters: Counters, index: number, message: string): Record<string, unknown> {
   return failOutcome(counters, index, { reason: "dirty_input", message, raisedQuestions: 0 });
 }
@@ -254,7 +257,7 @@ function commitCompoundRow(
       legError = parsedLeg.error;
       break;
     }
-    // Cast is a lie for malformed rows — validateRawTransaction rejects those.
+    // Cast is a lie for malformed rows: validateRawTransaction rejects those.
     legs.push({ ...parsedLeg.value, amount: legRecord.amount as number });
   }
   if (legError !== undefined) return failRow(counters, row.index, legError);
@@ -285,7 +288,7 @@ function commitStandaloneRow(deps: RowCommitDeps, row: RowContext): Record<strin
   const { counters } = deps;
   const parsed = safeParse(STANDALONE_SPEC, row.record, { aliases: LEG_ALIASES });
   if (!parsed.ok) return failRow(counters, row.index, parsed.error);
-  // Cast is a lie for malformed rows — validateRawTransaction rejects those.
+  // Cast is a lie for malformed rows: validateRawTransaction rejects those.
   const raw: RawTransactionInput = {
     ...parsed.value,
     source_file_id: row.fileId,
@@ -385,6 +388,6 @@ export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
     );
   }
 
-  // Exit 7 only for genuine failures — duplicates are a successful no-op.
+  // Exit 7 only for genuine failures: duplicates are a successful no-op.
   if (counters.failed > 0) process.exitCode = EXIT.PARTIAL;
 }
