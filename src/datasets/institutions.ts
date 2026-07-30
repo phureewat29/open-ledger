@@ -28,7 +28,6 @@ export const countryFileSchema = z.object({
 });
 
 export const institutionsDataset: DatasetDefinition<z.infer<typeof countryFileSchema>> = {
-  dirname: "institutions",
   schema: countryFileSchema,
   flatten: (file) => file.institutions,
   sortKey: (row) => String(row.code ?? ""),

@@ -1,7 +1,7 @@
 import * as z from "zod";
 import { loadDatasetRows, type DatasetDefinition } from "./loader.js";
 
-// Locale + currency per country, one `<cc>.json` file under `datasets/defaults/`.
+// Locale + currency per country, read from the top level of `datasets/<cc>.json`.
 // `config converge` seeds display defaults from it.
 
 const countryDefaultsSchema = z.object({
@@ -13,7 +13,6 @@ const countryDefaultsSchema = z.object({
 type CountryDefaults = z.infer<typeof countryDefaultsSchema>;
 
 export const defaultsDataset: DatasetDefinition<CountryDefaults> = {
-  dirname: "defaults",
   schema: countryDefaultsSchema,
   // The file's `country` is re-added by the loader (uppercased); the row carries
   // only the display fields here to avoid duplicating it.

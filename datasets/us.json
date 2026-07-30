@@ -1,5 +1,7 @@
 {
   "country": "US",
+  "locale": "en-US",
+  "currency": "USD",
   "institutions": [
     { "code": "CHASE", "label": "JPMorgan Chase", "kind": "bank" },
     { "code": "BOFA", "label": "Bank of America", "kind": "bank" },

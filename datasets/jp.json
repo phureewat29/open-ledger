@@ -1,5 +1,7 @@
 {
   "country": "JP",
+  "locale": "ja-JP",
+  "currency": "JPY",
   "institutions": [
     { "code": "MUFG", "label": "MUFG Bank (三菱UFJ銀行)", "kind": "bank", "notes": "Largest megabank." },
     { "code": "SMBC", "label": "Sumitomo Mitsui Banking Corporation (三井住友銀行)", "kind": "bank", "notes": "Megabank." },

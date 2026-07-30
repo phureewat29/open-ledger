@@ -1,5 +1,7 @@
 {
   "country": "CN",
+  "locale": "zh-CN",
+  "currency": "CNY",
   "institutions": [
     { "code": "ICBC", "label": "Industrial and Commercial Bank of China (工商银行)", "kind": "bank", "notes": "Largest of the Big Four; state-owned." },
     { "code": "CCB", "label": "China Construction Bank (建设银行)", "kind": "bank", "notes": "Big Four; state-owned." },

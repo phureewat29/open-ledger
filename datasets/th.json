@@ -1,5 +1,7 @@
 {
   "country": "TH",
+  "locale": "th-TH",
+  "currency": "THB",
   "institutions": [
     { "code": "KBANK", "label": "Kasikornbank", "kind": "bank" },
     { "code": "SCB", "label": "Siam Commercial Bank", "kind": "bank" },
