@@ -20,7 +20,7 @@ export interface OpenLedgerArtifacts {
 }
 
 /**
- * `absent` is every command that is not `ingest prepare` — the common case, and
+ * `absent` is every command that is not `ingest prepare`, the common case, and
  * not worth a note. `unreadable` is a prepare payload this host could not read,
  * which is a host defect and must never pass silently: attaching nothing was
  * indistinguishable from a model that never asked.
@@ -43,8 +43,8 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
 
 /**
  * `ingest prepare` is the only command that names a file id beside a route kind
- * and a page count. Matching all three keeps a `questions list` row — which also
- * carries a `kind` — from being read as a prepare payload and reported unreadable.
+ * and a page count. Matching all three keeps a `questions list` row, which also
+ * carries a `kind`, from being read as a prepare payload and reported unreadable.
  */
 const PREPARE_ROW = z.object({
   file_id: z.string(),

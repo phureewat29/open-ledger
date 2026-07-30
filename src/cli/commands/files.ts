@@ -23,7 +23,7 @@ const FILE_COLUMNS: Column<FileRow>[] = [
   { header: "Path", value: (r) => r.path },
 ];
 
-/** files.status enum; `new` belongs to `ingest list`, not here — filtering by it here would silently match nothing. */
+/** files.status enum; `new` belongs to `ingest list`, not here: filtering by it here would silently match nothing. */
 const FILE_STATUSES = ["pending", "ingested", "failed"] as const;
 type FileStatus = (typeof FILE_STATUSES)[number];
 
@@ -32,7 +32,7 @@ interface ListFilesOpts {
 }
 
 async function listFiles(opts: ListFilesOpts): Promise<void> {
-  // Checked up front — an unrecognized status would otherwise silently return zero rows.
+  // Checked up front: an unrecognized status would otherwise silently return zero rows.
   const { status } = opts;
   if (status !== undefined && !FILE_STATUSES.includes(status as FileStatus)) {
     fail("USAGE", `--status must be one of ${FILE_STATUSES.join("|")}, got "${status}"`);
@@ -72,7 +72,7 @@ async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
 
   // The extracted text describes a row that no longer exists, and nothing can
-  // reach it once the row is gone — same purge `ingest done`/`fail` do.
+  // reach it once the row is gone: same purge `ingest done`/`fail` do.
   const { cleanCache } = await import("../../ingest/prepare.js");
   const { removed } = cleanCache(id);
   emitObject({

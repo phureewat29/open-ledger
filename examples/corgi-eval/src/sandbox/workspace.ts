@@ -30,7 +30,7 @@ export interface SkillPack {
 const DIRS = ["home", "data", "cwd", "cache", "agent", "npm"] as const;
 
 /**
- * Every OLED_* the harness reads is set here, blank included — an operator's
+ * Every OLED_* the harness reads is set here, blank included: an operator's
  * exported OCR endpoint would otherwise reroute a statement and change what the
  * model was measured on.
  */

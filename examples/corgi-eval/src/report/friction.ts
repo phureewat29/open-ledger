@@ -9,7 +9,7 @@ import type { PhaseId, RunEvent, ToolObservation } from "./events.js";
 type FrictionType =
   | "unknown_flag"
   | "unknown_command"
-  /** A flag that exists, given a value oled rejects — or left empty, swallowing the next token. */
+  /** A flag that exists, given a value oled rejects, or left empty, swallowing the next token. */
   | "flag_value"
   | "usage_error"
   | "not_ready"
@@ -89,7 +89,7 @@ interface RecoveryRow {
   sameTurn: number;
 }
 
-/** One row per subcommand touched — the unit for changing the CLI. */
+/** One row per subcommand touched: the unit for changing the CLI. */
 export interface SubcommandRow {
   subcommand: string;
   calls: number;
@@ -484,7 +484,7 @@ export function analyzeFriction(calls: Attempt[]): FrictionAnalysis {
 
 /**
  * Excludes stdin-batch calls (`ingest commit --file <sf:id>` shares an
- * identical argv by design while its rows differ — see `redundantCommits`)
+ * identical argv by design while its rows differ; see `redundantCommits`)
  * and help calls (the contract working as intended, not flailing).
  */
 export function repeatedCommands(calls: Attempt[]): number {

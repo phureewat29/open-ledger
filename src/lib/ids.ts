@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 
 /**
- * `tx:` + sha256("<hash>|<page>|<row>[|<leg>]") — deterministic, so re-ingesting the
+ * `tx:` + sha256("<hash>|<page>|<row>[|<leg>]"), deterministic, so re-ingesting the
  * same file is idempotent. Omitting `legIndex` makes the hash match `deriveGroupId`'s.
  */
 export function deriveTransactionId(

@@ -196,7 +196,7 @@ async function readStdinToEnd(): Promise<string> {
 }
 
 /**
- * Reads batch rows from `--input <file>` or stdin — the CLI's only stdin
+ * Reads batch rows from `--input <file>` or stdin: the CLI's only stdin
  * read, kept because batches outgrow argv. Auto-detects a JSON array (first
  * non-ws char is `[`) vs NDJSON; row validation is the caller's job.
  */
@@ -308,7 +308,7 @@ function reportError(err: unknown): number {
 
 /**
  * At the parse boundary commander aborts before any action runs, so nothing
- * resolved the mode and `--json` may still be unparsed — argv is the only
+ * resolved the mode and `--json` may still be unparsed, so argv is the only
  * signal left.
  */
 export function jsonRequested(): boolean {

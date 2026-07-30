@@ -7,7 +7,7 @@ import type { EventSink, PhaseExit, PhaseId } from "../report/events.js";
 import { attachArtifacts, type TransportPlan } from "./attach.js";
 import { findTool, toolSpecs, unknownToolResult, type Tool } from "./tools.js";
 
-// The runner's own moves — a retry, a stall prod, handing artifacts back —
+// The runner's own moves (a retry, a stall prod, handing artifacts back)
 // are operational events, which the eval excludes by design.
 
 // Run-level, never per phase: a counter that restarted per phase would make

@@ -109,7 +109,7 @@ function commitCountersOf(stdout: string): CommitCounters | null {
 
 /**
  * PARTIAL means the command did some of the work, so the line that says how much
- * is the summary — row 0 is one result among many and reads as the whole failure.
+ * is the summary: row 0 is one result among many and reads as the whole failure.
  */
 function messageOf(exitCode: number, stdout: string, stderr: string): string {
   if (exitCode === EXIT.PARTIAL) {
@@ -119,7 +119,7 @@ function messageOf(exitCode: number, stdout: string, stderr: string): string {
   return firstLine(stderr) || firstLine(stdout);
 }
 
-/** `absent` stays silent — most commands prepare nothing. `unreadable` never does: that silence was the bug. */
+/** `absent` stays silent: most commands prepare nothing. `unreadable` never does: that silence was the bug. */
 function hostArtifacts(scan: ArtifactScan, command: string): HostArtifacts {
   if (scan.ok) return { artifacts: scan.value, notes: [] };
   if (scan.reason === "absent") return { artifacts: null, notes: [] };
@@ -304,7 +304,7 @@ function countRows(ndjson: string): number {
   return ndjson.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** Null outside `ingest commit` — the only subcommand that reads stdin at all. */
+/** Null outside `ingest commit`: the only subcommand that reads stdin at all. */
 function batchRows(argv: string[], stdin: string | undefined): number | null {
   if (stdin === undefined) return null;
   if (subcommandOf(argv, "") !== COMMIT_SUBCOMMAND) return null;

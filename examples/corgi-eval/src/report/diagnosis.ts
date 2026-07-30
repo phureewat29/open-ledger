@@ -2,7 +2,7 @@ import { errorShapeOf, plainMessage, type ErrorShape } from "../oled/contract.js
 import type { PhaseExit, PhaseId, RunEvent, ToolObservation } from "./events.js";
 import type { PhaseTally } from "./recorder.js";
 
-// Diagnoses why a run stopped, without scoring — the question the scorecard doesn't answer.
+// Diagnoses why a run stopped, without scoring: the question the scorecard doesn't answer.
 
 export type MissingKind = "tool" | "command" | "flag";
 
@@ -68,7 +68,7 @@ interface DiagnosisInput {
 
 /**
  * Which of oled's error shapes names something the CLI does not have. A flag
- * given a bad or empty value is not one — the flag exists, so it is friction
+ * given a bad or empty value is not one: the flag exists, so it is friction
  * over its value, and reporting it here read as a capability the CLI lacks.
  */
 const MISSING_BY_SHAPE: Record<ErrorShape, MissingKind | null> = {

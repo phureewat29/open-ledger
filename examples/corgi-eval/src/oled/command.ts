@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 /**
- * A non-zero exit is data (`CommandOk.exitCode`), not a failure — the harness
+ * A non-zero exit is data (`CommandOk.exitCode`), not a failure: the harness
  * scores it. Failure means the command never ran or never finished.
  */
 

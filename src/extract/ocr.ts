@@ -74,7 +74,7 @@ const PAGE_LEVEL: Record<OcrFailure, boolean> = {
 
 /**
  * Whether a failure is about this page or about the server. Page-level failures
- * leave a placeholder and let the run finish partial; server-level ones abort —
+ * leave a placeholder and let the run finish partial; server-level ones abort:
  * retrying 20 pages against a dead endpoint helps nobody.
  */
 export function isServerFailure(reason: OcrFailure): reason is ServerFailure {

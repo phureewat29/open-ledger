@@ -24,7 +24,7 @@ function spawnOpener(cmd: string, dataDir: string): Promise<string | undefined> 
   });
 }
 
-// The path is reported even when the opener fails — it is still useful on its own.
+// The path is reported even when the opener fails: it is still useful on its own.
 async function openDataDir(): Promise<void> {
   const dataDir = getDataDir();
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });

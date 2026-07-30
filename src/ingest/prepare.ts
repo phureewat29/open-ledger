@@ -58,7 +58,7 @@ function walk(dir: string, root: string, out: WalkedFile[]): void {
   }
 }
 
-/** Only a PDF can be locked, and only a PDF can be unopenable — an image needs neither probe. */
+/** Only a PDF can be locked, and only a PDF can be unopenable; an image needs neither probe. */
 async function encryptionOf(source: LoadedSource): Promise<Result<boolean>> {
   if (source.kind !== "pdf") return { ok: true, value: false };
   return tryExecute(() => isEncryptedPdf(source.bytes));
@@ -147,7 +147,7 @@ export function resolveEntryPath(db: Database.Database, entryOrId: string): stri
 
 interface PrepareOptions {
   password?: string;
-  /** Re-read the bytes and, once that succeeds, replace the prior row — dropping
+  /** Re-read the bytes and, once that succeeds, replace the prior row, dropping
    *  its transactions, questions, and artifacts. */
   force?: boolean;
   /** Ignore the text layer, for garbled or junk layers. */
@@ -228,7 +228,7 @@ type UnlockedBytes =
       message: string;
     };
 
-/** Images are never locked; decrypted PDF bytes stay in memory — only extracted text is written to disk. */
+/** Images are never locked; decrypted PDF bytes stay in memory: only extracted text is written to disk. */
 async function readableBytes(source: LoadedSource, password?: string): Promise<UnlockedBytes> {
   if (source.kind !== "pdf") return { ok: true, bytes: source.bytes };
 
@@ -265,7 +265,7 @@ function documentText(pages: TextPage[]): string {
 interface WriteTarget {
   fileId: string;
   dir: string;
-  /** The input file's own path — what an untouched image page cites. */
+  /** The input file's own path: what an untouched image page cites. */
   sourcePath: string;
 }
 

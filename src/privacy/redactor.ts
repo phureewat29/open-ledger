@@ -129,7 +129,7 @@ function createRedactor(): (text: string) => string {
 
 /**
  * Deep-walks `data`, redacting a string value only when its key is in the
- * per-command `fields` allowlist — ids/enums/amounts the agent needs verbatim
+ * per-command `fields` allowlist; ids/enums/amounts the agent needs verbatim
  * stay untouched. Returns a fresh structure (input untouched); a no-op when
  * `enabled` is false.
  */

@@ -45,7 +45,7 @@ export interface LedgerProbe {
   truncated: ListTruncation | null;
   /**
    * Every live row's three directions matched, ledger-wide, not only the
-   * linked ones — money missing from the statement would still corrupt a
+   * linked ones: money missing from the statement would still corrupt a
    * total, wherever it was posted from.
    */
   money: LedgerMoney;

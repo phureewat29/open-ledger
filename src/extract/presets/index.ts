@@ -42,7 +42,7 @@ export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 const HOUSE_PRESET: PresetName = "typhoon-ocr";
 
 /**
- * An unrecognized id — or none at all — gets the house preset, whose own model
+ * An unrecognized id, or none at all, gets the house preset, whose own model
  * is then the one to ask for.
  */
 export function presetForModel(modelId: string): { name: PresetName; preset: OcrPreset } {

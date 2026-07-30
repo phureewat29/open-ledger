@@ -123,7 +123,7 @@ function padTable(rows: string[][]): string[][] {
   return rows.map((r) => r.map((cell, c) => (cell ?? "").padEnd(widths[c])));
 }
 
-/** Header row, an underline sized to it, then the body — no pipes. */
+/** Header row, an underline sized to it, then the body: no pipes. */
 function renderTable(rows: string[][]): string[] {
   const padded = padTable(rows);
   if (padded.length === 0) return [];

@@ -1,7 +1,7 @@
 /**
  * oled's side of the contract: the exit codes its reporter uses, the error copy
  * the host reads back, and the flags the host appends to every call. Friction
- * and diagnosis both read these rows — holding them in one module is what stops
+ * and diagnosis both read these rows: holding them in one module is what stops
  * the two tables from drifting apart.
  */
 
@@ -35,7 +35,7 @@ export function carriesOutput(exitCode: number | null): boolean {
 }
 
 /**
- * Appended to every call, so the model never has to ask for them — which is
+ * Appended to every call, so the model never has to ask for them, which is
  * also why hint scoring cannot judge a hint that names one.
  */
 export const HOST_APPENDED_FLAGS = ["--json"];

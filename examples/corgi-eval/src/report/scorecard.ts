@@ -146,7 +146,7 @@ function uncategorizedCheck(ledger: LedgerProbe): Check {
 
 /**
  * Expected is the sum of the statement's charge, refund and payment groups,
- * so the ledger side must be the same three groups — counting every row
+ * so the ledger side must be the same three groups: counting every row
  * instead failed a run for an opening balance, a row the statement's totals
  * don't cover.
  */

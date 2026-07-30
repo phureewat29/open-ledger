@@ -90,7 +90,7 @@ interface DeleteFileResult {
 }
 
 /**
- * Cascaded transaction/question counts are gathered before the DELETE runs —
+ * Cascaded transaction/question counts are gathered before the DELETE runs:
  * CASCADE would make them unrecoverable after.
  */
 export function deleteFile(db: Database.Database, id: string): DeleteFileResult {

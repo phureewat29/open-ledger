@@ -32,7 +32,7 @@ describe("probePdfPages", () => {
     expect(probe.value[0]).toMatchObject({ page: 1, chars: 0, hasImage: true });
   });
 
-  it("classifies a mixed document as text, blank, scan — a partial text layer", async () => {
+  it("classifies a mixed document as text, blank, scan: a partial text layer", async () => {
     const probe = await probePdfPages(mixedPdf());
     expect(probe.ok).toBe(true);
     if (!probe.ok) return;

@@ -3,7 +3,7 @@ import * as z from "zod";
 import { str, int, json } from "../../lib/validate.js";
 import type { UpdateAccountMetadataPatch } from "./accounts.js";
 
-describe("z.infer — real call-site type", () => {
+describe("z.infer: real call-site type", () => {
   it("a representative patch spec infers a type assignable to UpdateAccountMetadataPatch", () => {
     const patchSpec = z.object({
       due_day: int().optional().nullable(),

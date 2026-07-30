@@ -5,7 +5,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 
 const CHARS_PER_TOKEN = 4;
 
-// Attachments are charged flat, not per character — base64 isn't text, and
+// Attachments are charged flat, not per character: base64 isn't text, and
 // per-character charging would make the trimmer discard real history for one image.
 const TOKENS_PER_ATTACHED_PART = 1_600;
 

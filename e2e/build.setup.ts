@@ -11,7 +11,7 @@ export function setup(): void {
   if (process.env.OLED_E2E_SKIP_BUILD === "1") {
     if (!existsSync(distEntry)) {
       throw new Error(
-        `OLED_E2E_SKIP_BUILD=1 but ${distEntry} is missing — run \`npm run build\` first`,
+        `OLED_E2E_SKIP_BUILD=1 but ${distEntry} is missing: run \`npm run build\` first`,
       );
     }
     return;

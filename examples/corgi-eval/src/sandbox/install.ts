@@ -50,7 +50,7 @@ async function pack(repoRoot: string, destination: string): Promise<Result<PackE
   return parsePackJson(packed.value.stdout);
 }
 
-/** dist/ is what the tarball ships — a missing build fails here instead of surfacing as a broken CLI mid-run. */
+/** dist/ is what the tarball ships: a missing build fails here instead of surfacing as a broken CLI mid-run. */
 export async function installPackedCli(args: {
   repoRoot: string;
   tarballDir: string;
@@ -59,7 +59,7 @@ export async function installPackedCli(args: {
   if (!existsSync(join(args.repoRoot, "dist", "cli", "index.js"))) {
     return {
       ok: false,
-      error: `no dist/cli/index.js in ${args.repoRoot} — run \`npm run build\` there first`,
+      error: `no dist/cli/index.js in ${args.repoRoot}, run \`npm run build\` there first`,
     };
   }
 

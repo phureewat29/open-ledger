@@ -19,7 +19,7 @@ const READER: Record<`${TextLayer}/${OcrAvailability}`, Reader> = {
 
 /**
  * File kind is deliberately not an axis: an image enters as `"none"` and routes
- * like a scan. Availability means configured, not reachable — a dead endpoint
+ * like a scan. Availability means configured, not reachable: a dead endpoint
  * fails the run loudly rather than degrading to images behind the caller's back.
  */
 export function readerFor(textLayer: TextLayer, ocr: OcrAvailability): Reader {

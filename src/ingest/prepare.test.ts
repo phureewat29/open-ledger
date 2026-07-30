@@ -208,7 +208,7 @@ describe("resolveEntryPath", () => {
     const prevCwd = process.cwd();
     process.chdir(outsideDir);
     try {
-      // Compare against process.cwd(), not the pre-chdir string — macOS tmpdir is a
+      // Compare against process.cwd(), not the pre-chdir string: macOS tmpdir is a
       // symlink, so chdir resolves it to its real path (/private/var/... vs /var/...).
       expect(resolveEntryPath(db, "c.pdf")).toBe(resolve(process.cwd(), "c.pdf"));
     } finally {

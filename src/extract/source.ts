@@ -52,7 +52,7 @@ export interface LoadedSource {
   kind: SourceKind;
   mime: string;
   bytes: Buffer;
-  /** sha256 of the on-disk bytes — still encrypted for a password-protected PDF, so a re-ingest dedups before unlock. */
+  /** sha256 of the on-disk bytes, still encrypted for a password-protected PDF, so a re-ingest dedups before unlock. */
   hash: string;
 }
 
@@ -64,7 +64,7 @@ type LoadOutcome =
       message: string;
     };
 
-/** The extension declares the type and the magic bytes must agree — a mislabeled
+/** The extension declares the type and the magic bytes must agree: a mislabeled
  *  file fails here instead of deep in mupdf or the OCR endpoint. */
 export function loadSource(path: string): LoadOutcome {
   const ext = extname(path).toLowerCase();

@@ -109,7 +109,7 @@ function loadStatementFacts(pdfPath: string): Result<StatementFacts> {
 
   const disagreements = reconcile(facts);
   if (disagreements.length > 0) {
-    return { ok: false, error: `${path} disagrees with itself — ${disagreements.join("; ")}` };
+    return { ok: false, error: `${path} disagrees with itself: ${disagreements.join("; ")}` };
   }
   return { ok: true, value: facts };
 }

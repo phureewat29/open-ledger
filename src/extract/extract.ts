@@ -102,7 +102,7 @@ function placeholder(page: number): string {
   return `[page ${page}: OCR failed]`;
 }
 
-/** A failed page is a hole in the document, not a failed run — the caller reports `failedPages` and exits PARTIAL. */
+/** A failed page is a hole in the document, not a failed run: the caller reports `failedPages` and exits PARTIAL. */
 function ocrExtraction(
   outcomes: OcrPageOutcome[],
   settings: OcrSettings,

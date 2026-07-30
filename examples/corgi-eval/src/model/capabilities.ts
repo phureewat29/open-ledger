@@ -95,7 +95,7 @@ function findRow(rows: unknown[], model: string): ModelRow | null {
   return null;
 }
 
-// A failure here means the model's limits are unknown, never that it's unfit — the operator acts on those differently.
+// A failure here means the model's limits are unknown, never that it's unfit: the operator acts on those differently.
 export async function resolveCapabilities(
   query: CapabilityQuery,
 ): Promise<Result<ModelCapabilities>> {

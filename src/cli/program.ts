@@ -51,7 +51,7 @@ function commandPath(cmd: Command): string {
 
 /**
  * Parse failures never reach runAction, so they are mapped onto the same error
- * contract here — USAGE, with the erroring command's own help as the hint.
+ * contract here: USAGE, with the erroring command's own help as the hint.
  * --help and --version already printed and keep their exit code.
  */
 function parseFailureHandler(cmd: Command): (err: CommanderError) => void {
@@ -77,7 +77,7 @@ function parseFailureHandler(cmd: Command): (err: CommanderError) => void {
   };
 }
 
-/** Builds the full commander program: pure construction — callers own `.parse()` / `.parseAsync()`. */
+/** Builds the full commander program: pure construction, callers own `.parse()` / `.parseAsync()`. */
 export function buildProgram(): Command {
   const require = createRequire(import.meta.url);
   const { version } = require("../../package.json");
@@ -93,7 +93,7 @@ export function buildProgram(): Command {
     .description("The Harness Layer for Personal Finance")
     .version(version)
     .addHelpCommand(false)
-    // Bare `oled` reports harness status — the same action as `status`, which
+    // Bare `oled` reports harness status: the same action as `status`, which
     // redacts by default; `oled status --no-redact` is the way to opt out.
     .action(runAction(showStatus));
 

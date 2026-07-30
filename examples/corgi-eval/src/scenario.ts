@@ -33,7 +33,7 @@ export const SCENARIO: Phase[] = [
 
 /**
  * Environment facts the model cannot infer, and nothing else. Usage rules for
- * `oled` are deliberately absent — SKILL.md and `--help` are the surface under
+ * `oled` are deliberately absent: SKILL.md and `--help` are the surface under
  * test, so repeating their advice here would measure this text instead.
  */
 export const ENVIRONMENT_ADAPTER = `## This environment

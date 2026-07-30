@@ -222,7 +222,7 @@ function outcomeMarkdown(report: RunReport): string[] {
   return [
     "What the pairing accomplished, read back through the CLI. Every row must pass.",
     "",
-    "`every statement row posted` counts the rows that became one of the statement's charges, refunds or card payments, which is what its printed totals cover. Bookkeeping outside those groups — a carried-forward opening balance, say — is reported in the ledger readout and never scored.",
+    "`every statement row posted` counts the rows that became one of the statement's charges, refunds or card payments, which is what its printed totals cover. Bookkeeping outside those groups (a carried-forward opening balance, say) is reported in the ledger readout and never scored.",
     "",
     ...markdownTable(
       ["check", "result", "want", "got"],
@@ -289,7 +289,7 @@ function nextAttemptCell(item: FrictionItem): string {
 
 function frictionDetail(item: FrictionItem, index: number): string[] {
   return [
-    `#### ${index + 1}. ${item.type} — ${item.phase}`,
+    `#### ${index + 1}. ${item.type}: ${item.phase}`,
     "",
     ...markdownTable(
       ["field", "value"],
@@ -373,7 +373,7 @@ function recoveryMarkdown(report: RunReport): string[] {
     "",
     "`recovered` means a later call to the subcommand succeeded, not necessarily the next one. `repeated` sent the identical command again; `changed` tried a different one and still never succeeded; `abandoned` never returned to the subcommand.",
     "",
-    "`same turn` means every other attempt at that subcommand was dispatched in the same turn as this one — parallel tool calls in one reply, sent before any of their results existed. They are outside the rate: an error the model had not read yet cannot have taught it anything.",
+    "`same turn` means every other attempt at that subcommand was dispatched in the same turn as this one: parallel tool calls in one reply, sent before any of their results existed. They are outside the rate: an error the model had not read yet cannot have taught it anything.",
     "",
     "### Hint efficacy",
     "",
@@ -593,7 +593,7 @@ const SECTIONS: Section[] = [
 export function renderConsole(report: RunReport, reportPath: string): string {
   const { scorecard, identity } = report;
   const lines: string[] = [""];
-  lines.push(chalk.bold(`corgi-eval — ${identity.model} @ ${identity.baseUrl}`));
+  lines.push(chalk.bold(`corgi-eval: ${identity.model} @ ${identity.baseUrl}`));
   lines.push(
     chalk.dim(
       `oled ${identity.oled.version} · skill ${identity.skill.version} (${identity.skill.length} chars, sha256 ${identity.skill.sha256.slice(0, 12)})`,
@@ -729,7 +729,7 @@ function ledgerSection(ledger: LedgerProbe): string[] {
       ],
     ),
     "",
-    "`rows linked to a statement file` counts the listed rows carrying a `source_file_id`. A row outside the statement's groups — an opening balance through `equity`, if the model posted one — is bookkeeping the statement's printed totals do not cover. Both readings are neutral: reported so they are visible, never scored.",
+    "`rows linked to a statement file` counts the listed rows carrying a `source_file_id`. A row outside the statement's groups (an opening balance through `equity`, if the model posted one) is bookkeeping the statement's printed totals do not cover. Both readings are neutral: reported so they are visible, never scored.",
   ];
   const truncated = truncationWarning(ledger);
   if (truncated) lines.push("", `> **Capped read:** ${truncated}`);
@@ -740,7 +740,7 @@ function ledgerSection(ledger: LedgerProbe): string[] {
 function renderMarkdown(report: RunReport, skill: string | null): string {
   const { scorecard, statements, expected, ledger, identity } = report;
   const lines = [
-    `# corgi-eval — ${identity.model}`,
+    `# corgi-eval: ${identity.model}`,
     "",
     `**Verdict: ${scorecard.passed ? "PASS" : "FAIL"}** · started ${identity.startedAt}`,
     "",
@@ -770,7 +770,7 @@ function renderMarkdown(report: RunReport, skill: string | null): string {
 
   for (const [index, section] of SECTIONS.entries()) {
     const note = section.heading?.(report);
-    lines.push("", `## ${index + 1}. ${section.title}${note ? ` — ${note}` : ""}`, "");
+    lines.push("", `## ${index + 1}. ${section.title}${note ? `: ${note}` : ""}`, "");
     lines.push(...section.markdown(report));
   }
 
@@ -794,7 +794,7 @@ function renderMarkdown(report: RunReport, skill: string | null): string {
 
   lines.push("", "## The skill under test", "");
   lines.push(
-    `What the model was handed, verbatim: ${identity.skill.version}, ${identity.skill.length} chars, sha256 \`${identity.skill.sha256}\`. It is short on purpose — everything it leaves out lives in the CLI's own \`--help\`, which is why the profile counts help lookups.`,
+    `What the model was handed, verbatim: ${identity.skill.version}, ${identity.skill.length} chars, sha256 \`${identity.skill.sha256}\`. It is short on purpose: everything it leaves out lives in the CLI's own \`--help\`, which is why the profile counts help lookups.`,
   );
   lines.push("");
   lines.push(

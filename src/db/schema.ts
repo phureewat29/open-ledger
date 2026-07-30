@@ -67,7 +67,7 @@ function currentVersion(db: Database.Database): number {
   return row.version;
 }
 
-/** Which of `tables` this database does not have — the schema half of `doctor`. */
+/** Which of `tables` this database does not have: the schema half of `doctor`. */
 export function listMissingTables(db: Database.Database, tables: string[]): string[] {
   const placeholders = tables.map(() => "?").join(",");
   const rows = db

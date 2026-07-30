@@ -73,7 +73,7 @@ function createStepRecorder(steps: SetupStep[]): Step {
     const result = await work();
     const detail = result.ok ? describe(result.value) : result.error;
     steps.push({ name, ok: result.ok, detail });
-    note(`  ${result.ok ? "ok" : "failed"} ${name} — ${detail}`);
+    note(`  ${result.ok ? "ok" : "failed"} ${name}: ${detail}`);
     return result;
   };
 }
@@ -286,7 +286,7 @@ async function run(config: Config): Promise<Result<boolean>> {
 
   const transport = planned.value;
   const budget = resolveContextBudget(transport.capabilities, config.contextBudgetTokens);
-  note(`  context budget ${budget.tokens} tokens — ${budget.detail}`);
+  note(`  context budget ${budget.tokens} tokens: ${budget.detail}`);
 
   const prepared = await prepare(step, guard.register);
   if (!prepared.ok) return prepared;

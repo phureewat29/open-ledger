@@ -34,7 +34,7 @@ export function listDatasets(): DatasetSummary[] {
   });
 }
 
-/** Throws on an unknown name — the CLI validates the name first for a clean error. */
+/** Throws on an unknown name: the CLI validates the name first for a clean error. */
 export function readDataset(
   name: string,
   filter: { country?: string; kind?: string } = {},

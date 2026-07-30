@@ -18,7 +18,7 @@ function padLabel(label: string, width: number, opts: { bold?: boolean } = {}): 
   return opts.bold ? chalk.bold(padded) : padded;
 }
 
-/** Human output only (TTY: aligned two-column, piped: tab-separated) — never emits JSON; the caller owns --json. */
+/** Human output only (TTY: aligned two-column, piped: tab-separated); never emits JSON, the caller owns --json. */
 export function printKeyValues(
   mode: OutputMode,
   rows: [string, string | number][],
@@ -42,7 +42,7 @@ export function banner(): string {
 }
 
 const DISCLAIMER =
-  "OpenLedger is a tool, it only summarizes financial statements — verify amounts against your statements before relying on them.";
+  "OpenLedger is a tool, it only summarizes financial statements: verify amounts against your statements before relying on them.";
 
 const SCENARIO = [
   "Place financial statements in a folder; your AI posts each row to a local ledger.",

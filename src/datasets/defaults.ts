@@ -30,7 +30,7 @@ export function findCountryDefaults(country: string): CountryDefaults | null {
   return all().find((r) => r.country === cc) ?? null;
 }
 
-/** Uppercased country codes that have defaults, sorted — for "unknown country" hints. */
+/** Uppercased country codes that have defaults, sorted, for "unknown country" hints. */
 export function availableCountries(): string[] {
   return all().map((r) => r.country);
 }

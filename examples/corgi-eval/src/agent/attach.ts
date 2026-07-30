@@ -14,7 +14,7 @@ import type { OpenLedgerArtifacts, PageImageArtifact } from "../oled/artifacts.j
 import type { OperationalNote } from "../report/events.js";
 
 /**
- * Hands back exactly what oled produced, verbatim — no opening, parsing, or
+ * Hands back exactly what oled produced, verbatim: no opening, parsing, or
  * summarizing here. Doing the model's work here would leave nothing to measure.
  */
 
@@ -47,7 +47,7 @@ function count(total: number, noun: string): string {
 
 /**
  * Fails here when the model accepts neither text nor image, before any
- * sandbox work — the alternative is a zero-row report that blames the model
+ * sandbox work: the alternative is a zero-row report that blames the model
  * for the harness.
  */
 export async function planHostTransport(query: CapabilityQuery): Promise<Result<TransportPlan>> {
