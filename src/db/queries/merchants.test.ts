@@ -5,6 +5,7 @@ import {
   findMerchantByAlias,
   findMerchantById,
   listMerchants,
+  renameMerchant,
   setMerchantDefaultAccount,
   clearMerchantDefaultAccount,
   mergeMerchants,
@@ -191,6 +192,44 @@ describe("clearMerchantDefaultAccount", () => {
     const result = clearMerchantDefaultAccount(db, m.id);
     expect(result).toEqual({ before: null });
     expect(findMerchantById(db, m.id)!.default_account_id).toBeNull();
+  });
+});
+
+describe("renameMerchant", () => {
+  let db: Database.Database;
+  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
+
+  it("renames in place and keeps the old name resolving to the same merchant", () => {
+    const m = upsertMerchant(db, { canonical_name: "STARBUCKS COFFEE #456", alias: "STARBUCKS #456 BKK" });
+
+    const renamed = renameMerchant(db, m.id, "Starbucks");
+    expect(renamed).toEqual({ before: "STARBUCKS COFFEE #456", after: "Starbucks" });
+    expect(findMerchantById(db, m.id)!.canonical_name).toBe("Starbucks");
+
+    // Both the original alias and the pre-rename name still hit the merchant.
+    expect(findMerchantByAlias(db, "STARBUCKS #456 BKK")?.merchant.id).toBe(m.id);
+    expect(findMerchantByAlias(db, "STARBUCKS COFFEE #456")?.merchant.id).toBe(m.id);
+  });
+
+  it("reports an alias conflict when another merchant holds the old name's pattern", () => {
+    const other = upsertMerchant(db, { canonical_name: "Other", alias: "GRAB FOOD" });
+    const m = upsertMerchant(db, { canonical_name: "GRAB FOOD" });
+
+    const renamed = renameMerchant(db, m.id, "Grab");
+    expect(renamed.after).toBe("Grab");
+    expect(renamed.alias_conflict).toEqual({
+      pattern: normalizeDescriptor("GRAB FOOD"),
+      held_by: other.id,
+    });
+  });
+
+  it("is a no-op when the name is unchanged", () => {
+    const m = upsertMerchant(db, { canonical_name: "Starbucks" });
+    expect(renameMerchant(db, m.id, "Starbucks")).toEqual({ before: "Starbucks", after: "Starbucks" });
+  });
+
+  it("throws for a missing merchant", () => {
+    expect(() => renameMerchant(db, "m:none", "Name")).toThrow(/not found/);
   });
 });
 

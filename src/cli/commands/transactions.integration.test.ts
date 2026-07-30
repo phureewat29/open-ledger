@@ -91,7 +91,10 @@ describe("transactions CLI integration (subprocess)", () => {
 
       const tree = await runCli(["accounts", "tree", "--json"]);
       expect(tree.code).toBe(0);
-      const roots = parseOne(tree.stdout) as any[];
+      // One object per root, then the summary: the uniform NDJSON contract.
+      const treeLines = parseNdjson(tree.stdout);
+      const roots = treeLines.filter((r) => r.type !== "summary");
+      expect(treeLines.find((r) => r.type === "summary")).toMatchObject({ roots: roots.length });
       const assetRoot = roots.find((r) => r.id === "asset");
       const expenseRoot = roots.find((r) => r.id === "expense");
       expect(assetRoot?.rollup).toBe(-100);
@@ -409,6 +412,54 @@ describe("transactions CLI integration (subprocess)", () => {
         "--json",
       ]);
       expect(both.code).toBe(2); // EXIT.USAGE
+    },
+    45000,
+  );
+
+  it(
+    "merchants update renames in place: transactions show flips, the raw name still resolves",
+    async () => {
+      const add = await runCli([
+        "transactions", "add",
+        "--debit-account", "expense:food",
+        "--credit-account", "asset:bank",
+        "--amount", "120",
+        "--date", "2026-07-15",
+        "--description", "Grab lunch run",
+        "--merchant-name", "GRABPAY* JOHN DOE 123",
+        "--json",
+      ]);
+      expect(add.code).toBe(0);
+      const txId = parseOne(add.stdout).transaction_id as string;
+
+      const before = parseOne((await runCli(["transactions", "show", txId, "--no-redact", "--json"])).stdout);
+      expect(before.merchant_name).toBe("GRABPAY* JOHN DOE 123");
+      const merchantId = before.merchant_id as string;
+
+      const updated = await runCli([
+        "merchants", "update", "--merchant", merchantId, "--name", "Grab", "--json",
+      ]);
+      expect(updated.code).toBe(0);
+      expect(parseOne(updated.stdout)).toMatchObject({
+        merchant_id: merchantId,
+        before: "GRABPAY* JOHN DOE 123",
+        after: "Grab",
+      });
+
+      // The display name is a live join, and the raw name survives as an alias.
+      const after = parseOne((await runCli(["transactions", "show", txId, "--no-redact", "--json"])).stdout);
+      expect(after.merchant_name).toBe("Grab");
+      const resolved = parseOne(
+        (await runCli(["merchants", "resolve", "--descriptor", "GRABPAY* JOHN DOE 123", "--json"])).stdout,
+      );
+      expect(resolved).toMatchObject({ found: true, merchant_id: merchantId });
+
+      // Renaming onto a name another merchant holds is refused toward merge.
+      const collision = await runCli([
+        "merchants", "update", "--merchant", merchantId, "--name", "Starbucks", "--json",
+      ]);
+      expect(collision.code).toBe(6); // EXIT.INVALID
+      expect(JSON.parse(collision.stderr.trim()).error.hint).toContain("merchants merge");
     },
     45000,
   );
@@ -804,7 +855,29 @@ describe("transactions CLI integration (subprocess)", () => {
       ]);
       expect(capped.code).toBe(0);
       const cappedSummary = parseNdjson(capped.stdout).find((o) => o.type === "summary");
-      expect(cappedSummary).toMatchObject({ total: 3, returned: 1, has_more: true, limit: 1 });
+      expect(cappedSummary).toMatchObject({ total: 3, returned: 1, has_more: true, limit: 1, offset: 0 });
+
+      // Paging: offset walks the stable (date DESC, id DESC) order to the tail,
+      // and the pages never overlap.
+      const pageOne = await runCli([
+        "transactions", "list", "--account", "expense:pagination", "--limit", "2", "--json",
+      ]);
+      const pageTwo = await runCli([
+        "transactions", "list", "--account", "expense:pagination", "--limit", "2", "--offset", "2", "--json",
+      ]);
+      const oneObjs = parseNdjson(pageOne.stdout);
+      const twoObjs = parseNdjson(pageTwo.stdout);
+      const oneIds = oneObjs.filter((o) => o.type !== "summary").map((o) => o.id);
+      const twoIds = twoObjs.filter((o) => o.type !== "summary").map((o) => o.id);
+      expect(oneIds).toHaveLength(2);
+      expect(twoIds).toHaveLength(1);
+      expect(oneObjs.find((o) => o.type === "summary")).toMatchObject({
+        total: 3, returned: 2, has_more: true, limit: 2, offset: 0,
+      });
+      expect(twoObjs.find((o) => o.type === "summary")).toMatchObject({
+        total: 3, returned: 1, has_more: false, limit: 2, offset: 2,
+      });
+      expect(new Set([...oneIds, ...twoIds]).size).toBe(3);
     },
     90000,
   );

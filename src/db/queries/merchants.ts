@@ -1,6 +1,6 @@
 import type Database from "libsql";
 import { randomUUID } from "crypto";
-import { clampLimit } from "../../lib/limit.js";
+import { clampLimit, clampOffset } from "../../lib/limit.js";
 
 export interface MerchantUpsertInput {
   canonical_name: string;
@@ -91,24 +91,77 @@ export function upsertMerchant(
     };
   }
 
-  let aliasConflict: MerchantAliasConflict | undefined;
-  if (input.alias) {
-    const normalized = normalizeDescriptor(input.alias);
-    if (normalized) {
-      const existsAlias = db
-        .prepare(`SELECT merchant_id FROM merchant_aliases WHERE normalized_pattern = ?`)
-        .get(normalized) as { merchant_id: string } | undefined;
-      if (!existsAlias) {
-        db.prepare(
-          `INSERT INTO merchant_aliases (id, merchant_id, normalized_pattern) VALUES (?, ?, ?)`,
-        ).run(`ma:${randomUUID()}`, merchant.id, normalized);
-      } else if (existsAlias.merchant_id !== merchant.id) {
-        aliasConflict = { pattern: normalized, held_by: existsAlias.merchant_id };
-      }
-    }
+  const aliasConflict = input.alias ? claimAlias(db, merchant.id, input.alias) : undefined;
+  return aliasConflict ? { ...merchant, alias_conflict: aliasConflict } : merchant;
+}
+
+/**
+ * Claims `rawText`'s normalized pattern for a merchant. A pattern already held
+ * by another merchant stays with its owner and is reported as a conflict; one
+ * the merchant already holds is a no-op.
+ */
+export function claimAlias(
+  db: Database.Database,
+  merchantId: string,
+  rawText: string,
+): MerchantAliasConflict | undefined {
+  const normalized = normalizeDescriptor(rawText);
+  if (!normalized) return undefined;
+  const holder = db
+    .prepare(`SELECT merchant_id FROM merchant_aliases WHERE normalized_pattern = ?`)
+    .get(normalized) as { merchant_id: string } | undefined;
+  if (!holder) {
+    db.prepare(
+      `INSERT INTO merchant_aliases (id, merchant_id, normalized_pattern) VALUES (?, ?, ?)`,
+    ).run(`ma:${randomUUID()}`, merchantId, normalized);
+    return undefined;
+  }
+  return holder.merchant_id !== merchantId
+    ? { pattern: normalized, held_by: holder.merchant_id }
+    : undefined;
+}
+
+export function findMerchantByName(db: Database.Database, name: string): MerchantRow | null {
+  const row = db
+    .prepare(`SELECT id, canonical_name, default_account_id, created_at FROM merchants WHERE canonical_name = ?`)
+    .get(name.trim()) as MerchantRow | undefined;
+  return row ?? null;
+}
+
+interface RenameMerchantResult {
+  before: string;
+  after: string;
+  /** The old name's pattern was already claimed by another merchant. */
+  alias_conflict?: MerchantAliasConflict;
+}
+
+/**
+ * Renames a merchant and keeps the old name as an alias, so raw descriptors
+ * that produced the old name still resolve to the same merchant. Display names
+ * are a live join, so no transaction rows need touching. Callers own the
+ * not-found and name-collision checks; this asserts them as invariants.
+ */
+export function renameMerchant(
+  db: Database.Database,
+  id: string,
+  name: string,
+): RenameMerchantResult {
+  const canonical = name.trim();
+  if (!canonical) throw new Error("merchant canonical_name is required");
+  const current = findMerchantById(db, id);
+  if (!current) throw new Error(`merchant "${id}" not found`);
+  if (current.canonical_name === canonical) {
+    return { before: current.canonical_name, after: canonical };
   }
 
-  return aliasConflict ? { ...merchant, alias_conflict: aliasConflict } : merchant;
+  const result = db.transaction(() => {
+    db.prepare(`UPDATE merchants SET canonical_name = ? WHERE id = ?`).run(canonical, id);
+    const conflict = claimAlias(db, id, current.canonical_name);
+    return conflict
+      ? { before: current.canonical_name, after: canonical, alias_conflict: conflict }
+      : { before: current.canonical_name, after: canonical };
+  })();
+  return result;
 }
 
 interface MerchantWithDefault {
@@ -136,6 +189,7 @@ export function findMerchantByAlias(
 
 interface ListMerchantsOptions {
   limit?: number;
+  offset?: number;
 }
 
 const DEFAULT_LIST_LIMIT = 200;
@@ -155,8 +209,8 @@ export function listMerchants(
             (SELECT COUNT(*) FROM merchant_aliases ma WHERE ma.merchant_id = m.id) AS alias_count
      FROM merchants m
      ORDER BY m.canonical_name
-     LIMIT ?`,
-  ).all(limit) as (MerchantRow & { alias_count: number })[];
+     LIMIT ? OFFSET ?`,
+  ).all(limit, clampOffset(opts.offset)) as (MerchantRow & { alias_count: number })[];
 }
 
 export function countMerchants(db: Database.Database): number {

@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import {
   emitList,
   emitObject,
-  emitSummary,
+  emitCappedSummary,
   fail,
   mapNotFoundError,
   requireYes,
@@ -12,10 +12,13 @@ import {
 import { openDb } from "../db.js";
 import {
   listMerchants as queryMerchants,
+  claimAlias,
   clampMerchantsLimit,
   countMerchants,
   findMerchantByAlias,
   findMerchantById,
+  findMerchantByName,
+  renameMerchant,
   upsertMerchant as upsertMerchantRow,
   setMerchantDefaultAccount,
   clearMerchantDefaultAccount,
@@ -27,6 +30,7 @@ import { findAccountById } from "../../db/queries/accounts.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
 import { parseInput, str, bool, int } from "../../lib/validate.js";
+import { clampOffset } from "../../lib/limit.js";
 
 // `canonical_name` is the only free-text field; ids and the default-account link are structured data left verbatim.
 const MERCHANT_REDACT_FIELDS = ["canonical_name"] as const;
@@ -44,24 +48,24 @@ interface ListMerchantsOpts {
 
 const LIST_MERCHANTS_SPEC = z.object({
   limit: int().optional(),
+  offset: int().optional(),
 });
 
 async function listMerchants(opts: ListMerchantsOpts): Promise<void> {
   const parsed = parseInput(LIST_MERCHANTS_SPEC, opts as Record<string, unknown>);
   const db = await openDb();
   const rows = applyRedaction(
-    queryMerchants(db, { limit: parsed.limit }),
+    queryMerchants(db, { limit: parsed.limit, offset: parsed.offset }),
     !!opts.redact,
     MERCHANT_REDACT_FIELDS,
   );
   emitList(rows, MERCHANT_COLUMNS);
-  const total = countMerchants(db);
-  emitSummary({
-    total,
-    returned: rows.length,
-    has_more: total > rows.length,
-    limit: clampMerchantsLimit(parsed.limit),
-  });
+  emitCappedSummary(
+    countMerchants(db),
+    rows.length,
+    clampMerchantsLimit(parsed.limit),
+    clampOffset(parsed.offset),
+  );
 }
 
 const RESOLVE_MERCHANT_SPEC = z.object({ descriptor: str() });
@@ -98,6 +102,54 @@ async function upsertMerchant(opts: Record<string, unknown>): Promise<void> {
   if (parsed.alias) input.alias = parsed.alias;
   if (parsed.default_account) input.default_account_id = parsed.default_account;
   emitObject({ ...upsertMerchantRow(db, input) });
+}
+
+const UPDATE_MERCHANT_SPEC = z.object({
+  merchant: str(),
+  name: str().optional(),
+  alias: str().optional(),
+  default_account: str().optional(),
+});
+
+async function updateMerchant(opts: Record<string, unknown>): Promise<void> {
+  const parsed = parseInput(UPDATE_MERCHANT_SPEC, opts, {
+    atLeastOne: "at least one of --name, --alias, --default-account is required",
+  });
+  const db = await openDb();
+  const current = findMerchantById(db, parsed.merchant);
+  if (!current) fail("NOT_FOUND", `merchant "${parsed.merchant}" not found`);
+
+  const result: Record<string, unknown> = { merchant_id: parsed.merchant };
+
+  if (parsed.name) {
+    const holder = findMerchantByName(db, parsed.name);
+    if (holder && holder.id !== parsed.merchant) {
+      fail("INVALID", `merchant name "${parsed.name.trim()}" already belongs to ${holder.id}`, {
+        hint: `merge them instead: oled merchants merge --from ${parsed.merchant} --to ${holder.id} --yes`,
+      });
+    }
+    const renamed = renameMerchant(db, parsed.merchant, parsed.name);
+    result.before = renamed.before;
+    result.after = renamed.after;
+    // The old name stays resolvable as an alias unless another merchant holds it.
+    if (renamed.alias_conflict) result.alias_conflict = renamed.alias_conflict;
+  }
+
+  if (parsed.alias) {
+    const conflict = claimAlias(db, parsed.merchant, parsed.alias);
+    if (conflict) result.alias_conflict = conflict;
+    else result.alias_added = parsed.alias;
+  }
+
+  if (parsed.default_account) {
+    if (!findAccountById(db, parsed.default_account)) {
+      fail("NOT_FOUND", `account "${parsed.default_account}" not found`);
+    }
+    const set = setMerchantDefaultAccount(db, parsed.merchant, parsed.default_account);
+    result.default_account = set.after;
+  }
+
+  emitObject(result);
 }
 
 const SET_DEFAULT_SPEC = z.object({
@@ -165,6 +217,7 @@ export function registerMerchants(program: Command): void {
         "",
         "Behavior: manages merchants and their default accounts; an alias maps raw bank text to a merchant.",
         "Typical flow: resolve a descriptor; if unknown, upsert with a name and alias, then set-default.",
+        "Cleaning names: `update --merchant <id> --name <clean>` renames in place and keeps the raw name as an alias.",
         "Example: oled merchants resolve --descriptor \"POS STARBUCKS\" --json",
       ].join("\n"),
     );
@@ -173,6 +226,7 @@ export function registerMerchants(program: Command): void {
     .command("list")
     .description("List merchants")
     .option("--limit <n>", "max rows (default 200, max 1000)")
+    .option("--offset <n>", "rows to skip; repeat with offset += returned while the summary says has_more")
     .option("--no-redact", "skip PII redaction (on by default)")
     .action(runAction(listMerchants));
 
@@ -189,6 +243,19 @@ export function registerMerchants(program: Command): void {
     .option("--alias <alias>", "merchant alias to add")
     .option("--default-account <id>", "default account id")
     .action(runAction(upsertMerchant));
+
+  merchants
+    .command("update")
+    .description("Rename a merchant or add an alias; the old name keeps resolving")
+    .option("--merchant <id>", "merchant id")
+    .option("--name <name>", "new canonical name (the old one is kept as an alias)")
+    .option("--alias <alias>", "additional alias to claim")
+    .option("--default-account <id>", "default account id")
+    .addHelpText(
+      "after",
+      "\nNote: `transactions add --merchant-name` matches by name, so the old spelling there would create a new merchant; prefer ids after a rename.",
+    )
+    .action(runAction(updateMerchant));
 
   merchants
     .command("set-default")
