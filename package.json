@@ -1,6 +1,6 @@
 {
-  "name": "@phureewat29/openledger",
-  "version": "0.14.5",
+  "name": "@aquartier/openledger",
+  "version": "0.14.6",
   "description": "OpenLedger — The Harness Layer for Personal Finance",
   "keywords": [
     "finance",
