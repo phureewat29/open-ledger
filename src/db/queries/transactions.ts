@@ -3,7 +3,7 @@ import { accountExists } from "./accounts.js";
 import { upsertMerchant, type MerchantUpsertInput } from "./merchants.js";
 import { buildPatch, type PatchField } from "../../lib/patch.js";
 import { newGroupId, newTransactionId } from "../../lib/ids.js";
-import { clampLimit } from "../../lib/limit.js";
+import { clampLimit, clampOffset } from "../../lib/limit.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
 
 /**
@@ -204,6 +204,8 @@ export interface ListTransactionsOptions {
   /** Exact match on the stored minor-unit amount. */
   amount?: number;
   limit?: number;
+  /** Rows to skip; page with `offset += returned` while the summary says has_more. */
+  offset?: number;
   /** When true, fold rows into per-group_id clusters (NULLs stay standalone). */
   group?: boolean;
 }
@@ -270,10 +272,11 @@ export function listTransactions(
 ): TransactionRow[] | TransactionCluster[] {
   const { whereSql, params } = buildListWhere(opts);
   const limit = clampListLimit(opts.limit);
+  const offset = clampOffset(opts.offset);
 
   const rows = db
-    .prepare(`${ROW_SELECT} ${whereSql} ORDER BY t.date DESC, t.id DESC LIMIT ?`)
-    .all(...params, limit) as TransactionRow[];
+    .prepare(`${ROW_SELECT} ${whereSql} ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as TransactionRow[];
 
   return opts.group ? clusterByGroup(rows) : rows;
 }

@@ -3,3 +3,7 @@
 export function clampLimit(limit: number | undefined, fallback: number, max: number): number {
   return Math.min(Math.max(limit ?? fallback, 1), max);
 }
+
+export function clampOffset(offset: number | undefined): number {
+  return Math.max(0, Math.floor(offset ?? 0));
+}

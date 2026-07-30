@@ -1,7 +1,7 @@
 import type Database from "libsql";
 import { randomUUID } from "crypto";
 import { parseJsonOrNull } from "../../lib/json.js";
-import { clampLimit } from "../../lib/limit.js";
+import { clampLimit, clampOffset } from "../../lib/limit.js";
 
 interface QuestionTarget {
   transaction_id?: string | null;
@@ -152,6 +152,7 @@ export function countQuestions(db: Database.Database, scope: CountQuestionsScope
 /** Snake_case like CountQuestionsScope, so one filter object can feed both. */
 interface ListQuestionsOptions {
   limit?: number;
+  offset?: number;
   batch_id?: string;
   includeDeferred?: boolean;
 }
@@ -176,13 +177,13 @@ export function listQuestions(
   if (opts.batch_id) { conditions.push("batch_id = ?"); params.push(opts.batch_id); }
   if (!opts.includeDeferred) conditions.push(ACTIVE_DEFERRED_CLAUSE);
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  params.push(capped);
+  params.push(capped, clampOffset(opts.offset));
   return db.prepare(
     `SELECT ${ROW_COLUMNS}
      FROM questions
      ${where}
      ORDER BY created_at ASC
-     LIMIT ?`,
+     LIMIT ? OFFSET ?`,
   ).all(...params) as QuestionRow[];
 }
 

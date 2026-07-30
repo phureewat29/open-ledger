@@ -3,6 +3,7 @@ import type Database from "libsql";
 import {
   currentMode,
   emit,
+  emitCappedSummary,
   emitList,
   emitObject,
   emitSummary,
@@ -43,6 +44,7 @@ import {
 } from "../../ingest/commit.js";
 import { autoMergeStrictDuplicateTransactions } from "../../ingest/dedup.js";
 import { fromMinorUnits, toMinorUnits } from "../../lib/money.js";
+import { clampOffset } from "../../lib/limit.js";
 import { getDisplayCurrency } from "../currency.js";
 import { newBatchId } from "../../lib/ids.js";
 import { applyRedaction } from "../../privacy/redactor.js";
@@ -91,6 +93,7 @@ const LIST_TRANSACTIONS_SPEC = z.object({
   amount: num().optional(),
   currency: str().optional(),
   limit: num().optional(),
+  offset: num().optional(),
 });
 
 async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
@@ -107,15 +110,19 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
     listOpts.amount = toMinorUnits(parsed.amount, parsed.currency ?? getDisplayCurrency());
   }
   if (parsed.limit !== undefined) listOpts.limit = parsed.limit;
+  if (parsed.offset !== undefined) listOpts.offset = parsed.offset;
 
   const total = countTransactions(db, listOpts);
   const limit = clampListLimit(listOpts.limit);
+  const offset = clampOffset(listOpts.offset);
 
   if (opts.group) {
+    // Offset pages rows before clustering, so a group can straddle a page,
+    // the same way it can straddle the limit.
     const clusters = queryTransactions(db, { ...listOpts, group: true });
     emitClusters(clusters, !!opts.redact);
     const returned = clusters.reduce((n, c) => n + c.transactions.length, 0);
-    emitSummary({ total, returned, has_more: total > returned, limit });
+    emitCappedSummary(total, returned, limit, offset);
     return;
   }
 
@@ -125,7 +132,7 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
     TRANSACTION_REDACT_FIELDS,
   );
   emitList(rows, LIST_COLUMNS);
-  emitSummary({ total, returned: rows.length, has_more: total > rows.length, limit });
+  emitCappedSummary(total, rows.length, limit, offset);
 }
 
 function emitClusters(clusters: TransactionCluster[], redact: boolean): void {
@@ -435,6 +442,7 @@ export function registerTransactions(program: Command): void {
     .option("--amount <decimal>", "filter by exact amount (decimal)")
     .option("--currency <code>", "currency for --amount (defaults to the configured display currency)")
     .option("--limit <n>", "max rows (default 50, max 500)")
+    .option("--offset <n>", "rows to skip; repeat with offset += returned while the summary says has_more")
     .option("--group", "fold linked transactions into their group clusters")
     .option("--no-redact", "skip PII redaction (on by default)")
     .action(runAction(listTransactions));

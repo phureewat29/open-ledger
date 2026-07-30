@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import type { QuestionRow } from "../../db/queries/questions.js";
-import { emitList, emitSummary, fail, runAction, type Column } from "../output.js";
+import { emitCappedSummary, emitList, fail, runAction, type Column } from "../output.js";
+import { clampOffset } from "../../lib/limit.js";
 import { openDb } from "../db.js";
 import * as z from "zod";
 import { parseInput, str, int } from "../../lib/validate.js";
@@ -75,6 +76,7 @@ interface ListQuestionsOpts {
 const LIST_QUESTIONS_SPEC = z.object({
   batch: str().optional(),
   limit: int().optional(),
+  offset: int().optional(),
 });
 
 async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
@@ -85,7 +87,7 @@ async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
   const db = await openDb();
   // One filter object for both queries, so `total` counts what the list filtered.
   const filter = { batch_id: parsed.batch, includeDeferred: !!opts.includeDeferred };
-  const rows = queryQuestions(db, { ...filter, limit: parsed.limit });
+  const rows = queryQuestions(db, { ...filter, limit: parsed.limit, offset: parsed.offset });
   let listRows = rows.map(toListRow);
   if (opts.redact) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
@@ -93,12 +95,12 @@ async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
   }
   emitList(listRows, LIST_COLUMNS);
   const total = countQuestions(db, filter);
-  emitSummary({
+  emitCappedSummary(
     total,
-    returned: listRows.length,
-    has_more: total > listRows.length,
-    limit: clampQuestionsLimit(parsed.limit),
-  });
+    listRows.length,
+    clampQuestionsLimit(parsed.limit),
+    clampOffset(parsed.offset),
+  );
 }
 
 const ANSWER_SPEC = z.object({
@@ -148,7 +150,7 @@ export function registerQuestions(program: Command): void {
         "",
         "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
         "Typical flow: list --json, resolve each by kind, then answer (--also <id,id> closes siblings) or defer.",
-        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert; currency_mismatch -> re-post as linked legs through equity:conversion:<ccy>.",
+        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert or update; currency_mismatch -> re-post as linked legs through equity:conversion:<ccy>.",
         "Example: oled questions list --json",
       ].join("\n"),
     );
@@ -158,6 +160,7 @@ export function registerQuestions(program: Command): void {
     .description("List questions")
     .option("--batch <id>", "filter by batch id")
     .option("--limit <n>", "max rows (default 200, max 1000)")
+    .option("--offset <n>", "rows to skip; repeat with offset += returned while the summary says has_more")
     .option("--include-deferred", "include deferred questions")
     .option("--no-redact", "skip PII redaction (on by default)")
     .addHelpText(
