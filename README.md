@@ -72,7 +72,7 @@ Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared dir
 2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through questions discovered from the ingestion, such as an unrecognized merchant or an ambiguous account match.
 3. With the ledger current, ask for the payoff: *"What's my net worth, and where did most of my spending go last month?"* your AI will read the answer straight from the OpenLedger.
 
-There are two complete references ship in this repo: 
+Two complete references ship in this repo:
 - [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`
 - [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
 
@@ -85,7 +85,7 @@ This is the loop the skill teaches an agent to run:
 1. **Discover**: `oled ingest list --json` to find new/pending files.
 2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it. A locked PDF exits 4 until the agent re-runs with `--password <password>`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. With no text layer and no OCR endpoint, it comes back as one image per page.
 3. **Read**: the agent reads what prepare returned, either the text document or the page images, and picks out every transaction row.
-4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, fuzzy account match, uncategorized fallback, cross-currency row).
+4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, a lookalike account, uncategorized fallback, cross-currency row).
 5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
 
 ## Commands
@@ -124,7 +124,7 @@ oled open           # Open the data folder in file explorer
 
 ## Configuration
 
-OpenLedger stores everything in `~/.oled/`:
+OpenLedger stores everything in `~/.oled/`. `oled config --init` creates it, along with the database and data directory:
 
 ```
 ~/.oled/
