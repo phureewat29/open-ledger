@@ -27,11 +27,11 @@ const OLED_DIR = process.env.OLED_DIR
 
 /**
  * Also drives the persisted-key list: unknown keys on disk are tolerated on
- * read and dropped on the next write — `saveConfig` writes only the fields
+ * read and dropped on the next write; `saveConfig` writes only the fields
  * listed here.
  */
 const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: string }> = {
-  // Last-resort constants; `config converge` overrides them — other modules
+  // Last-resort constants; `config converge` overrides them, and other modules
   // should read the resolved value, not hardcode a currency.
   displayLocale: { default: "th-TH" },
   displayCurrency: { default: "THB" },
@@ -79,7 +79,7 @@ function loadFileConfig(): Partial<OpenLedgerConfig> {
   try {
     return JSON.parse(readFileSync(configPath, "utf-8"));
   } catch {
-    // Must degrade to defaults, not throw — every command, including the
+    // Must degrade to defaults, not throw: every command, including the
     // ones that would repair the file, would crash at startup otherwise.
     return {};
   }
@@ -107,7 +107,7 @@ function buildConfig(): OpenLedgerConfig {
 export const config = buildConfig();
 
 /**
- * File values only — no env overrides, no defaults folded in. Converge uses
+ * File values only, no env overrides, no defaults folded in. Converge uses
  * this to tell an explicitly-persisted value apart from a defaulted one, so
  * it can slot a dataset-derived default between the two.
  */
@@ -117,7 +117,8 @@ export function loadPersistedConfig(): Partial<OpenLedgerConfig> {
 
 export function saveConfig(partial: Partial<OpenLedgerConfig>): void {
   const configPath = getConfigPath();
-  if (!existsSync(OLED_DIR)) mkdirSync(OLED_DIR, { recursive: true });
+  // 0700 like the cache dir: this tree holds financial data.
+  if (!existsSync(OLED_DIR)) mkdirSync(OLED_DIR, { recursive: true, mode: 0o700 });
 
   const existing = loadFileConfig();
   const merged = pickConfigFields({ ...existing, ...partial });

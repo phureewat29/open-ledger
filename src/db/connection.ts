@@ -8,7 +8,7 @@ let singleDb: Database.Database | null = null;
 
 function openDb(dbPath: string): Database.Database {
   const dir = dirname(dbPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const db = new Database(dbPath);
 
@@ -26,7 +26,11 @@ function openDb(dbPath: string): Database.Database {
 
   db.pragma("foreign_keys = ON");
   migrate(db, dbPath);
-  try { chmodSync(dbPath, 0o600); } catch {}
+  // WAL mode writes committed rows into the -wal/-shm sidecars, so the 0600
+  // promise has to cover them too. Best effort, same as the db file itself.
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try { chmodSync(path, 0o600); } catch {}
+  }
   return db;
 }
 
