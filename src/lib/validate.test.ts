@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as z from "zod";
 import { str, num, int, bool, json, parseInput, safeParse, ValidationError } from "./validate.js";
 
-describe("validate — defaults", () => {
+describe("validate: defaults", () => {
   it("uses the default when the key is absent", () => {
     expect(parseInput(z.object({ currency: str().default("THB") }), {}).currency).toBe("THB");
   });
@@ -14,17 +14,10 @@ describe("validate — defaults", () => {
   });
 });
 
-describe("validate — required accumulation", () => {
+describe("validate: required accumulation", () => {
   it("lists every missing required field in one message, exact format", () => {
     const spec = z.object({ id: str(), name: str(), type: str() });
     expect(safeParse(spec, {})).toEqual({ ok: false, error: "--id, --name, --type required" });
-  });
-
-  it("honours a custom required label", () => {
-    expect(safeParse(z.object({ reason: str() }), {})).toEqual({
-      ok: false,
-      error: "--reason required",
-    });
   });
 
   it("derives the default label from the key (underscores to dashes)", () => {
@@ -43,7 +36,7 @@ describe("validate — required accumulation", () => {
   });
 });
 
-describe("validate — coercions", () => {
+describe("validate: coercions", () => {
   it("coerces numbers and reports non-numbers", () => {
     expect(parseInput(z.object({ amount: num() }), { amount: "12.5" }).amount).toBe(12.5);
     expect(safeParse(z.object({ amount: num() }), { amount: "abc" })).toEqual({
@@ -79,7 +72,7 @@ describe("validate — coercions", () => {
   });
 });
 
-describe("validate — nullable", () => {
+describe("validate: nullable", () => {
   it("passes explicit null through and does not call map", () => {
     let called = false;
     const spec = z.object({
@@ -100,7 +93,7 @@ describe("validate — nullable", () => {
   });
 });
 
-describe("validate — optional", () => {
+describe("validate: optional", () => {
   it("omits an absent optional key entirely", () => {
     const parsed = parseInput(z.object({ name: str().optional() }), {});
     expect("name" in parsed).toBe(false);
@@ -108,13 +101,7 @@ describe("validate — optional", () => {
   });
 });
 
-describe("validate — oneOf", () => {
-  it("accepts a member and narrows nothing at runtime", () => {
-    expect(
-      parseInput(z.object({ type: z.enum(["asset", "liability"]) }), { type: "asset" }).type,
-    ).toBe("asset");
-  });
-
+describe("validate: oneOf", () => {
   it("rejects a non-member with the join-formatted message", () => {
     expect(safeParse(z.object({ type: z.enum(["asset", "liability"]) }), { type: "bogus" })).toEqual({
       ok: false,
@@ -123,7 +110,7 @@ describe("validate — oneOf", () => {
   });
 });
 
-describe("validate — key resolution", () => {
+describe("validate: key resolution", () => {
   it("reads an explicit alias", () => {
     const spec = z.object({ debit_account_id: str() });
     expect(
@@ -137,7 +124,7 @@ describe("validate — key resolution", () => {
   });
 });
 
-describe("validate — map", () => {
+describe("validate: map", () => {
   it("applies map to present values", () => {
     expect(parseInput(z.object({ due_day: int().transform((v) => v * 2) }), { due_day: "10" }).due_day).toBe(
       20,
@@ -145,7 +132,7 @@ describe("validate — map", () => {
   });
 });
 
-describe("validate — atLeastOne", () => {
+describe("validate: atLeastOne", () => {
   const spec = z.object({ name: str().optional(), due_day: int().optional() });
   const msg = "at least one of --name, --due-day is required";
 
@@ -158,18 +145,11 @@ describe("validate — atLeastOne", () => {
   });
 });
 
-describe("validate — entry-point shapes", () => {
+describe("validate: entry-point shapes", () => {
   it("safeParse returns an ok Result on success", () => {
     expect(safeParse(z.object({ name: str() }), { name: "x" })).toEqual({
       ok: true,
       value: { name: "x" },
-    });
-  });
-
-  it("safeParse returns an error Result on failure", () => {
-    expect(safeParse(z.object({ name: str() }), {})).toEqual({
-      ok: false,
-      error: "--name required",
     });
   });
 

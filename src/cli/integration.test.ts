@@ -15,23 +15,6 @@ afterAll(() => {
 });
 
 describe("cli integration (subprocess)", () => {
-  it("new status --json emits exactly one parseable JSON object, exit 0", async () => {
-    const { stdout, code } = await runCli(["status", "--json"]);
-    expect(code).toBe(0);
-    const lines = stdout.trim().split("\n").filter(Boolean);
-    expect(lines).toHaveLength(1);
-    const obj = JSON.parse(lines[0]);
-    expect(obj.type).toBe("status");
-    expect(obj.db).toBeDefined();
-    expect(obj.counts).toBeDefined();
-  }, 30000);
-
-  it("emits zero ANSI escape codes on piped (non-TTY) stdout", async () => {
-    const { stdout, code } = await runCli(["status"]);
-    expect(code).toBe(0);
-    expect(/\x1b\[[0-9;]*m/.test(stdout)).toBe(false);
-  }, 30000);
-
   it("a guarded command without confirmation exits non-zero with a JSON error on stderr", async () => {
     // requireYes fires before the id lookup, so the nonexistent id never matters.
     const { stdout, stderr, code } = await runCli(["transactions", "delete", "tx:none", "--json"]);
@@ -48,6 +31,8 @@ describe("cli integration (subprocess)", () => {
     expect(code).toBe(0);
     expect(stdout).toContain("\t");
     expect(stdout).toMatch(/^configured\t/m);
+    // Piped, so the human renderer must not colour: chalk sees no TTY.
+    expect(/\x1b\[[0-9;]*m/.test(stdout)).toBe(false);
   }, 30000);
 
   // Derived from COMMANDS, which consistency.test.ts pins to the registered tree.

@@ -49,7 +49,7 @@ export function createSandbox(prefix: string): Sandbox {
   };
   /**
    * Node warns on stderr when NO_COLOR and FORCE_COLOR are both set, corrupting
-   * the one-JSON-object-on-stderr contract subprocess tests assert — drop both
+   * the one-JSON-object-on-stderr contract subprocess tests assert; drop both
    * rather than inherit whatever the shell/CI exported.
    */
   delete env.FORCE_COLOR;
@@ -68,7 +68,7 @@ export function createSandbox(prefix: string): Sandbox {
 
 /** This file lives in fixtures/, so the repo root is one level up. */
 export const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-export const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
+const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
 export const distEntry = resolve(repoRoot, "dist", "cli", "index.js");
 
 export interface CliResult {
@@ -77,7 +77,7 @@ export interface CliResult {
   code: number;
 }
 
-export interface RunCliOpts {
+interface RunCliOpts {
   stdin?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -87,10 +87,10 @@ export type CliRunner = (args: string[], opts?: RunCliOpts) => Promise<CliResult
 
 /**
  * `"src"` transpiles the TypeScript entry on every spawn; `"dist"` runs the built
- * artifact a published install executes, and needs a prior build — the e2e
+ * artifact a published install executes, and needs a prior build; the e2e
  * suite's globalSetup owns that.
  */
-export type CliTarget = "src" | "dist";
+type CliTarget = "src" | "dist";
 
 const CLI_COMMAND: Record<CliTarget, { file: string; argv: string[] }> = {
   // Absolute entry path, so a caller can override cwd (e.g. an agent shell

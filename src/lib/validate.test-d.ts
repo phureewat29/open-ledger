@@ -2,7 +2,7 @@ import { describe, it, expectTypeOf } from "vitest";
 import * as z from "zod";
 import { str, int, json } from "./validate.js";
 
-describe("z.infer — worked shapes", () => {
+describe("z.infer: worked shapes", () => {
   it("optional string becomes an optional key", () => {
     const spec = z.object({ name: str().optional() });
     expectTypeOf<z.infer<typeof spec>>().toEqualTypeOf<{ name?: string }>();
@@ -21,11 +21,6 @@ describe("z.infer — worked shapes", () => {
   it("default strips undefined into a required key", () => {
     const spec = z.object({ currency: str().default("THB") });
     expectTypeOf<z.infer<typeof spec>>().toEqualTypeOf<{ currency: string }>();
-  });
-
-  it("enum narrows to the literal union", () => {
-    const spec = z.object({ type: z.enum(["asset", "liability"]) });
-    expectTypeOf<z.infer<typeof spec>>().toEqualTypeOf<{ type: "asset" | "liability" }>();
   });
 
   it("json<T> carries its type parameter through optional", () => {

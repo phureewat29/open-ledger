@@ -25,11 +25,7 @@ describe("normalizeMaskedAccountNumber", () => {
     expect(normalizeMaskedAccountNumber("••7652")).toBe("••7652");
     expect(normalizeMaskedAccountNumber(null)).toBeNull();
     expect(normalizeMaskedAccountNumber("••")).toBe("••");
-  });
-
-  it("stores the literal trailing digits (ending in 9483) for a masked-middle number", () => {
-    const normalized = normalizeMaskedAccountNumber("470686XXXXXX9483");
-    expect(normalized).not.toBeNull();
-    expect(normalized!.endsWith("9483")).toBe(true);
+    // A number that opens with digits has no prefix to keep, so it gets the default one.
+    expect(normalizeMaskedAccountNumber("470686XXXXXX9483")).toBe("••9483");
   });
 });

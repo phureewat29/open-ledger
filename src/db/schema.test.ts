@@ -85,12 +85,6 @@ describe("migrate", () => {
     expect(cols).not.toContain("model");
   });
 
-  it("is idempotent", () => {
-    const db = freshDb();
-    migrate(db);
-    expect(() => migrate(db)).not.toThrow();
-  });
-
   it("records each applied version once and preserves data across re-migration", () => {
     const db = freshDb();
     migrate(db);

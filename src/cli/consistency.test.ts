@@ -6,8 +6,8 @@ import type { Command } from "commander";
 import { buildProgram, COMMANDS } from "./program.js";
 
 /**
- * buildProgram() only builds the commander tree — no argv parsing, no action
- * run — so calling it here is side-effect free.
+ * buildProgram() only builds the commander tree: no argv parsing, no action
+ * run, so calling it here is side-effect free.
  */
 
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
@@ -122,14 +122,8 @@ function extractFlagTokens(span: string): string[] {
 }
 
 describe("docs consistency (no subprocesses)", () => {
-  it("program construction has no side effects (importing/building never touches argv)", () => {
-    /**
-     * A parsed-argv or action-run side effect at import time would throw or
-     * hang here (vitest has its own argv) — reaching this assertion is the proof.
-     */
-    expect(() => buildProgram()).not.toThrow();
-  });
-
+  // The program-reading tests below all construct the tree, so an import-time
+  // or construction side effect fails the file.
   it("top-level command names: program tree == README Commands section == SKILL.md spans == help-screen COMMANDS array", () => {
     const program = buildProgram();
     const fromProgram = new Set(topLevelNames(program));
@@ -156,7 +150,7 @@ describe("docs consistency (no subprocesses)", () => {
       const sub = firstSubToken(span);
       if (!sub) continue; // span targets the parent noun (e.g. `oled config --init`)
       const child = nounCmd.commands.find((c) => c.name() === sub);
-      if (!child) problems.push(`\`${span}\` — \`${sub}\` is not a subcommand of \`${noun}\``);
+      if (!child) problems.push(`\`${span}\`: \`${sub}\` is not a subcommand of \`${noun}\``);
     }
     expect(problems).toEqual([]);
   });
@@ -180,7 +174,7 @@ describe("docs consistency (no subprocesses)", () => {
         for (const flag of extractFlagTokens(span)) {
           if (globalFlags.has(flag)) continue;
           if (!realFlags.has(flag)) {
-            problems.push(`${label}: \`${span}\` — ${flag} is not an option on \`${target.name()}\``);
+            problems.push(`${label}: \`${span}\`: ${flag} is not an option on \`${target.name()}\``);
           }
         }
       }
@@ -192,16 +186,9 @@ describe("docs consistency (no subprocesses)", () => {
     expect(SKILL.length).toBeLessThan(20_000);
   });
 
+  // The frontmatter's own shape is pinned harder in src/setup/install.test.ts,
+  // which parses it and checks the exact name and a minimum description length.
   it("SKILL.md carries no references/ pointer", () => {
     expect(SKILL.includes("references/")).toBe(false);
-  });
-
-  it("SKILL.md frontmatter has name + description and no version key", () => {
-    const fm = SKILL.match(/^---\n([\s\S]*?)\n---/);
-    expect(fm).not.toBeNull();
-    const front = fm![1];
-    expect(/^name:/m.test(front)).toBe(true);
-    expect(/^description:/m.test(front)).toBe(true);
-    expect(/^version:/m.test(front)).toBe(false);
   });
 });

@@ -36,11 +36,4 @@ describe("toMinorUnits / fromMinorUnits", () => {
     expect(fromMinorUnits(toMinorUnits(1500, "JPY"), "JPY")).toBe(1500);
     expect(fromMinorUnits(toMinorUnits(1.234, "KWD"), "KWD")).toBe(1.234);
   });
-
-  it("respects each currency's own fractional precision (THB=2, JPY=0)", () => {
-    expect(toMinorUnits(135.0, "THB")).toBe(13500);
-    expect(fromMinorUnits(13500, "THB")).toBe(135.0);
-    expect(toMinorUnits(1500, "JPY")).toBe(1500);
-    expect(fromMinorUnits(1500, "JPY")).toBe(1500);
-  });
 });

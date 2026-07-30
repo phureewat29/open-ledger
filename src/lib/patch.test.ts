@@ -16,10 +16,7 @@ describe("buildPatch", () => {
   it("skips an absent field entirely", () => {
     const spec: Record<string, PatchField> = { due_day: {} };
     const result = buildPatch(spec, freshRow(), {});
-    expect(result.sets).toEqual([]);
-    expect(result.params).toEqual([]);
-    expect(result.before).toEqual({});
-    expect(result.after).toEqual({});
+    expect(result).toEqual({ sets: [], params: [], before: {}, after: {} });
   });
 
   it("lets an explicit null through and binds SQL null", () => {
@@ -52,18 +49,11 @@ describe("buildPatch", () => {
     expect(result.after.masked).toBe("••1111");
   });
 
-  it("returns all-empty pieces for an empty patch", () => {
-    const spec: Record<string, PatchField> = { due_day: {}, bank_name: {} };
-    const result = buildPatch(spec, freshRow(), {});
-    expect(result).toEqual({ sets: [], params: [], before: {}, after: {} });
-  });
-
   it("never puts undefined into params, even if a transform returns it", () => {
     const spec: Record<string, PatchField> = {
       due_day: { transform: () => undefined },
     };
     const result = buildPatch(spec, freshRow(), { due_day: 20 });
     expect(result.params).toEqual([null]);
-    expect(result.params.includes(undefined)).toBe(false);
   });
 });

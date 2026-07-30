@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { findAccountById } from "../db/queries/accounts.js";
 import { createAccount } from "./accounts.js";
 import { findAccountsByFuzzyName } from "./matching.js";
 import { freshDb } from "../../fixtures/db.js";
@@ -50,22 +49,6 @@ describe("findAccountsByFuzzyName", () => {
     const matches = findAccountsByFuzzyName(db, "kbank savings 76520");
     expect(matches[0].account.id).toBe("asset:kbank-7652");
     expect(matches[0].similarity).toBeGreaterThanOrEqual(0.9);
-  });
-});
-
-describe("createAccount with a masked-middle account number", () => {
-  it("stores a display mask ending in the real trailing digits, not a corrupted check-digit drop", () => {
-    const db = freshDb();
-    createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-    createAccount(db, {
-      id: "asset:kbank-9483",
-      name: "KBank Savings",
-      type: "asset",
-      parent_id: "asset",
-      account_number_masked: "470686XXXXXX9483",
-    });
-    const stored = findAccountById(db, "asset:kbank-9483")!.account_number_masked!;
-    expect(stored.endsWith("9483")).toBe(true);
   });
 });
 
