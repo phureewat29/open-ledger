@@ -35,7 +35,7 @@
     "test": "vitest run --typecheck --typecheck.tsconfig ./tsconfig.typecheck.json",
     "dev": "tsx src/cli/index.ts",
     "release": "tsx scripts/release.ts",
-    "integration": "npm run build && tsx scripts/integration.ts",
+    "integration": "vitest run -c vitest.e2e.config.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

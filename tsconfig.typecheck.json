@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "noEmit": true, "rootDir": "." },
-  "include": ["src/**/*", "fixtures/**/*"],
+  "include": ["src/**/*", "fixtures/**/*", "e2e/**/*"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }

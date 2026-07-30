@@ -70,6 +70,7 @@ export function createSandbox(prefix: string): Sandbox {
 /** This file lives in fixtures/, so the repo root is one level up. */
 export const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 export const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
+export const distEntry = resolve(repoRoot, "dist", "cli", "index.js");
 
 export interface CliResult {
   stdout: string;
@@ -86,18 +87,31 @@ export interface RunCliOpts {
 export type CliRunner = (args: string[], opts?: RunCliOpts) => Promise<CliResult>;
 
 /**
+ * `"src"` transpiles the TypeScript entry on every spawn; `"dist"` runs the built
+ * artifact a published install executes, and needs a prior build — the e2e
+ * suite's globalSetup owns that.
+ */
+export type CliTarget = "src" | "dist";
+
+const CLI_COMMAND: Record<CliTarget, { file: string; argv: string[] }> = {
+  // Absolute entry path, so a caller can override cwd (e.g. an agent shell
+  // elsewhere) without breaking tsx's entrypoint lookup.
+  src: { file: "npx", argv: ["tsx", cliEntry] },
+  dist: { file: process.execPath, argv: [distEntry] },
+};
+
+/**
  * Resolves with the exit code instead of rejecting, because every caller
  * asserts on it. Bound rather than passed per call: the sandbox only exists
  * from `beforeAll` onwards.
  */
-export function makeRunCli(sandbox: Sandbox): CliRunner {
+export function makeRunCli(sandbox: Sandbox, target: CliTarget = "src"): CliRunner {
+  const { file, argv } = CLI_COMMAND[target];
   return (args, opts = {}) =>
     new Promise((resolvePromise) => {
       const child = execFile(
-        "npx",
-        // Absolute script path, so a caller can override cwd (e.g. an agent shell
-        // elsewhere) without breaking tsx's entrypoint lookup.
-        ["tsx", cliEntry, ...args],
+        file,
+        [...argv, ...args],
         {
           cwd: opts.cwd ?? sandbox.root,
           env: opts.env ?? sandbox.env,
@@ -134,26 +148,4 @@ export function parseOne(stdout: string): any {
     throw new Error(`expected exactly 1 NDJSON line, got ${lines.length}: ${stdout.slice(0, 500)}`);
   }
   return JSON.parse(lines[0]);
-}
-
-/**
- * Runs `cleanup` once on exit and SIGINT/SIGTERM (re-raising 130/143
- * afterwards), so a killed script still removes its sandbox. Script callers
- * only — vitest's `afterAll` already suffices there.
- */
-export function registerProcessCleanup(cleanup: () => void): void {
-  let cleanedUp = false;
-  const cleanupOnce = (): void => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    cleanup();
-  };
-
-  process.on("exit", cleanupOnce);
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      cleanupOnce();
-      process.exit(signal === "SIGINT" ? 130 : 143);
-    });
-  }
 }
