@@ -62,7 +62,7 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
     const skill = skillMd();
     expect(skill).toContain("## Setup");
     expect(skill).toContain("node --version");
-    expect(skill).toContain("npm install -g @phureewat29/openledger");
+    expect(skill).toContain("npm install -g @aquartier/openledger");
   });
 });
 

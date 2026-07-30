@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@phureewat29/openledger"><img src="https://img.shields.io/npm/v/@phureewat29/openledger.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/@phureewat29/openledger"><img src="https://img.shields.io/npm/dt/@phureewat29/openledger.svg" alt="npm total downloads" /></a>
+  <a href="https://www.npmjs.com/package/@aquartier/openledger"><img src="https://img.shields.io/npm/v/@aquartier/openledger.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@aquartier/openledger"><img src="https://img.shields.io/npm/dt/@aquartier/openledger.svg" alt="npm total downloads" /></a>
 </p>
 
 <br />
@@ -41,7 +41,7 @@ The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host 
 1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
 
    ```bash
-   npm install -g @phureewat29/openledger
+   npm install -g @aquartier/openledger
    ```
 
 2. Paste into your AI chat:
@@ -58,7 +58,7 @@ Your AI walks you through the rest.
 ### Coding Agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, PI)
 
 ```bash
-npm install -g @phureewat29/openledger
+npm install -g @aquartier/openledger
 npx skills add phureewat29/openledger
 ```
 

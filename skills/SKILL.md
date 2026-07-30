@@ -11,7 +11,7 @@ Pass `--json` on every command. With a shell, run `oled` yourself, one command p
 
 ## Setup
 
-`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @phureewat29/openledger`. First run: `oled config --generate-key --json` unless `oled status --json` shows `"configured":true`. Statements go in the `dataDir` from `oled config show --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
+`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @aquartier/openledger`. First run: `oled config --generate-key --json` unless `oled status --json` shows `"configured":true`. Statements go in the `dataDir` from `oled config show --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
 
 ## Commands
 
