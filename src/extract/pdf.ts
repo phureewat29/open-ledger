@@ -43,7 +43,7 @@ export async function unlockPdf(bytes: Buffer, password: string): Promise<Unlock
     if (doc.authenticatePassword(password) === MUPDF_AUTH_FAILED) {
       return { ok: false, reason: "wrong_password" };
     }
-    const out = doc.saveToBuffer("decrypt");
+    const out = doc.saveToBuffer("encrypt=none");
     return { ok: true, decrypted: Buffer.from(out.asUint8Array()) };
   } finally {
     doc.destroy();
@@ -89,7 +89,7 @@ function probeOne(doc: Document, index: number): ProbedPage {
 }
 
 /**
- * Measures and extracts the text layer in the same pass — the text-layer route
+ * Measures and extracts the text layer in the same pass: the text-layer route
  * has nothing left to do afterwards, so no page is ever opened twice.
  */
 export async function probePdfPages(bytes: Buffer): Promise<Result<ProbedPage[]>> {
