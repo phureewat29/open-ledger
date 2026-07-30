@@ -21,8 +21,8 @@ import { recordQuestion } from "../db/queries/questions.js";
 import type { MerchantUpsertInput } from "../db/queries/merchants.js";
 
 /**
- * Ledger-design §5: both legs must share a currency (derived from the accounts,
- * never trusted from input); a cross-currency move needs a linked conversion pair.
+ * Both legs must share a currency (derived from the accounts, never trusted
+ * from input); a cross-currency move needs a linked conversion pair.
  */
 export const CURRENCY_MISMATCH_HINT =
   "add a linked conversion pair (one leg per currency, sharing a group)";
@@ -293,7 +293,7 @@ function resolveTransactionAccounts(
   return { debitId, creditId, hints };
 }
 
-/** Currency comes from the resolved accounts, never from input (ledger-design §5).
+/** Currency comes from the resolved accounts, never from input.
  *  A cross-currency pair is reported as a mismatch rather than merged. */
 function deriveTransactionCurrency(
   db: Database.Database,

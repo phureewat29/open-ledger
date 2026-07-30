@@ -311,9 +311,10 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   if (!credit) fail("NOT_FOUND", `account "${raw.credit_account_id}" not found`, { hint: accountHint });
 
   /**
-   * Ledger-design §5 currency rule, applied inline: this strict path requires
-   * both accounts to pre-exist and raises no questions, so it can't delegate to
-   * commitTransaction's currency_mismatch path — only CURRENCY_MISMATCH_HINT is shared.
+   * The same both-legs-one-currency rule commitTransaction enforces, applied
+   * inline: this strict path requires both accounts to pre-exist and raises no
+   * questions, so it can't delegate to commitTransaction's currency_mismatch
+   * path — only CURRENCY_MISMATCH_HINT is shared.
    */
   const currency = debit.currency || getDisplayCurrency();
   const creditCurrency = credit.currency || getDisplayCurrency();
