@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { config } from "../config.js";
 import {
+  formatAmount,
   formatCurrencyAmount,
   getDisplayCurrency,
   getDisplayLocale,
@@ -34,5 +35,18 @@ describe("currency helpers", () => {
     const formatted = formatCurrencyAmount(1234.5, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     expect(formatted).toMatch(/1,234\.50/);
     expect(formatted).toMatch(/฿|THB/);
+  });
+
+  it("keeps the sign: negative amounts render negative", () => {
+    config.displayLocale = "th-TH";
+    config.displayCurrency = "THB";
+    expect(formatAmount(-150)).toMatch(/-[^\d]*150/);
+  });
+
+  it("uses each currency's own fraction digits, not a hardcoded two", () => {
+    config.displayLocale = "en-US";
+    expect(formatAmount(1500, "JPY")).not.toMatch(/1,500\.0/);
+    expect(formatAmount(1.234, "KWD")).toMatch(/1\.234/);
+    expect(formatAmount(135, "THB")).toMatch(/135\.00/);
   });
 });

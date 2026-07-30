@@ -12,6 +12,10 @@ export function getDisplayCurrency(): string {
   return config.displayCurrency;
 }
 
+/**
+ * Signed, with each currency's own fraction digits (Intl knows the exponents:
+ * THB 2, JPY 0, KWD 3). Callers may still pin digits explicitly.
+ */
 export function formatCurrencyAmount(
   amount: number,
   options: {
@@ -28,13 +32,9 @@ export function formatCurrencyAmount(
     currency,
     minimumFractionDigits: options.minimumFractionDigits,
     maximumFractionDigits: options.maximumFractionDigits,
-  }).format(Math.abs(amount));
+  }).format(amount);
 }
 
 export function formatAmount(amount: number, currency?: string): string {
-  return formatCurrencyAmount(amount, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    currency,
-  });
+  return formatCurrencyAmount(amount, { currency });
 }
