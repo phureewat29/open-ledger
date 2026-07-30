@@ -3,6 +3,7 @@ import { accountExists } from "./accounts.js";
 import { upsertMerchant, type MerchantUpsertInput } from "./merchants.js";
 import { buildPatch, type PatchField } from "../../lib/patch.js";
 import { newGroupId, newTransactionId } from "../../lib/ids.js";
+import { clampLimit } from "../../lib/limit.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
 
 /**
@@ -64,7 +65,7 @@ interface TransactionDetail extends TransactionRow {
 
 export type ValidateTransactionResult = { ok: true } | { ok: false; reason: string };
 
-/** Amount must already be an integer in minor units — this layer never sees decimals. */
+/** Amount must already be an integer in minor units: this layer never sees decimals. */
 export function validateTransaction(input: TransactionInput): ValidateTransactionResult {
   if (!ISO_DATE_RE.test(input.date ?? "")) {
     return { ok: false, reason: "Transaction date must be an ISO date (YYYY-MM-DD)." };
@@ -110,7 +111,7 @@ function insertParams(id: string, merchantId: string | null, input: TransactionI
 }
 
 /**
- * Validates, then `INSERT ... ON CONFLICT(id) DO NOTHING` — re-inserting the
+ * Validates, then `INSERT ... ON CONFLICT(id) DO NOTHING`: re-inserting the
  * same derived id is a no-op. `duplicate` is true when the row already existed.
  */
 export function insertTransaction(
@@ -251,9 +252,8 @@ function buildListWhere(opts: ListFilters): { whereSql: string; params: any[] } 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 500;
 
-/** Shared with the CLI summary so the reported cap matches the rows returned. */
 export function clampListLimit(limit?: number): number {
-  return Math.min(Math.max(limit ?? DEFAULT_LIST_LIMIT, 1), MAX_LIST_LIMIT);
+  return clampLimit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
 }
 
 export function listTransactions(
@@ -385,8 +385,8 @@ export function bulkRecategorize(
 /**
  * The re-point step of `mergeAccounts` (src/accounts/accounts.ts). Rows that
  * would become a degenerate self-transaction (one side `fromId`, the other
- * already `toId`) are deleted FIRST — the debit<>credit CHECK forbids that state
- * even transiently — then the remainder is re-pointed. Does not touch the
+ * already `toId`) are deleted FIRST, since the debit<>credit CHECK forbids that
+ * state even transiently; then the remainder is re-pointed. Does not touch the
  * accounts table.
  */
 export function repointTransactions(

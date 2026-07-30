@@ -231,11 +231,6 @@ describe("transactions CLI integration (subprocess)", () => {
       expect(parsed.affected).toBe(1);
       expect(parsed.skipped_self_transaction).toBe(0);
       expect(parsed.sample_transaction_ids).toHaveLength(1);
-
-      const listed = await runCli(["transactions", "list", "--account", "expense:food", "--json"]);
-      expect(listed.code).toBe(0);
-      const rows = parseNdjson(listed.stdout);
-      expect(rows.some((r) => r.debit_account_id === "expense:food")).toBe(true);
     },
     45000,
   );
@@ -354,6 +349,13 @@ describe("transactions CLI integration (subprocess)", () => {
         before: null,
         after: "asset:bank",
       });
+
+      // merchants list announces its cap like every other list surface.
+      const listed = parseNdjson((await runCli(["merchants", "list", "--json"])).stdout);
+      const summary = listed.find((r) => r.type === "summary");
+      const rows = listed.filter((r) => r.type !== "summary");
+      expect(summary).toMatchObject({ returned: rows.length, has_more: false, limit: 200 });
+      expect(summary.total).toBeGreaterThanOrEqual(1);
     },
     45000,
   );

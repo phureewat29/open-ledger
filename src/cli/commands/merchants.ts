@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import {
   emitList,
   emitObject,
+  emitSummary,
   fail,
   mapNotFoundError,
   requireYes,
@@ -11,6 +12,8 @@ import {
 import { openDb } from "../db.js";
 import {
   listMerchants as queryMerchants,
+  clampMerchantsLimit,
+  countMerchants,
   findMerchantByAlias,
   findMerchantById,
   upsertMerchant as upsertMerchantRow,
@@ -23,7 +26,7 @@ import {
 import { findAccountById } from "../../db/queries/accounts.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
-import { parseInput, str, bool } from "../../lib/validate.js";
+import { parseInput, str, bool, int } from "../../lib/validate.js";
 
 // `canonical_name` is the only free-text field; ids and the default-account link are structured data left verbatim.
 const MERCHANT_REDACT_FIELDS = ["canonical_name"] as const;
@@ -39,10 +42,26 @@ interface ListMerchantsOpts {
   redact?: boolean;
 }
 
+const LIST_MERCHANTS_SPEC = z.object({
+  limit: int().optional(),
+});
+
 async function listMerchants(opts: ListMerchantsOpts): Promise<void> {
+  const parsed = parseInput(LIST_MERCHANTS_SPEC, opts as Record<string, unknown>);
   const db = await openDb();
-  const rows = applyRedaction(queryMerchants(db), !!opts.redact, MERCHANT_REDACT_FIELDS);
+  const rows = applyRedaction(
+    queryMerchants(db, { limit: parsed.limit }),
+    !!opts.redact,
+    MERCHANT_REDACT_FIELDS,
+  );
   emitList(rows, MERCHANT_COLUMNS);
+  const total = countMerchants(db);
+  emitSummary({
+    total,
+    returned: rows.length,
+    has_more: total > rows.length,
+    limit: clampMerchantsLimit(parsed.limit),
+  });
 }
 
 const RESOLVE_MERCHANT_SPEC = z.object({ descriptor: str() });
@@ -153,6 +172,7 @@ export function registerMerchants(program: Command): void {
   merchants
     .command("list")
     .description("List merchants")
+    .option("--limit <n>", "max rows (default 200, max 1000)")
     .option("--no-redact", "skip PII redaction (on by default)")
     .action(runAction(listMerchants));
 

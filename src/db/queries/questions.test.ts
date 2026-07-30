@@ -39,12 +39,12 @@ describe("questions table", () => {
     expect(countQuestions(db)).toBe(0);
   });
 
-  it("listQuestions scopes by batchId when supplied", () => {
+  it("listQuestions scopes by batch_id when supplied", () => {
     recordQuestion(db, { file_id: null, batch_id: "ib:a", account_id: "expense:food", kind: "uncategorized", prompt: "a" });
     recordQuestion(db, { file_id: null, batch_id: "ib:b", account_id: "expense:food", kind: "uncategorized", prompt: "b" });
     recordQuestion(db, { file_id: null, batch_id: null, account_id: "expense:food", kind: "uncategorized", prompt: "c" });
-    expect(listQuestions(db, { batchId: "ib:a" }).map(r => r.prompt)).toEqual(["a"]);
-    expect(listQuestions(db, { batchId: "ib:b" }).map(r => r.prompt)).toEqual(["b"]);
+    expect(listQuestions(db, { batch_id: "ib:a" }).map(r => r.prompt)).toEqual(["a"]);
+    expect(listQuestions(db, { batch_id: "ib:b" }).map(r => r.prompt)).toEqual(["b"]);
     expect(listQuestions(db).map(r => r.prompt).sort()).toEqual(["a", "b", "c"]);
   });
 

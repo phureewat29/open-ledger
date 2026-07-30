@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import type { QuestionRow } from "../../db/queries/questions.js";
-import { emitList, fail, runAction, type Column } from "../output.js";
+import { emitList, emitSummary, fail, runAction, type Column } from "../output.js";
 import { openDb } from "../db.js";
 import * as z from "zod";
 import { parseInput, str, int } from "../../lib/validate.js";
@@ -68,24 +68,37 @@ const DEFER_COLUMNS: Column<{ id: string; days: number }>[] = [
 ];
 
 interface ListQuestionsOpts {
-  batch?: string;
   includeDeferred?: boolean;
   redact?: boolean;
 }
 
+const LIST_QUESTIONS_SPEC = z.object({
+  batch: str().optional(),
+  limit: int().optional(),
+});
+
 async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
-  const { listQuestions: queryQuestions } = await import("../../db/queries/questions.js");
+  const parsed = parseInput(LIST_QUESTIONS_SPEC, opts as Record<string, unknown>);
+  const { listQuestions: queryQuestions, countQuestions, clampQuestionsLimit } = await import(
+    "../../db/queries/questions.js"
+  );
   const db = await openDb();
-  const rows = queryQuestions(db, {
-    batchId: opts.batch,
-    includeDeferred: !!opts.includeDeferred,
-  });
+  // One filter object for both queries, so `total` counts what the list filtered.
+  const filter = { batch_id: parsed.batch, includeDeferred: !!opts.includeDeferred };
+  const rows = queryQuestions(db, { ...filter, limit: parsed.limit });
   let listRows = rows.map(toListRow);
   if (opts.redact) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
     listRows = applyRedaction(listRows, true, QUESTION_REDACT_FIELDS);
   }
   emitList(listRows, LIST_COLUMNS);
+  const total = countQuestions(db, filter);
+  emitSummary({
+    total,
+    returned: listRows.length,
+    has_more: total > listRows.length,
+    limit: clampQuestionsLimit(parsed.limit),
+  });
 }
 
 const ANSWER_SPEC = z.object({
@@ -144,8 +157,13 @@ export function registerQuestions(program: Command): void {
     .command("list")
     .description("List questions")
     .option("--batch <id>", "filter by batch id")
+    .option("--limit <n>", "max rows (default 200, max 1000)")
     .option("--include-deferred", "include deferred questions")
     .option("--no-redact", "skip PII redaction (on by default)")
+    .addHelpText(
+      "after",
+      "\nThe summary row carries total/returned/has_more: raise --limit when has_more is true.",
+    )
     .action(runAction(listQuestions));
 
   questions

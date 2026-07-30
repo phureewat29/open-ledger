@@ -1,5 +1,6 @@
 import type Database from "libsql";
 import { randomUUID } from "crypto";
+import { clampLimit } from "../../lib/limit.js";
 
 export interface MerchantUpsertInput {
   canonical_name: string;
@@ -28,7 +29,7 @@ interface MerchantUpsertResult extends MerchantRow {
 /**
  * Strips store ids, terminal codes, city tags, and transaction-type words so
  * "STARBUCKS #1234 BKK CHARGE" and "Starbucks #5678 BANGKOK" both normalize
- * to "starbucks" — the form `merchant_aliases.normalized_pattern` indexes.
+ * to "starbucks": the form `merchant_aliases.normalized_pattern` indexes.
  */
 const NOISE_TOKENS = new Set([
   "bkk", "bangkok", "thailand", "th", "tha",
@@ -137,11 +138,18 @@ interface ListMerchantsOptions {
   limit?: number;
 }
 
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 1000;
+
+export function clampMerchantsLimit(limit?: number): number {
+  return clampLimit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+}
+
 export function listMerchants(
   db: Database.Database,
   opts: ListMerchantsOptions = {},
 ): (MerchantRow & { alias_count: number })[] {
-  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const limit = clampMerchantsLimit(opts.limit);
   return db.prepare(
     `SELECT m.id, m.canonical_name, m.default_account_id, m.created_at,
             (SELECT COUNT(*) FROM merchant_aliases ma WHERE ma.merchant_id = m.id) AS alias_count

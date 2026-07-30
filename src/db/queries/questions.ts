@@ -1,6 +1,7 @@
 import type Database from "libsql";
 import { randomUUID } from "crypto";
 import { parseJsonOrNull } from "../../lib/json.js";
+import { clampLimit } from "../../lib/limit.js";
 
 interface QuestionTarget {
   transaction_id?: string | null;
@@ -148,23 +149,31 @@ export function countQuestions(db: Database.Database, scope: CountQuestionsScope
   return row.n;
 }
 
+/** Snake_case like CountQuestionsScope, so one filter object can feed both. */
 interface ListQuestionsOptions {
   limit?: number;
-  batchId?: string;
+  batch_id?: string;
   includeDeferred?: boolean;
 }
 
 const ROW_COLUMNS =
   "id, batch_id, file_id, transaction_id, account_id, kind, prompt, options_json, context_json, deferred_until, created_at";
 
+const DEFAULT_LIST_LIMIT = 200;
+const MAX_LIST_LIMIT = 1000;
+
+export function clampQuestionsLimit(limit?: number): number {
+  return clampLimit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+}
+
 export function listQuestions(
   db: Database.Database,
   opts: ListQuestionsOptions = {},
 ): QuestionRow[] {
-  const capped = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const capped = clampQuestionsLimit(opts.limit);
   const conditions: string[] = [];
   const params: any[] = [];
-  if (opts.batchId) { conditions.push("batch_id = ?"); params.push(opts.batchId); }
+  if (opts.batch_id) { conditions.push("batch_id = ?"); params.push(opts.batch_id); }
   if (!opts.includeDeferred) conditions.push(ACTIVE_DEFERRED_CLAUSE);
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(capped);
