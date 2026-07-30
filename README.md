@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-    A harness that turns scattered financial statements into a private, deterministic ledger for AI.
+    A harness that turns scattered financial statements into a private, deterministic ledger for your AI.
 </p>
 
 <p align="center">
