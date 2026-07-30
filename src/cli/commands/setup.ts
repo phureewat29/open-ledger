@@ -24,6 +24,12 @@ async function setupSkill(opts: SetupOpts): Promise<void> {
     return;
   }
 
+  if (opts.global && opts.dir) {
+    fail("USAGE", "--global and --dir are mutually exclusive", {
+      hint: "pass --dir with the exact skills directory, or --global for ~/.agents/skills",
+    });
+  }
+
   const installOpts: InstallOptions = {
     global: opts.global,
     dir: opts.dir,

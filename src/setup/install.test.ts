@@ -68,7 +68,7 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
 
 // realpath needed: macOS tmpdir is a symlink (/var -> /private/var), which
 // process.cwd() canonicalizes but the raw tmp string does not.
-describe("installSkill — target resolution", () => {
+describe("installSkill: target resolution", () => {
   it("--dir D is the skills dir itself: the pack lands at D/openledger, nothing appended", () => {
     const dir = tmp("oled-install-dir-");
     try {
@@ -84,8 +84,7 @@ describe("installSkill — target resolution", () => {
     }
   });
 
-  // The reported bug: a caller naming its host's own skills dir used to get a
-  // second "skills" segment, landing the pack where nothing scans for it.
+  // A doubled segment would land the pack where no agent scans for it.
   it("--dir <host skills dir> does not append a second skills segment", () => {
     const base = tmp("oled-install-host-dir-");
     const dir = join(base, ".claude", "skills");
@@ -117,7 +116,7 @@ describe("installSkill — target resolution", () => {
 
 });
 
-describe("installSkill — version guard", () => {
+describe("installSkill: version guard", () => {
   it("is idempotent when re-installed at the same version", () => {
     const dir = tmp("oled-install-idem-");
     try {
@@ -180,7 +179,7 @@ describe("setup CLI (subprocess)", () => {
   );
 
   it(
-    "--dir installs the pack and reports it as JSON (kind 'dir')",
+    "--dir installs the pack and reports its path as JSON",
     async () => {
       const dir = tmp("oled-cli-install-");
       try {
@@ -189,6 +188,21 @@ describe("setup CLI (subprocess)", () => {
         const parsed = JSON.parse(res.stdout.trim());
         expect(parsed.installed[0]).toMatchObject({ path: join(dir, "openledger") });
         expect(existsSync(join(dir, "openledger", "SKILL.md"))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+
+  it(
+    "--global and --dir together is a usage error",
+    async () => {
+      const dir = tmp("oled-cli-install-conflict-");
+      try {
+        const res = await runCli(["setup", "--global", "--dir", dir, "--json"]);
+        expect(res.code).toBe(2); // EXIT.USAGE
+        expect(JSON.parse(res.stderr.trim()).error.code).toBe("E_USAGE");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
