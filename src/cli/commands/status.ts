@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { config, getConfigPath, getDataDir, keyFingerprint } from "../../config.js";
+import { config, getConfigPath, getDataDir } from "../../config.js";
 import { existsSync } from "fs";
 import { formatAmount } from "../currency.js";
 import { banner, visibleLength, ANSI_RE, formatInt } from "../format.js";
@@ -26,8 +26,6 @@ interface StatusReport {
   db: {
     path: string;
     reachable: boolean;
-    encrypted: boolean;
-    key_fingerprint: string | null;
     error: string | null;
   };
   counts: Counts | null;
@@ -36,10 +34,15 @@ interface StatusReport {
   net_worth: { assets: number; liabilities: number; net_worth: number } | null;
 }
 
+/** `status` never creates the ledger, so a missing db file is reported, not opened. */
+const NO_LEDGER = "no ledger yet";
+
 async function buildReport(): Promise<StatusReport> {
   const report: StatusReport = {
     type: "status",
-    configured: existsSync(getConfigPath()) || existsSync(config.dbPath),
+    // A converge has run, which is what `oled config --init` does; a db file on
+    // its own says nothing about configuration.
+    configured: existsSync(getConfigPath()),
     config_path: getConfigPath(),
     data_dir: getDataDir(),
     locale: config.displayLocale,
@@ -48,8 +51,6 @@ async function buildReport(): Promise<StatusReport> {
     db: {
       path: config.dbPath,
       reachable: false,
-      encrypted: !!config.dbEncryptionKey,
-      key_fingerprint: config.dbEncryptionKey ? keyFingerprint(config.dbEncryptionKey) : null,
       error: null,
     },
     counts: null,
@@ -57,6 +58,13 @@ async function buildReport(): Promise<StatusReport> {
     questions: null,
     net_worth: null,
   };
+
+  // Orienting must not create a ledger: openDb() would migrate an empty file
+  // into existence, so a missing db is reported instead of opened.
+  if (!existsSync(config.dbPath)) {
+    report.db.error = NO_LEDGER;
+    return report;
+  }
 
   // Deferred so non-db commands skip the libsql cost at startup.
   const { getNetWorth } = await import("../../accounts/balances.js");
@@ -124,8 +132,6 @@ function renderPlain(r: StatusReport): void {
     ["user_name", r.user_name],
     ["db_path", r.db.path],
     ["db_reachable", r.db.reachable],
-    ["db_encrypted", r.db.encrypted],
-    ["db_key_fingerprint", r.db.key_fingerprint ?? "not set"],
   ];
   if (r.db.error) lines.push(["db_error", r.db.error]);
   if (r.counts) {
@@ -185,16 +191,19 @@ function renderTty(r: StatusReport, color: boolean): void {
     ["Data dir", dim(r.data_dir)],
     [
       "Database",
-      r.db.reachable
-        ? `ready${r.db.encrypted ? dim(" (encrypted)") : ""}`
-        : dim(r.db.error ? `not ready — ${r.db.error}` : "not ready"),
+      r.db.reachable ? "ready" : dim(r.db.error ? `not ready — ${r.db.error}` : "not ready"),
     ],
-    ["Key", r.db.key_fingerprint ? dim(r.db.key_fingerprint) : dim("not set")],
   ]);
 
-  // status always exits 0, so an unreachable db needs a pointer to the surface
-  // that diagnoses it.
-  if (!r.db.reachable) process.stdout.write(dim("  run `oled doctor` for details") + "\n\n");
+  // status always exits 0, so an unreachable db needs a pointer to whatever
+  // resolves it: creating the ledger, or diagnosing one that will not open.
+  if (!r.db.reachable) {
+    const next =
+      r.db.error === NO_LEDGER
+        ? "run `oled config --init` to create one"
+        : "run `oled doctor` for details";
+    process.stdout.write(dim(`  ${next}`) + "\n\n");
+  }
 
   if (r.counts) {
     section("Ledger", [

@@ -26,17 +26,18 @@ You've tried many personal finance apps from the App Store. None of them fits wh
 
 AI fails when it has nowhere reliable to keep the numbers. OpenLedger gives it that place, a deterministic harness that holds every number in your own records.
 
-OpenLedger is a secure bookkeeping that serves as a harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
+OpenLedger is a secure bookkeeping harness for your AI. The data source is what you already receive which are monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping.
 
-Everything stays on your machine, the database is fully encrypted, and what the harness returns to your AI has PII redacted by default before it sends to AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
+Everything stays on your machine, and what the harness returns to your AI has PII redacted by default before it sends to AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
 
 By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is yours to reimagine, and everything you build reads from the same ledger, so you can keep adding without starting over.
 
 ## Use OpenLedger with your AI
 
-The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host gets the same bytes; `oled setup --print` prints them.
+The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md).
 
-### AI Chat Apps (ChatGPT, Claude, Gemini, Kimi)
+### AI Apps
+ChatGPT, Claude, Gemini
 
 1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
 
@@ -55,24 +56,25 @@ The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host 
 
 Your AI walks you through the rest.
 
-### Coding Agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, PI)
+### Coding Agents
+Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw
 
 ```bash
 npm install -g @aquartier/openledger
 npx skills add phureewat29/openledger
 ```
 
-Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read (use `--host claude` for Claude Code).
+Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read. Pass `--dir <path>` to name your agent's own skills directory instead, such as `--dir .claude/skills` for Claude Code.
 
-### Your own agent stack
-
-Every command speaks `--json` with typed exit codes, built to be scripted. `oled setup --dir <agent-home>` installs the skill anywhere. Two complete references ship in this repo: [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`, and [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
-
-With the skill installed, give your agent a real task:
+### Usecases
 
 1. Start with the statements you have waiting: *"Ingest my new statements."* It discovers new files, prepares and reads each one, commits the transactions it finds, and raises a question for anything it can't resolve on its own.
-2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through open questions, such as an unrecognized merchant or an ambiguous account match, one at a time.
-3. With the ledger current, ask for the payoff: *"What's my net worth, and where did most of my spending go last month?"* It reads the answer straight from the ledger.
+2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through questions discovered from the ingestion, such as an unrecognized merchant or an ambiguous account match.
+3. With the ledger current, ask for the payoff: *"What's my net worth, and where did most of my spending go last month?"* your AI will read the answer straight from the OpenLedger.
+
+There are two complete references ship in this repo: 
+- [`examples/corgi-claude`](./examples/corgi-claude) runs the statement-to-answers loop with `claude -p`
+- [`examples/corgi-eval`](./examples/corgi-eval) runs evals against any model and scores how well the harness fits.
 
 ## The Agent Workflow
 
@@ -93,7 +95,7 @@ Run `oled --help` (or `oled <noun> --help`) for the full flag reference. Grouped
 ```
 oled                # Status: config, database, ledger counts, net worth (default)
 oled doctor         # Diagnose the harness environment
-oled setup          # Install the skill for an agent CLI (--host <id> | --dir <path>)
+oled setup          # Install the skill for an agent CLI (--dir <path>)
 oled config         # Configuration
 
 oled ingest         # Ingest pipeline: list / prepare / commit / done / fail
@@ -113,9 +115,9 @@ oled open           # Open the data folder in file explorer
 
 ## Security & Privacy
 
-- All financial data stays on your machine, encrypted with AES-256 (libsql); default `~/.oled/db.sqlite`.
-- The config file (`~/.oled/config.json`) carries `0600` permissions. It holds two secrets at most, the database encryption key and the OCR endpoint API key; `config show` surfaces a fingerprint of each and `status` one of the database key, never the plaintext.
-- Statement passwords are never stored. The caller keeps them and passes one per run with `--password` — a command-line argument, so it shows up in shell history and process listings.
+- All financial data stays on your machine; default `~/.oled/db.sqlite`. Both it and the config file are written with `0600` permissions.
+- The config file (`~/.oled/config.json`) holds one secret at most, the OCR endpoint API key; `config show` surfaces a fingerprint of it, never the plaintext.
+- Statement passwords are never stored. The caller keeps them and passes one per run with `--password` - a command-line argument, so it shows up in shell history and process listings.
 - A decrypted statement stays in memory. Only what an agent has to read is written to `cache/`: the extracted text, or the page images.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
 - No telemetry, no analytics. OpenLedger makes no network calls of its own. The exception is opt-in and goes only to the OCR endpoint you configure: `ingest prepare` sends it the page images to read, and `doctor` asks it which models it serves.
@@ -126,9 +128,9 @@ OpenLedger stores everything in `~/.oled/`:
 
 ```
 ~/.oled/
-  config.json    # locale, currency, paths, database encryption key (0600 permissions)
+  config.json    # locale, currency, paths (0600 permissions)
   context.md     # persistent freeform context an agent can read (path shown as context_path in oled config show)
-  db.sqlite      # encrypted SQLite database
+  db.sqlite      # SQLite database (0600 permissions)
   data/          # drop your statements here, as PDFs or images (subfolders allowed)
   cache/         # extracted text and page images handed to an agent
 ```
@@ -143,10 +145,6 @@ See `.env.example` for the current list:
 # Optional. Relocates the entire ~/.oled directory. Individual
 # OLED_* overrides below still win for their own paths.
 OLED_DIR=
-
-# Optional. Passphrase used to encrypt the local SQLite database (AES-256).
-# `oled config --generate-key` generates one if left blank.
-OLED_DB_ENCRYPTION_KEY=
 
 # Optional. Default: ~/.oled/db.sqlite
 OLED_DB_PATH=

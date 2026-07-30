@@ -26,7 +26,6 @@ let runCli: CliRunner;
 let dbPath: string;
 
 beforeAll(() => {
-  // createSandbox blanks OLED_DB_ENCRYPTION_KEY, so this file can read the db directly with `libsql`.
   sandbox = createSandbox("oled-ingest-it-");
   runCli = makeRunCli(sandbox);
   dbPath = sandbox.dbPath;

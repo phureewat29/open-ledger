@@ -75,7 +75,7 @@ Steps, in order:
    `dist/cli/index.js`) and the isolation env described below.
 3. **place statement** — copies `fixtures/card-statement-2026-05.pdf` into the
    workspace's data directory.
-4. **install skill** — `oled setup --host claude` installs the skill pack
+4. **install skill** — `oled setup --dir .claude/skills` installs the skill pack
    where `claude` discovers it, and the run reports the path setup wrote.
 5. **doctor readiness gate** — `oled doctor --json` must report `ok: true`
    (the db opens, the schema is present, the PDF reader loads) before the run
@@ -136,9 +136,8 @@ first turn's prompt, the same way a user would.
 Every run builds a fresh, isolated workspace and redirects `HOME`/`USERPROFILE`,
 `OLED_DIR`, `OLED_DB_PATH`, `OLED_DATA_DIR`, and `OLED_CACHE_DIR` into it before
 doing anything else, so it never reads or writes your real `~/.oled` (if you have
-one). `OLED_DB_ENCRYPTION_KEY` and the three `OLED_OCR_*` variables are blanked
-too: the demo's database stays reproducible and no statement can be routed to an
-OCR endpoint you happen to have exported.
+one). The three `OLED_OCR_*` variables are blanked too, so no statement can be
+routed to an OCR endpoint you happen to have exported.
 
 The cache lives inside the agent's own working directory, so the documents it
 reads never sit outside the workspace it was handed. The run deletes the
@@ -159,10 +158,9 @@ checks, change anything else.
     through the `oled` CLI (npm package `@aquartier/openledger`). The runner
     creates a throwaway workspace directory and runs every oled command with
     HOME, USERPROFILE, OLED_DIR, OLED_DB_PATH, OLED_DATA_DIR and
-    OLED_CACHE_DIR redirected into it, and with OLED_DB_ENCRYPTION_KEY and
-    every OLED_OCR_* variable set to the empty string — a run must never
-    touch my real ~/.oled and never reach an OCR endpoint I happen to have
-    exported. Delete the workspace on exit (including Ctrl-C); add a
+    OLED_CACHE_DIR redirected into it, and with every OLED_OCR_* variable set
+    to the empty string — a run must never touch my real ~/.oled and never
+    reach an OCR endpoint I happen to have exported. Delete the workspace on exit (including Ctrl-C); add a
     --keep-workspace flag that skips deletion and prints the path.
 
 **2. A statement to work on**
@@ -178,8 +176,8 @@ checks, change anything else.
 
     Add an offline mode (--skip-agent) that proves the plumbing without
     calling any model, one PASS/FAIL line per check, exit non-zero on the
-    first failure: (a) `oled setup --host claude` (or --dir for another
-    agent CLI) installs the OpenLedger skill and reports where; (b) `oled
+    first failure: (a) `oled setup --dir .claude/skills` (or another agent
+    CLI's skills directory) installs the OpenLedger skill and reports where; (b) `oled
     doctor --json` reports ok: true; (c) `oled ingest list --json` finds the
     statement — the summary line's `new` count is at least 1; (d) `oled
     ingest prepare <path> --password <pw> --json` returns kind "text" with a

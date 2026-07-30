@@ -30,10 +30,9 @@ export interface SkillPack {
 const DIRS = ["home", "data", "cwd", "cache", "agent", "npm"] as const;
 
 /**
- * A blank encryption key means a plain db file: reproducible across runs. Every
- * OLED_* the harness reads is set here, blank included — an operator's exported
- * OCR endpoint would otherwise reroute a statement and change what the model was
- * measured on.
+ * Every OLED_* the harness reads is set here, blank included — an operator's
+ * exported OCR endpoint would otherwise reroute a statement and change what the
+ * model was measured on.
  */
 function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
   const bin = join(paths.npm, "bin");
@@ -46,7 +45,6 @@ function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
     OLED_DB_PATH: paths.dbPath,
     OLED_DATA_DIR: paths.data,
     OLED_CACHE_DIR: paths.cache,
-    OLED_DB_ENCRYPTION_KEY: "",
     OLED_OCR_BASE_URL: "",
     OLED_OCR_MODEL: "",
     OLED_OCR_API_KEY: "",
@@ -104,7 +102,7 @@ export async function installSkillPack(
     };
   }
 
-  const dir = join(workspace.agent, "skills", "openledger");
+  const dir = join(workspace.agent, "openledger");
   const pack = tryExecute(() => {
     const text = readFileSync(join(dir, "SKILL.md"), "utf8");
     return {

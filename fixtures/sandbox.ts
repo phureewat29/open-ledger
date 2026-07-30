@@ -40,7 +40,6 @@ export function createSandbox(prefix: string): Sandbox {
     OLED_DB_PATH: dbPath,
     OLED_DATA_DIR: dataDir,
     OLED_CACHE_DIR: cacheDir,
-    OLED_DB_ENCRYPTION_KEY: "",
     // Blanked so no test can reach a live OCR endpoint, and so a developer's own
     // model choice cannot leak in.
     OLED_OCR_BASE_URL: "",

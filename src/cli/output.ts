@@ -253,7 +253,6 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
 
 const NOT_READY_PATTERNS = [
   "failed to open database",
-  "wrong encryption key",
   "corrupt database",
   "not a database",
   "file is encrypted",
@@ -275,7 +274,7 @@ function toCliError(err: unknown): CliError {
   }
   if (isNotReadyError(err)) {
     return new CliError("NOT_READY", (err as Error).message, {
-      hint: "run `oled config --generate-key` to configure the harness",
+      hint: "run `oled config --init` to configure the harness",
     });
   }
   return new CliError("GENERIC", errorMessage(err));

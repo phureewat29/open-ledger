@@ -55,9 +55,9 @@ export function writeBinShim(paths: WorkspacePaths, repoRoot: string): void {
 }
 
 /**
- * Blank encryption key keeps the db reproducible; PATH is prefixed so `oled`
- * resolves to the shim. Every OLED_* the harness reads is set here, blank
- * included: an operator's exported OCR endpoint would otherwise reach the demo.
+ * PATH is prefixed so `oled` resolves to the shim. Every OLED_* the harness
+ * reads is set here, blank included: an operator's exported OCR endpoint would
+ * otherwise reach the demo.
  */
 export function buildEnv(paths: WorkspacePaths): NodeJS.ProcessEnv {
   return {
@@ -69,7 +69,6 @@ export function buildEnv(paths: WorkspacePaths): NodeJS.ProcessEnv {
     OLED_DB_PATH: paths.dbPath,
     OLED_DATA_DIR: paths.data,
     OLED_CACHE_DIR: paths.cache,
-    OLED_DB_ENCRYPTION_KEY: "",
     OLED_OCR_BASE_URL: "",
     OLED_OCR_MODEL: "",
     OLED_OCR_API_KEY: "",
@@ -164,13 +163,14 @@ export function runOpenLedger(
   return runCommand("oled", args, { cwd, env });
 }
 
-/** `--host claude` lands the pack at `<cwd>/.claude/skills/openledger`, where
- *  `claude` discovers it; the reported path is the one setup says it wrote. */
+/** `--dir .claude/skills` resolves against the run's cwd, landing the pack at
+ *  `<cwd>/.claude/skills/openledger`, where `claude` discovers it; the reported
+ *  path is the one setup says it wrote. */
 export async function installSkill(
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): Promise<StepResult> {
-  const res = await runOpenLedger(["setup", "--host", "claude", "--json"], env, cwd);
+  const res = await runOpenLedger(["setup", "--dir", ".claude/skills", "--json"], env, cwd);
   if (!res.ok) return exitStatus(res);
 
   const [payload] = parseNdjson(res.stdout);

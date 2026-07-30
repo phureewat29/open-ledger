@@ -23,7 +23,7 @@ import { registerOpen } from "./commands/open.js";
 export const COMMANDS = [
   { name: "status", desc: "Status: config, database, ledger counts, net worth (default)" },
   { name: "doctor", desc: "Diagnose the harness environment" },
-  { name: "setup", desc: "Install the skill for an agent CLI (--host <id> | --dir <path>)" },
+  { name: "setup", desc: "Install the skill for an agent CLI (--dir <path>)" },
   { name: "config", desc: "Configuration" },
   { name: "ingest", desc: "Ingest pipeline: list / prepare / commit / done / fail" },
   { name: "files", desc: "Browse ingested files (list / show / drop)" },

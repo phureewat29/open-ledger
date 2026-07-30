@@ -6,18 +6,13 @@ import {
   SkillPackVersionError,
   type InstallOptions,
 } from "../../setup/install.js";
-import { SKILL_HOSTS, findHost, DEFAULT_HOST } from "../../setup/hosts.js";
+import { DEFAULT_SKILLS_DIR } from "../../setup/locations.js";
 
 interface SetupOpts {
-  host?: string;
   global?: boolean;
   dir?: string;
   force?: boolean;
   print?: boolean;
-}
-
-function hostIds(): string {
-  return SKILL_HOSTS.map((h) => h.id).join(", ");
 }
 
 async function setupSkill(opts: SetupOpts): Promise<void> {
@@ -29,13 +24,7 @@ async function setupSkill(opts: SetupOpts): Promise<void> {
     return;
   }
 
-  const host = opts.host ?? DEFAULT_HOST;
-  if (!findHost(host)) {
-    fail("USAGE", `unknown --host ${host}`, { hint: `known hosts: ${hostIds()}` });
-  }
-
   const installOpts: InstallOptions = {
-    host,
     global: opts.global,
     dir: opts.dir,
     force: opts.force,
@@ -62,7 +51,7 @@ async function setupSkill(opts: SetupOpts): Promise<void> {
   if (mode.json) {
     emit({ installed: [target] });
   } else {
-    process.stdout.write(`${target.kind}\t${target.path}\t${target.version}\n`);
+    process.stdout.write(`${target.path}\t${target.version}\n`);
   }
 }
 
@@ -70,9 +59,8 @@ export function registerSetup(program: Command): void {
   program
     .command("setup")
     .description("Install the skill for an agent CLI")
-    .option("--host <id>", `target agent host: ${hostIds()}`, DEFAULT_HOST)
-    .option("--global", "install under the host's home skills dir instead of the cwd")
-    .option("--dir <path>", "override the install base directory")
+    .option("--global", `install under ~/${DEFAULT_SKILLS_DIR} instead of the cwd`)
+    .option("--dir <path>", "skills directory to install into; the pack lands at <path>/openledger")
     .option("--force", "overwrite an installed skill dir whose version differs")
     .option("--print", "print SKILL.md to stdout as raw markdown and exit (ignores --json)")
     .action(runAction(setupSkill));

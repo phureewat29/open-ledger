@@ -154,7 +154,7 @@ describe("docs consistency (no subprocesses)", () => {
       if (!nounCmd || nounCmd.commands.length === 0) continue;
 
       const sub = firstSubToken(span);
-      if (!sub) continue; // span targets the parent noun (e.g. `oled config --generate-key`)
+      if (!sub) continue; // span targets the parent noun (e.g. `oled config --init`)
       const child = nounCmd.commands.find((c) => c.name() === sub);
       if (!child) problems.push(`\`${span}\` — \`${sub}\` is not a subcommand of \`${noun}\``);
     }

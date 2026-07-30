@@ -3,12 +3,13 @@ import type Database from "libsql";
 import chalk from "chalk";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import { join, resolve } from "path";
 import { getConfigPath, getDataDir } from "../../config.js";
 import { listMissingTables } from "../../db/schema.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
-import { SKILL_HOSTS } from "../../setup/hosts.js";
+import { SKILL_DIRS, SKILL_PACK_DIR } from "../../setup/locations.js";
 import { EXIT, currentMode, emit, emitList, runAction, type Column } from "../output.js";
 import { errorMessage } from "../../lib/result.js";
 import { probeOcrEndpoint, resolveOcr } from "../../extract/ocr.js";
@@ -111,27 +112,27 @@ async function runChecks(): Promise<Check[]> {
 /** Informational only; never a HARD_CHECK. */
 function skillPackCheck(): Check {
   const name = "skill_pack";
-  const candidates: { host: string; scope: string; path: string }[] = [];
-  for (const host of SKILL_HOSTS) {
-    candidates.push({
-      host: host.id,
-      scope: "project",
-      path: join(resolve(process.cwd(), host.projectDir), "openledger", "VERSION"),
-    });
-  }
-  for (const host of SKILL_HOSTS) {
-    candidates.push({
-      host: host.id,
-      scope: "global",
-      path: join(host.globalDir(), "openledger", "VERSION"),
-    });
+  // Probes the conventional dirs, project scope before global. A pack installed
+  // somewhere else with `setup --dir` is not found, and reads as not installed.
+  const candidates: { dir: string; scope: string; path: string }[] = [];
+  for (const [scope, base] of [
+    ["project", process.cwd()],
+    ["global", homedir()],
+  ] as const) {
+    for (const dir of SKILL_DIRS) {
+      candidates.push({
+        dir,
+        scope,
+        path: join(resolve(base, dir), SKILL_PACK_DIR, "VERSION"),
+      });
+    }
   }
 
   const found = candidates.find((c) => existsSync(c.path));
   if (!found) return { name, ok: true, detail: "not installed" };
 
   const installed = readFileSync(found.path, "utf8").trim();
-  const where = `${found.host}, ${found.scope}`;
+  const where = `${found.dir}, ${found.scope}`;
   const cli = getVersion();
   if (installed !== cli) {
     return {

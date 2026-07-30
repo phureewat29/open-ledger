@@ -14,7 +14,6 @@ export interface OpenLedgerConfig {
   displayLocale: string;
   displayCurrency: string;
   dbPath: string;
-  dbEncryptionKey: string;
   dataDir: string;
   userName: string;
   ocrBaseUrl: string;
@@ -37,7 +36,6 @@ const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: 
   displayLocale: { default: "th-TH" },
   displayCurrency: { default: "THB" },
   dbPath: { envVar: "OLED_DB_PATH", default: resolve(OLED_DIR, "db.sqlite") },
-  dbEncryptionKey: { envVar: "OLED_DB_ENCRYPTION_KEY", default: "" },
   dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },
   userName: { default: "User" },
   ocrBaseUrl: { envVar: "OLED_OCR_BASE_URL", default: "" },
@@ -50,7 +48,7 @@ const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as readonly (keyof OpenLedgerConf
 
 /** Config fields whose value must never be echoed in plaintext; `config show`
  *  renders each as `{ set, fingerprint }` via `keyFingerprint()` instead. */
-export const CONFIG_SECRETS = ["dbEncryptionKey", "ocrApiKey"] as const;
+export const CONFIG_SECRETS = ["ocrApiKey"] as const;
 
 export function getOledDir(): string {
   return OLED_DIR;
@@ -69,8 +67,8 @@ export function getCacheDir(): string {
   return process.env.OLED_CACHE_DIR || resolve(OLED_DIR, "cache");
 }
 
-/** Non-reversible fingerprint (`sha256:` + first 8 hex) so `config`/`status`
- *  can prove a key is set without ever printing the passphrase. */
+/** Non-reversible fingerprint (`sha256:` + first 8 hex) so `config show` can
+ *  prove a secret is set without ever printing it. */
 export function keyFingerprint(key: string): string {
   return `sha256:${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 }

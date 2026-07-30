@@ -5,13 +5,13 @@ description: A local double-entry personal-finance harness driven through the `o
 
 # OpenLedger
 
-`oled` is a deterministic CLI over a local, encrypted, double-entry ledger; you supply the intelligence. The CLI is the manual: `oled --help` lists the commands and the output contract, `oled <noun> --help` gives each command's behavior, flow, and flags, and every error carries a code and a message, often a `hint`. When you do not understand something, ask the CLI: never invent flags, subcommands, or ids.
+`oled` is a deterministic CLI over a local, double-entry ledger; you supply the intelligence. The CLI is the manual: `oled --help` lists the commands and the output contract, `oled <noun> --help` gives each command's behavior, flow, and flags, and every error carries a code and a message, often a `hint`. When you do not understand something, ask the CLI: never invent flags, subcommands, or ids.
 
 Pass `--json` on every command. With a shell, run `oled` yourself, one command per call. Human is your terminal: send one command per message, wait for the pasted output; ask for uploads instead of reading files.
 
 ## Setup
 
-`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @aquartier/openledger`. First run: `oled config --generate-key --json` unless `oled status --json` shows `"configured":true`. Statements go in the `dataDir` from `oled config show --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
+`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @aquartier/openledger`. First run: `oled config --init --json` unless `oled status --json` shows `"configured":true`. Statements go in the `dataDir` from `oled config show --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
 
 ## Commands
 

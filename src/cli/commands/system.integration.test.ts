@@ -31,7 +31,7 @@ beforeAll(() => {
     JSON.stringify({ displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" }, null, 2) + "\n",
   );
 
-  // Create + migrate the shared (unencrypted) db once; tests below seed their own rows against it.
+  // Create + migrate the shared db once; tests below seed their own rows against it.
   const raw = new Database(dbPath);
   raw.pragma("foreign_keys = ON");
   migrate(raw);
@@ -44,7 +44,7 @@ afterAll(() => {
 
 describe("system CLI integration (subprocess)", () => {
   it(
-    "config --generate-key on a fresh env: config show reflects it redacted, never plaintext",
+    "config --init on a fresh env creates the db and data dir, and config show reflects them",
     async () => {
       const isolated = createSandbox("oled-system-setup-it-");
       try {
@@ -54,11 +54,11 @@ describe("system CLI integration (subprocess)", () => {
         const setup = await runCli(
           [
             "config",
+            "--init",
             "--data-dir",
             setupDataDir,
             "--db",
             setupDbPath,
-            "--generate-key",
             "--user-name",
             "Fresh User",
             "--currency",
@@ -71,21 +71,16 @@ describe("system CLI integration (subprocess)", () => {
         );
         expect(setup.code).toBe(0);
         const setupResult = parseOne(setup.stdout);
-        expect(setupResult.dbEncryptionKey).toMatchObject({ set: true });
-        expect(setupResult.dbEncryptionKey.fingerprint).toMatch(/^sha256:[0-9a-f]{8}$/);
         expect(setupResult.created).toMatchObject({ db: setupDbPath, data_dir: setupDataDir });
-        expect(/[0-9a-f]{64}/i.test(setup.stdout)).toBe(false);
 
         const show = await runCli(["config", "show", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(show.code).toBe(0);
         const cfg = parseOne(show.stdout);
-        expect(cfg.dbEncryptionKey).toMatchObject({
-          set: true,
-          fingerprint: setupResult.dbEncryptionKey.fingerprint,
-        });
         expect(cfg.dataDir).toBe(setupDataDir);
         expect(cfg.dbPath).toBe(setupDbPath);
-        expect(/[0-9a-f]{64}/i.test(show.stdout)).toBe(false);
+        // No database key of any kind reaches the config; absence is the contract.
+        expect(setupResult).not.toHaveProperty("dbEncryptionKey");
+        expect(cfg).not.toHaveProperty("dbEncryptionKey");
       } finally {
         isolated.cleanup();
       }
@@ -94,73 +89,19 @@ describe("system CLI integration (subprocess)", () => {
   );
 
   it(
-    "config --generate-key re-run keeps the live key instead of orphaning the encrypted db",
+    "config rejects an unknown --country with USAGE and names the ones it has",
     async () => {
-      const isolated = createSandbox("oled-system-rekey-it-");
+      const isolated = createSandbox("oled-system-country-it-");
       try {
-        const first = await runCli(
-          ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--generate-key", "--json"],
-          { env: isolated.env, cwd: isolated.root },
-        );
-        expect(first.code).toBe(0);
-        const fingerprint = parseOne(first.stdout).dbEncryptionKey.fingerprint;
-
-        const second = await runCli(["config", "--generate-key", "--json"], {
+        const res = await runCli(["config", "--country", "bogus", "--json"], {
           env: isolated.env,
           cwd: isolated.root,
         });
-        expect(second.code).toBe(0);
-        expect(parseOne(second.stdout).dbEncryptionKey).toMatchObject({ set: true, fingerprint });
-      } finally {
-        isolated.cleanup();
-      }
-    },
-    30000,
-  );
-
-  it(
-    "config --encryption-key imports a caller-held key on a fresh env, redacted in output",
-    async () => {
-      const isolated = createSandbox("oled-system-import-key-it-");
-      try {
-        const key = "0123456789abcdef".repeat(4);
-        const setup = await runCli(
-          ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--encryption-key", key, "--json"],
-          { env: isolated.env, cwd: isolated.root },
-        );
-        expect(setup.code).toBe(0);
-        const result = parseOne(setup.stdout);
-        expect(result.dbEncryptionKey).toMatchObject({ set: true });
-        expect(result.dbEncryptionKey.fingerprint).toMatch(/^sha256:[0-9a-f]{8}$/);
-        expect(/[0-9a-f]{64}/i.test(setup.stdout)).toBe(false);
-      } finally {
-        isolated.cleanup();
-      }
-    },
-    30000,
-  );
-
-  it(
-    "config rejects --generate-key with --encryption-key, and a non-hex key (USAGE)",
-    async () => {
-      const isolated = createSandbox("oled-system-key-usage-it-");
-      try {
-        const key = "0123456789abcdef".repeat(4);
-        const both = await runCli(["config", "--generate-key", "--encryption-key", key, "--json"], {
-          env: isolated.env,
-          cwd: isolated.root,
-        });
-        expect(both.code).toBe(2);
-        expect(JSON.parse(both.stderr.trim()).error.code).toBe("E_USAGE");
-
-        const short = await runCli(["config", "--encryption-key", "hunter2", "--json"], {
-          env: isolated.env,
-          cwd: isolated.root,
-        });
-        expect(short.code).toBe(2);
-        const err = JSON.parse(short.stderr.trim());
+        expect(res.code).toBe(2);
+        const err = JSON.parse(res.stderr.trim());
         expect(err.error.code).toBe("E_USAGE");
-        expect(err.error.message).toContain("64 hex");
+        expect(err.error.message).toContain("bogus");
+        expect(err.error.hint).toContain("TH");
       } finally {
         isolated.cleanup();
       }
@@ -169,37 +110,32 @@ describe("system CLI integration (subprocess)", () => {
   );
 
   it(
-    "config --generate-key refuses to key an existing keyless db (INVALID) and leaves it usable",
+    "status on a virgin env creates no ledger, and reports one after config --init",
     async () => {
-      const isolated = createSandbox("oled-system-plain-db-it-");
+      const isolated = createSandbox("oled-system-virgin-it-");
       try {
-        // Any db-touching command run with the sandbox's blank key creates a
-        // plain db first — the agent-bootstrap path the demo exercises.
-        const seed = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
-        expect(seed.code).toBe(0);
-
-        const rekey = await runCli(["config", "--generate-key", "--json"], {
-          env: isolated.env,
-          cwd: isolated.root,
-        });
-        expect(rekey.code).toBe(6);
-        const err = JSON.parse(rekey.stderr.trim());
-        expect(err.error.code).toBe("E_INVALID");
-        // The refusal must name the keyless case: there is no key to "change".
-        expect(err.error.message).toContain("encrypting it now");
-        expect(err.error.hint).toContain("--generate-key");
-
-        // Refused before saveConfig, so no key was ever written down: without
-        // this, the plain db would fail every later open with a wrong key.
+        const before = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
+        expect(before.code).toBe(0);
+        const blank = parseOne(before.stdout);
+        expect(blank.configured).toBe(false);
+        expect(blank.db.reachable).toBe(false);
+        // Orienting must not bring a ledger into existence — the trap this closes.
+        expect(existsSync(isolated.dbPath)).toBe(false);
         expect(existsSync(join(isolated.home, ".oled", "config.json"))).toBe(false);
 
-        // `configured` means a db is in place, not that the rekey succeeded.
-        const status = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
-        expect(status.code).toBe(0);
-        const report = parseOne(status.stdout);
-        expect(report.db.reachable).toBe(true);
-        expect(report.db.encrypted).toBe(false);
+        const init = await runCli(
+          ["config", "--init", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--json"],
+          { env: isolated.env, cwd: isolated.root },
+        );
+        expect(init.code).toBe(0);
+
+        const after = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
+        expect(after.code).toBe(0);
+        const report = parseOne(after.stdout);
         expect(report.configured).toBe(true);
+        expect(report.db.reachable).toBe(true);
+        expect(report.db).not.toHaveProperty("encrypted");
+        expect(report.db).not.toHaveProperty("key_fingerprint");
       } finally {
         isolated.cleanup();
       }

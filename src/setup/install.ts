@@ -1,23 +1,20 @@
 import { createRequire } from "module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import { join, resolve } from "path";
-import { findHost, DEFAULT_HOST } from "./hosts.js";
+import { DEFAULT_SKILLS_DIR, SKILL_PACK_DIR } from "./locations.js";
 
-/** Every host receives the checked-in skills/SKILL.md verbatim: no templating, no per-host wrapper. */
+/** Every target receives the checked-in skills/SKILL.md verbatim: no templating, no per-agent wrapper. */
 
 interface InstalledTarget {
-  /** The host id it landed under, or "dir" for an explicit --dir install. */
-  kind: string;
   path: string;
   version: string;
 }
 
 export interface InstallOptions {
-  /** Target host id; defaults to DEFAULT_HOST. */
-  host?: string;
-  /** Install under the host's home skills dir rather than the cwd. */
+  /** Install under the home skills dir rather than the cwd. */
   global?: boolean;
-  /** Explicit base dir: the pack lands at <dir>/skills/openledger, ignoring the host. */
+  /** The skills directory to install into; the pack lands at <dir>/openledger. */
   dir?: string;
   /** Overwrite an installed skill dir whose VERSION differs. */
   force?: boolean;
@@ -54,16 +51,13 @@ export function skillMd(): string {
   return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
 }
 
-// --dir D is host-agnostic: resolve(D)/skills/openledger. Otherwise <cwd or
-// home>/<host skills dir>/openledger (the host dir already ends in skills).
-function resolveTarget(opts: InstallOptions): { kind: string; dir: string } {
-  if (opts.dir) {
-    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "openledger") };
-  }
-  const host = findHost(opts.host ?? DEFAULT_HOST);
-  if (!host) throw new Error(`unknown skill host: ${opts.host}`);
-  const base = opts.global ? host.globalDir() : resolve(process.cwd(), host.projectDir);
-  return { kind: host.id, dir: join(base, "openledger") };
+// One rule for every case: <skills dir>/openledger. --dir names that skills dir
+// outright; otherwise it is the default under the home dir or the cwd.
+function resolveTarget(opts: InstallOptions): string {
+  const base = opts.dir
+    ? resolve(opts.dir)
+    : resolve(opts.global ? homedir() : process.cwd(), DEFAULT_SKILLS_DIR);
+  return join(base, SKILL_PACK_DIR);
 }
 
 function readVersionFile(skillDir: string): string | null {
@@ -75,7 +69,7 @@ function readVersionFile(skillDir: string): string | null {
 /** Idempotent at the same version; throws SkillPackVersionError on a clash without --force. */
 export function installSkill(opts: InstallOptions = {}): InstalledTarget {
   const version = getVersion();
-  const { kind, dir } = resolveTarget(opts);
+  const dir = resolveTarget(opts);
 
   const existing = readVersionFile(dir);
   if (existing !== null && existing !== version && !opts.force) {
@@ -86,5 +80,5 @@ export function installSkill(opts: InstallOptions = {}): InstalledTarget {
   writeFileSync(join(dir, "SKILL.md"), skillMd());
   writeFileSync(join(dir, "VERSION"), version + "\n");
 
-  return { kind, path: dir, version };
+  return { path: dir, version };
 }

@@ -23,11 +23,8 @@ let groomingId = "";
 let manualDupId = "";
 
 /**
- * Its own sandbox, never shared with the read sweep: that sweep migrates a
- * plaintext db and `config --generate-key` refuses to key an existing one. The
- * sandbox blanks OLED_DB_ENCRYPTION_KEY, and an empty string is falsy, so the key
- * the first step writes into config.json is what every later command opens the db
- * with — this file is the only place the lifecycle runs against an encrypted db.
+ * Its own sandbox, never shared with the read sweep: this file mutates the
+ * ledger from the first step onwards, and the sweep must not see those rows.
  */
 beforeAll(() => {
   sandbox = createSandbox("oled-e2e-lifecycle-");
@@ -128,19 +125,17 @@ function lifecycleItems(): Record<string, unknown>[] {
   ];
 }
 
-describe("lifecycle against an encrypted ledger (dist subprocess)", () => {
+describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
-    "config --generate-key keys a fresh db and never prints the raw key",
+    "config --init bootstraps the config, data dir and db every later step reads",
     async () => {
-      // First in the file, and nothing above it may touch the db:
-      // --generate-key refuses to key a db that already exists.
       const res = await ok([
         "config",
+        "--init",
         "--data-dir",
         sandbox.dataDir,
         "--db",
         sandbox.dbPath,
-        "--generate-key",
         "--user-name",
         "Integration Tester",
         "--currency",
@@ -148,18 +143,24 @@ describe("lifecycle against an encrypted ledger (dist subprocess)", () => {
         "--locale",
         "th-TH",
       ]);
-      expect(parseOne(res.stdout).dbEncryptionKey).toMatchObject({ set: true });
-      expect(res.stdout, "raw 64-hex encryption key leaked onto stdout").not.toMatch(/[0-9a-f]{64}/i);
+      expect(parseOne(res.stdout).created).toMatchObject({
+        db: sandbox.dbPath,
+        data_dir: sandbox.dataDir,
+      });
     },
     20000,
   );
 
   it(
-    "config show reports the generated key as set",
+    "config show reads back what --init persisted",
     async () => {
-      // Reads the key the step above wrote.
       const cfg = parseOne((await ok(["config", "show"])).stdout);
-      expect(cfg.dbEncryptionKey).toMatchObject({ set: true });
+      expect(cfg).toMatchObject({
+        userName: "Integration Tester",
+        displayCurrency: "THB",
+        dbPath: sandbox.dbPath,
+      });
+      expect(cfg).not.toHaveProperty("dbEncryptionKey");
     },
     20000,
   );
@@ -481,9 +482,9 @@ describe("lifecycle against an encrypted ledger (dist subprocess)", () => {
     async () => {
       const skillBase = join(sandbox.root, "agent-skill");
       const result = parseOne((await ok(["setup", "--dir", skillBase])).stdout);
-      const skillDir = join(skillBase, "skills", "openledger");
+      const skillDir = join(skillBase, "openledger");
       expect(result.installed).toHaveLength(1);
-      expect(result.installed[0]).toMatchObject({ kind: "dir", path: skillDir });
+      expect(result.installed[0]).toMatchObject({ path: skillDir });
       expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
       expect(existsSync(join(skillDir, "VERSION"))).toBe(true);
     },
@@ -491,7 +492,7 @@ describe("lifecycle against an encrypted ledger (dist subprocess)", () => {
   );
 
   it(
-    "config --locale rewrites the display locale on the keyed config",
+    "config --locale rewrites the display locale",
     async () => {
       await ok(["config", "--locale", "en-US"]);
       expect(parseOne((await ok(["config", "show"])).stdout)).toMatchObject({

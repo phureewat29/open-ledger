@@ -45,9 +45,9 @@ const DISCLAIMER =
   "OpenLedger is a tool, it only summarizes financial statements — verify amounts against your statements before relying on them.";
 
 const SCENARIO = [
-  "Place financial statements in a folder; your AI posts each row to a local encrypted ledger.",
+  "Place financial statements in a folder; your AI posts each row to a local ledger.",
   "Ask for net worth, spending, subscriptions, or debt payoff. Answers always come from the ledger.",
-  "Every entry is double-entry and stays on your machine.",
+  "Every entry is double-entry and data stays safely on your machine.",
 ];
 
 const CONTRACT = [
@@ -77,16 +77,15 @@ export function helpScreen(
 
   const usageLines = [
     row("oled", "<command> [OPTIONS]"),
-    row("oled", "Show harness status (default)"),
   ];
 
   return [
     "",
     banner(),
     "",
-    section("Usage", usageLines),
+    section("About", SCENARIO),
     "",
-    section("What it does", SCENARIO),
+    section("Usage", usageLines),
     "",
     section("Commands", commands.map((c) => row(c.name, c.desc))),
     "",
@@ -95,5 +94,6 @@ export function helpScreen(
     section("Contract", CONTRACT),
     "",
     chalk.dim(DISCLAIMER),
+    "",
   ].join("\n");
 }

@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { existsSync, mkdirSync } from "fs";
+import { mkdirSync } from "fs";
 import { openDb } from "../db.js";
 import {
   config as appConfig,
@@ -11,7 +11,6 @@ import {
   type OpenLedgerConfig,
 } from "../../config.js";
 import { findCountryDefaults, availableCountries } from "../../datasets/defaults.js";
-import { generateKey } from "../../db/encryption.js";
 import { getContextPath } from "../../context.js";
 import { printKeyValues } from "../format.js";
 import { currentMode, emit, fail, runAction, type OutputMode } from "../output.js";
@@ -64,8 +63,7 @@ function printConfig(mode: OutputMode, data: Record<string, unknown>): void {
 const CONVERGE_FLAGS_SPEC = z.object({
   data_dir: str().optional(),
   db: str().optional(),
-  generate_key: bool().optional(),
-  encryption_key: str().optional(),
+  init: bool().optional(),
   locale: str().optional(),
   currency: str().optional(),
   user_name: str().optional(),
@@ -115,43 +113,8 @@ function resolveConvergedConfig(flags: ConvergeFlags): ConvergedConfig {
   };
 }
 
-/**
- * `undefined` means "leave the persisted key alone", which is also what
- * --generate-key means once a key exists: minting a new one over a live key
- * would orphan the encrypted db.
- */
-function resolveEncryptionKey(flags: ConvergeFlags): string | undefined {
-  if (flags.generate_key) return appConfig.dbEncryptionKey ? undefined : generateKey();
-  if (flags.encryption_key === undefined) return undefined;
-  // Same shape generateKey mints; anything else silently weakens the cipher.
-  if (!/^[0-9a-f]{64}$/i.test(flags.encryption_key)) {
-    fail("USAGE", "--encryption-key must be 64 hex characters", {
-      hint: "use --generate-key to mint one",
-    });
-  }
-  return flags.encryption_key;
-}
-
-/**
- * No re-encryption path exists, so refuse before saveConfig — a bad request
- * must leave both the config file and the database untouched.
- */
-function guardKeyChange(key: string | undefined, dbPath: string): void {
-  if (key === undefined || key === appConfig.dbEncryptionKey || !existsSync(dbPath)) return;
-  // A keyless db is the common case: any earlier command created it, so say so
-  // rather than talking about changing a key the caller never set.
-  const change = appConfig.dbEncryptionKey ? "changing its encryption key" : "encrypting it now";
-  fail("INVALID", `database ${dbPath} already exists; ${change} would make it unreadable`, {
-    hint: "drop --generate-key / --encryption-key to keep using this database, or move it aside (keep a backup) and re-run to start an encrypted one",
-  });
-}
-
-async function applyConvergedConfig(
-  converged: ConvergedConfig,
-  dbEncryptionKey: string | undefined,
-): Promise<void> {
+async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
   const patch: Partial<OpenLedgerConfig> = { ...converged };
-  if (dbEncryptionKey !== undefined) patch.dbEncryptionKey = dbEncryptionKey;
   saveConfig(patch);
 
   // openDb() runs the migration against the (freshly) configured db path.
@@ -173,16 +136,10 @@ async function applyConvergedConfig(
  * singleton, so converging with no new flags is a no-op.
  */
 async function convergeConfig(flags: ConvergeFlags): Promise<void> {
-  if (flags.generate_key && flags.encryption_key !== undefined) {
-    fail("USAGE", "--generate-key and --encryption-key are mutually exclusive");
-  }
-
   const converged = resolveConvergedConfig(flags);
   mkdirSync(converged.dataDir, { recursive: true });
 
-  const dbEncryptionKey = resolveEncryptionKey(flags);
-  guardKeyChange(dbEncryptionKey, converged.dbPath);
-  await applyConvergedConfig(converged, dbEncryptionKey);
+  await applyConvergedConfig(converged);
 
   printConfig(currentMode(), {
     ...redactConfig(appConfig),
@@ -210,8 +167,7 @@ export function registerConfig(program: Command): void {
     .description("Configuration")
     .option("--data-dir <dir>", "data directory")
     .option("--db <path>", "database path")
-    .option("--generate-key", "generate a new encryption key")
-    .option("--encryption-key <key>", "set the database encryption key")
+    .option("--init", "create the config file, database, and data directory")
     .option("--locale <locale>", "locale")
     .option("--currency <code>", "default currency code")
     .option("--country <code>", "seed locale/currency from a country's defaults (default: th)")
