@@ -116,14 +116,14 @@ function skillPackCheck(): Check {
     candidates.push({
       host: host.id,
       scope: "project",
-      path: join(resolve(process.cwd(), host.projectDir), "open-ledger", "VERSION"),
+      path: join(resolve(process.cwd(), host.projectDir), "openledger", "VERSION"),
     });
   }
   for (const host of SKILL_HOSTS) {
     candidates.push({
       host: host.id,
       scope: "global",
-      path: join(host.globalDir(), "open-ledger", "VERSION"),
+      path: join(host.globalDir(), "openledger", "VERSION"),
     });
   }
 
@@ -137,7 +137,7 @@ function skillPackCheck(): Check {
     return {
       name,
       ok: false,
-      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g @morroc/open-ledger@latest)`,
+      detail: `installed ${installed} (${where}), cli ${cli} — refresh the skill (oled setup --force) or upgrade the CLI (npm install -g @phureewat29/openledger@latest)`,
     };
   }
   return { name, ok: true, detail: `installed ${installed} (${where})` };

@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@morroc/open-ledger"><img src="https://img.shields.io/npm/v/@morroc/open-ledger.svg" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/@morroc/open-ledger"><img src="https://img.shields.io/npm/dt/@morroc/open-ledger.svg" alt="npm total downloads" /></a>
+  <a href="https://www.npmjs.com/package/@phureewat29/openledger"><img src="https://img.shields.io/npm/v/@phureewat29/openledger.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@phureewat29/openledger"><img src="https://img.shields.io/npm/dt/@phureewat29/openledger.svg" alt="npm total downloads" /></a>
 </p>
 
 <br />
@@ -41,13 +41,13 @@ The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md). Every host 
 1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
 
    ```bash
-   npm install -g @morroc/open-ledger
+   npm install -g @phureewat29/openledger
    ```
 
 2. Paste into your AI chat:
 
    ```
-   Fetch https://raw.githubusercontent.com/phureewat29/open-ledger/main/skills/SKILL.md
+   Fetch https://raw.githubusercontent.com/phureewat29/openledger/main/skills/SKILL.md
    and follow it. oled is installed; help me set up my ledger.
    ```
 
@@ -58,8 +58,8 @@ Your AI walks you through the rest.
 ### Coding Agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, PI)
 
 ```bash
-npm install -g @morroc/open-ledger
-npx skills add phureewat29/open-ledger
+npm install -g @phureewat29/openledger
+npx skills add phureewat29/openledger
 ```
 
 Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read (use `--host claude` for Claude Code).
@@ -176,8 +176,8 @@ OLED_OCR_API_KEY=
 ## Contributing
 
 ```bash
-git clone https://github.com/phureewat29/open-ledger
-cd open-ledger
+git clone https://github.com/phureewat29/openledger
+cd openledger
 npm install
 npm run build
 npm link # makes 'oled' available globally

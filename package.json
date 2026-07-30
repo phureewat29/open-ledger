@@ -1,5 +1,5 @@
 {
-  "name": "@morroc/open-ledger",
+  "name": "@phureewat29/openledger",
   "version": "0.14.3",
   "description": "OpenLedger — The Harness Layer for Personal Finance",
   "keywords": [
@@ -11,13 +11,13 @@
     "cli",
     "ai"
   ],
-  "homepage": "https://github.com/phureewat29/open-ledger#readme",
+  "homepage": "https://github.com/phureewat29/openledger#readme",
   "bugs": {
-    "url": "https://github.com/phureewat29/open-ledger/issues"
+    "url": "https://github.com/phureewat29/openledger/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phureewat29/open-ledger.git"
+    "url": "git+https://github.com/phureewat29/openledger.git"
   },
   "license": "Apache-2.0",
   "author": "Phureewat A",

@@ -159,7 +159,7 @@ export async function runDemo(
     return result.ok;
   };
 
-  const builtOk = await step("build open-ledger", async () => exitStatus(await buildOpenLedger(REPO_ROOT)));
+  const builtOk = await step("build OpenLedger", async () => exitStatus(await buildOpenLedger(REPO_ROOT)));
   if (!builtOk) return { pass: false, paths: null };
 
   // Creating the workspace and copying the fixture either work or throw; there

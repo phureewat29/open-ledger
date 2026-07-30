@@ -24,7 +24,7 @@ function checkStreamParser(problems: string[]): void {
     toolUse("Bash", { command: longCommand }),
     toolUse("Read", { file_path: "/ws/cwd/cache/sf_1/document.txt" }),
     toolUse("Write", { file_path: "/ws/cwd/batch.ndjson" }),
-    toolUse("Skill", { command: "open-ledger" }),
+    toolUse("Skill", { command: "openledger" }),
     assistantLine({ type: "text", text: "no tool here" }),
     JSON.stringify({ type: "stream_event", event: { type: "content_block_delta" } }),
     JSON.stringify({ type: "result", result: "final answer", duration_ms: 4200 }),
@@ -128,7 +128,7 @@ function checkPlainReporter(problems: string[]): void {
   const before = pendingTimers();
   const out = captureLog(() => {
     const reporter = makePlainReporter();
-    reporter.step("build open-ledger", true);
+    reporter.step("build OpenLedger", true);
     reporter.step("ingest prepare smoke", false, "exit 4: the PDF is locked and no password was given");
     reporter.turnStart(1, 1, "ingest my new statements");
     reporter.turnActivity("> oled ingest list --json");
@@ -143,7 +143,7 @@ function checkPlainReporter(problems: string[]): void {
   }
 
   const missing = [
-    "[ ok ] build open-ledger",
+    "[ ok ] build OpenLedger",
     "[fail] ingest prepare smoke  exit 4: the PDF is locked and no password was given",
     "turn 1/1: ingest my new statements",
     "> oled ingest list --json",

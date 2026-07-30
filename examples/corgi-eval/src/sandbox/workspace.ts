@@ -104,7 +104,7 @@ export async function installSkillPack(
     };
   }
 
-  const dir = join(workspace.agent, "skills", "open-ledger");
+  const dir = join(workspace.agent, "skills", "openledger");
   const pack = tryExecute(() => {
     const text = readFileSync(join(dir, "SKILL.md"), "utf8");
     return {

@@ -69,7 +69,7 @@ doesn't mean the demo has stalled.
 
 Steps, in order:
 
-1. **build open-ledger** — `npm run build` at the repo root.
+1. **build OpenLedger** — `npm run build` at the repo root.
 2. **create workspace** — a fresh, throwaway temp directory for this run,
    holding the `oled` bin shim (pointing at the freshly built
    `dist/cli/index.js`) and the isolation env described below.
@@ -156,7 +156,7 @@ checks, change anything else.
 **1. An isolated harness**
 
     Create a runner script for a demo where an agent works a bank statement
-    through the `oled` CLI (npm package `@morroc/open-ledger`). The runner
+    through the `oled` CLI (npm package `@phureewat29/openledger`). The runner
     creates a throwaway workspace directory and runs every oled command with
     HOME, USERPROFILE, OLED_DIR, OLED_DB_PATH, OLED_DATA_DIR and
     OLED_CACHE_DIR redirected into it, and with OLED_DB_ENCRYPTION_KEY and

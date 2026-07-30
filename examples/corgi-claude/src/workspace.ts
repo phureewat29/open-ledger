@@ -164,7 +164,7 @@ export function runOpenLedger(
   return runCommand("oled", args, { cwd, env });
 }
 
-/** `--host claude` lands the pack at `<cwd>/.claude/skills/open-ledger`, where
+/** `--host claude` lands the pack at `<cwd>/.claude/skills/openledger`, where
  *  `claude` discovers it; the reported path is the one setup says it wrote. */
 export async function installSkill(
   env: NodeJS.ProcessEnv,

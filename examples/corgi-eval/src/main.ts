@@ -102,7 +102,7 @@ async function prepare(
   register(workspace);
 
   const installed = await step(
-    "pack and install open-ledger",
+    "pack and install OpenLedger",
     () =>
       installPackedCli({ repoRoot: REPO_ROOT, tarballDir: workspace.root, prefix: workspace.npm }),
     (cli) => `${cli.version}, ${cli.fileCount} files`,

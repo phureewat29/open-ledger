@@ -17,7 +17,7 @@ export interface InstallOptions {
   host?: string;
   /** Install under the host's home skills dir rather than the cwd. */
   global?: boolean;
-  /** Explicit base dir: the pack lands at <dir>/skills/open-ledger, ignoring the host. */
+  /** Explicit base dir: the pack lands at <dir>/skills/openledger, ignoring the host. */
   dir?: string;
   /** Overwrite an installed skill dir whose VERSION differs. */
   force?: boolean;
@@ -54,16 +54,16 @@ export function skillMd(): string {
   return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
 }
 
-// --dir D is host-agnostic: resolve(D)/skills/open-ledger. Otherwise <cwd or
-// home>/<host skills dir>/open-ledger (the host dir already ends in skills).
+// --dir D is host-agnostic: resolve(D)/skills/openledger. Otherwise <cwd or
+// home>/<host skills dir>/openledger (the host dir already ends in skills).
 function resolveTarget(opts: InstallOptions): { kind: string; dir: string } {
   if (opts.dir) {
-    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "open-ledger") };
+    return { kind: "dir", dir: join(resolve(opts.dir), "skills", "openledger") };
   }
   const host = findHost(opts.host ?? DEFAULT_HOST);
   if (!host) throw new Error(`unknown skill host: ${opts.host}`);
   const base = opts.global ? host.globalDir() : resolve(process.cwd(), host.projectDir);
-  return { kind: host.id, dir: join(base, "open-ledger") };
+  return { kind: host.id, dir: join(base, "openledger") };
 }
 
 function readVersionFile(skillDir: string): string | null {

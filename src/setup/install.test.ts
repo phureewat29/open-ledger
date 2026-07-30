@@ -38,7 +38,7 @@ function parseFrontmatter(md: string): Record<string, string> {
 describe("skillMd (checked-in skills/SKILL.md)", () => {
   it("carries name/description frontmatter and no version key", () => {
     const fm = parseFrontmatter(skillMd());
-    expect(fm.name).toBe("open-ledger");
+    expect(fm.name).toBe("openledger");
     expect(fm.description.length).toBeGreaterThan(20);
     expect(fm.version).toBeUndefined();
   });
@@ -62,16 +62,16 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
     const skill = skillMd();
     expect(skill).toContain("## Setup");
     expect(skill).toContain("node --version");
-    expect(skill).toContain("npm install -g @morroc/open-ledger");
+    expect(skill).toContain("npm install -g @phureewat29/openledger");
   });
 });
 
 // realpath needed: macOS tmpdir is a symlink (/var -> /private/var), which
 // process.cwd() canonicalizes but the raw tmp string does not.
 const HOST_PROJECT_DIRS: { host: string; rel: string[] }[] = [
-  { host: "agents", rel: [".agents", "skills", "open-ledger"] },
-  { host: "claude", rel: [".claude", "skills", "open-ledger"] },
-  { host: "kimi", rel: [".skills", "open-ledger"] },
+  { host: "agents", rel: [".agents", "skills", "openledger"] },
+  { host: "claude", rel: [".claude", "skills", "openledger"] },
+  { host: "kimi", rel: [".skills", "openledger"] },
 ];
 
 describe("SKILL_HOSTS registry", () => {
@@ -101,7 +101,7 @@ describe("installSkill — host project dirs (cwd)", () => {
         expect(existsSync(join(target.path, "SKILL.md"))).toBe(true);
         expect(readFileSync(join(target.path, "VERSION"), "utf8").trim()).toBe(getVersion());
         const fm = parseFrontmatter(readFileSync(join(target.path, "SKILL.md"), "utf8"));
-        expect(fm.name).toBe("open-ledger");
+        expect(fm.name).toBe("openledger");
       } finally {
         process.chdir(prevCwd);
         rmSync(cwd, { recursive: true, force: true });
@@ -117,7 +117,7 @@ describe("installSkill — host project dirs (cwd)", () => {
       const target = installSkill({});
       expect(target.kind).toBe("agents");
       expect(realpathSync(target.path)).toBe(
-        realpathSync(join(cwd, ".agents", "skills", "open-ledger")),
+        realpathSync(join(cwd, ".agents", "skills", "openledger")),
       );
       expect(existsSync(join(target.path, "SKILL.md"))).toBe(true);
     } finally {
@@ -128,11 +128,11 @@ describe("installSkill — host project dirs (cwd)", () => {
 });
 
 describe("installSkill — --dir base and version guard", () => {
-  it("--dir D lands the pack at D/skills/open-ledger with kind 'dir'", () => {
+  it("--dir D lands the pack at D/skills/openledger with kind 'dir'", () => {
     const dir = tmp("oled-install-dir-");
     try {
       const target = installSkill({ dir });
-      const skillDir = join(dir, "skills", "open-ledger");
+      const skillDir = join(dir, "skills", "openledger");
       expect(target).toMatchObject({ kind: "dir", path: skillDir, version: getVersion() });
       expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
       expect(readFileSync(join(skillDir, "VERSION"), "utf8").trim()).toBe(getVersion());
@@ -146,7 +146,7 @@ describe("installSkill — --dir base and version guard", () => {
     try {
       installSkill({ dir });
       expect(() => installSkill({ dir })).not.toThrow();
-      expect(readFileSync(join(dir, "skills", "open-ledger", "VERSION"), "utf8").trim()).toBe(
+      expect(readFileSync(join(dir, "skills", "openledger", "VERSION"), "utf8").trim()).toBe(
         getVersion(),
       );
     } finally {
@@ -158,7 +158,7 @@ describe("installSkill — --dir base and version guard", () => {
     const dir = tmp("oled-install-clash-");
     try {
       installSkill({ dir });
-      const versionPath = join(dir, "skills", "open-ledger", "VERSION");
+      const versionPath = join(dir, "skills", "openledger", "VERSION");
       writeFileSync(versionPath, "0.0.1\n");
 
       let err: unknown;
@@ -199,7 +199,7 @@ describe("setup CLI (subprocess)", () => {
       expect(res.code).toBe(0);
       expect(res.stdout.startsWith("---\n")).toBe(true);
       const fm = parseFrontmatter(res.stdout);
-      expect(fm.name).toBe("open-ledger");
+      expect(fm.name).toBe("openledger");
     },
     30000,
   );
@@ -214,9 +214,9 @@ describe("setup CLI (subprocess)", () => {
         const parsed = JSON.parse(res.stdout.trim());
         expect(parsed.installed[0]).toMatchObject({
           kind: "dir",
-          path: join(dir, "skills", "open-ledger"),
+          path: join(dir, "skills", "openledger"),
         });
-        expect(existsSync(join(dir, "skills", "open-ledger", "SKILL.md"))).toBe(true);
+        expect(existsSync(join(dir, "skills", "openledger", "SKILL.md"))).toBe(true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -230,7 +230,7 @@ describe("setup CLI (subprocess)", () => {
       const res = await runCli(["setup", "--global", "--json"]);
       expect(res.code).toBe(0);
       const parsed = JSON.parse(res.stdout.trim());
-      const expected = join(sandbox.home, ".agents", "skills", "open-ledger");
+      const expected = join(sandbox.home, ".agents", "skills", "openledger");
       expect(parsed.installed[0]).toMatchObject({ kind: "agents", path: expected });
       expect(existsSync(join(expected, "SKILL.md"))).toBe(true);
     },
