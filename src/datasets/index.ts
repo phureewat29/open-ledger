@@ -1,14 +1,15 @@
 import { loadDatasetRows, type DatasetDefinition, type DatasetRow } from "./loader.js";
 import { institutionsDataset } from "./institutions.js";
 import { defaultsDataset } from "./defaults.js";
+import { noiseDataset } from "./noise.js";
 
 /** A dataset with a typed finder of its own (`findCountryDefaults`) exports it from its own module instead. */
 
-// `any` here only erases the per-entry file shape (institutions vs defaults each
-// have their own concrete `DatasetDefinition<...>`), which the registry doesn't need.
+// `any` only erases each entry's own concrete `DatasetDefinition<...>` file shape, which the registry doesn't need.
 const REGISTRY: Record<string, DatasetDefinition<any>> = {
   institutions: institutionsDataset,
   defaults: defaultsDataset,
+  noise: noiseDataset,
 };
 
 export function listDatasetNames(): string[] {

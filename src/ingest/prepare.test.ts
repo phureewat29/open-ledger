@@ -209,7 +209,7 @@ describe("resolveEntryPath", () => {
     process.chdir(outsideDir);
     try {
       // Compare against process.cwd(), not the pre-chdir string: macOS tmpdir is a
-      // symlink, so chdir resolves it to its real path (/private/var/... vs /var/...).
+      // symlink that chdir resolves to its real path.
       expect(resolveEntryPath(db, "c.pdf")).toBe(resolve(process.cwd(), "c.pdf"));
     } finally {
       process.chdir(prevCwd);
@@ -436,18 +436,17 @@ describe("prepareFile: refusals", () => {
 describe("prepareFile: --force", () => {
   // A re-prepare needs something to lose.
   function commitRow(db: Database.Database, fileId: string): void {
-    createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
-    createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-    const merchant = upsertMerchant(db, { canonical_name: "Shop" });
+    createAccount(db, { id: "thb:expense", name: "Expenses (THB)", type: "expense", parent_id: null });
+    createAccount(db, { id: "thb:asset", name: "Assets (THB)", type: "asset", parent_id: null });
+    const merchant = upsertMerchant(db, { canonical_name: "Shop" }, []);
     insertTransaction(db, {
       date: "2026-05-01",
       description: "Shop",
       merchant_id: merchant.id,
       source_file_id: fileId,
-      debit_account_id: "expense",
-      credit_account_id: "asset",
+      debit_account_id: "thb:expense",
+      credit_account_id: "thb:asset",
       amount: 1000,
-      currency: "THB",
     });
     expect(countTransactionsBySourceFile(db, fileId)).toBe(1);
   }

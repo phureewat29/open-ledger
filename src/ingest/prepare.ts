@@ -68,10 +68,7 @@ function unreadableEntry(file: WalkedFile, note: string): IngestEntry {
   return { ...file, hash: null, fileId: null, status: "unreadable", encrypted: false, note };
 }
 
-/**
- * A file this harness can't read becomes an `unreadable` row, rather than
- * sinking the whole listing.
- */
+/** A file this harness can't read becomes an `unreadable` row, rather than sinking the listing. */
 export async function discoverFiles(
   db: Database.Database,
   opts: { regex?: RegExp } = {},
@@ -147,8 +144,8 @@ export function resolveEntryPath(db: Database.Database, entryOrId: string): stri
 
 interface PrepareOptions {
   password?: string;
-  /** Re-read the bytes and, once that succeeds, replace the prior row, dropping
-   *  its transactions, questions, and artifacts. */
+  /** Re-reads bytes, then replaces the prior row, dropping its transactions,
+   *  questions, and artifacts. */
   force?: boolean;
   /** Ignore the text layer, for garbled or junk layers. */
   rescan?: boolean;
@@ -352,8 +349,7 @@ export async function prepareFile(
   if (!loaded.ok) return { ok: false, reason: loaded.reason, message: loaded.message };
   const source = loaded.value;
 
-  // Every case but --force's swap (see replaceFileRow) registers now: a file
-  // that never opens still needs an id for `ingest fail`.
+  // Registers now (except --force's swap): a file that never opens still needs an id for `ingest fail`.
   const prior = opts.force ? findFileByHash(db, source.hash) : null;
   const fileId = prior ? newFileId() : registerPendingFile(db, source).fileId;
 

@@ -23,8 +23,7 @@ interface Check {
 const HARD_CHECKS = new Set(["db_open", "schema_tables_present"]);
 const REQUIRED_TABLES = ["accounts", "transactions", "questions"];
 
-/** Diagnosing must not provision: doctor reports what is missing and points at
- *  `config --init`, the same look-don't-create rule `status` follows. */
+// Diagnosing must not provision: doctor reports what's missing and points at `config --init`.
 const INIT_HINT = "run `oled config --init` to create it";
 
 function configCheck(): Check {
@@ -122,8 +121,7 @@ async function runChecks(): Promise<Check[]> {
 /** Informational only; never a HARD_CHECK. */
 function skillPackCheck(): Check {
   const name = "skill_pack";
-  // Probes the conventional dirs, project scope before global. A pack installed
-  // somewhere else with `setup --dir` is not found, and reads as not installed.
+  // Probes conventional dirs only; a pack installed via `setup --dir` elsewhere reads as not installed.
   const candidates: { dir: string; scope: string; path: string }[] = [];
   for (const [scope, base] of [
     ["project", process.cwd()],

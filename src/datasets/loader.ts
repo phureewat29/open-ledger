@@ -5,26 +5,18 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Generic loader for the shipped reference datasets: one `<cc>.json` per
- * country under `datasets/`, each holding every dataset's slice for that
- * country. Adding a country is a new file, not a code change; dataset-specific
- * shape lives in the per-dataset modules (institutions.ts, defaults.ts).
+ * country under `datasets/`. Adding a country is a new file, not a code
+ * change; dataset-specific shape lives in the per-dataset modules.
  */
 
-// Two levels below the package root either way (src/datasets/ under tsx, dist/datasets/
-// built); the uncompiled datasets/ dir is reached by the same relative walk in both.
+// Two levels below the package root under both tsx (src/datasets/) and the dist build.
 const DATASETS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../datasets");
 
 /** A flattened dataset row, always tagged with the (uppercased) country it loaded from. */
 export type DatasetRow = Record<string, unknown> & { country: string };
 
-/**
- * Describes one dataset for the generic loader. `schema` validates a whole
- * `<cc>.json` locale file, of which this dataset owns one slice; unknown
- * sibling keys are ignored, so each schema names only what it reads. `flatten`
- * turns the file into base rows (the loader adds `country`); a dataset absent
- * from a locale flattens to no rows. `sortKey` is the within-country tiebreak;
- * `kinds` lists the `kind` values a `--kind` filter may police.
- */
+// `flatten` returns base rows (the loader adds `country`); unknown sibling
+// keys in `<cc>.json` are ignored.
 export interface DatasetDefinition<F extends { country: string } = { country: string }> {
   schema: z.ZodType<F>;
   flatten: (file: F) => Record<string, unknown>[];
@@ -45,8 +37,7 @@ function readJson(file: string): unknown {
     parsedFiles.set(path, raw);
     return raw;
   } catch (err) {
-    // A shipped dataset file that won't parse is a packaging defect, not user
-    // input; surface it loudly rather than degrading to an empty registry.
+    // A shipped file that won't parse is a packaging defect; surface it loudly rather than degrading to an empty registry.
     throw new Error(`dataset file ${file} is not valid JSON: ${(err as Error).message}`);
   }
 }
@@ -79,10 +70,7 @@ function loadAll<F extends { country: string }>(def: DatasetDefinition<F>): Data
   return rows;
 }
 
-/**
- * Every row of a named dataset, sorted by country then the sort key. Returns
- * the shared memoized array: callers must copy before mutating it.
- */
+/** Every row of a named dataset, sorted by country then sort key. Returns the shared memoized array: callers must copy before mutating it. */
 export function loadDatasetRows<F extends { country: string }>(
   name: string,
   def: DatasetDefinition<F>,

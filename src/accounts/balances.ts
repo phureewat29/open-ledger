@@ -3,6 +3,7 @@ import {
   findAccountById,
   getAccountSubtree,
   type AccountRow,
+  type AccountType,
 } from "../db/queries/accounts.js";
 import {
   getAccountLegSums,
@@ -11,10 +12,10 @@ import {
   type AccountLegSumsOptions,
 } from "../db/queries/balances.js";
 import { insertTransaction } from "../db/queries/transactions.js";
-import { config } from "../config.js";
+import { currencyOf } from "../lib/ids.js";
 import { fromMinorUnits, toMinorUnits } from "../lib/money.js";
 import { todayIso, ISO_DATE_RE } from "../lib/date.js";
-import { ensureStructuralAccount } from "./accounts.js";
+import { ensureStructuralAccount, structuralAccountId } from "./accounts.js";
 
 export interface AccountBalanceMinor extends AccountRow {
   /** Minor units. */
@@ -25,30 +26,47 @@ export interface AccountBalanceMinor extends AccountRow {
   balance: number;
 }
 
+/** Per-currency integer minor units; never summed across keys. Decimals only
+ *  appear at the CLI boundary, through `toDecimalTotals`. */
+export type CurrencyTotals = Record<string, number>;
+
 interface NetWorth {
-  assets: number;
-  liabilities: number;
-  net_worth: number;
+  assets: CurrencyTotals;
+  liabilities: CurrencyTotals;
+  net_worth: CurrencyTotals;
 }
 
 interface PeriodTotals {
-  income: number;
-  expenses: number;
+  income: CurrencyTotals;
+  expenses: CurrencyTotals;
 }
 
-/**
- * Shared normal-balance rule: asset/expense are debit-normal, the rest
- * credit-normal. Leg sums are integer minor units; every decimal here comes
- * from the account's currency exponent (`fromMinorUnits`).
- */
+function addMinor(totals: CurrencyTotals, currency: string, minor: number): void {
+  totals[currency] = (totals[currency] ?? 0) + minor;
+}
+
+/** Per-currency `a - b` over the union of both key sets; nothing collapses across keys. */
+export function subtractTotals(a: CurrencyTotals, b: CurrencyTotals): CurrencyTotals {
+  const out: CurrencyTotals = {};
+  for (const [currency, minor] of Object.entries(a)) addMinor(out, currency, minor);
+  for (const [currency, minor] of Object.entries(b)) addMinor(out, currency, -minor);
+  return out;
+}
+
+/** Normal-balance rule: asset/expense are debit-normal, others credit-normal. */
+function balanceMinor(type: AccountType, sumDebit: number, sumCredit: number): number {
+  const debitNormal = type === "asset" || type === "expense";
+  return debitNormal ? sumDebit - sumCredit : sumCredit - sumDebit;
+}
+
+/** `balance` is the decimal of `balance_minor` under the account's own currency exponent. */
 export function getAccountBalances(
   db: Database.Database,
   opts: AccountLegSumsOptions = {},
 ): AccountBalanceMinor[] {
   return getAccountLegSums(db, opts).map((r) => {
-    const debitNormal = r.type === "asset" || r.type === "expense";
-    const balance_minor = debitNormal ? r.sum_debit - r.sum_credit : r.sum_credit - r.sum_debit;
     const { sum_debit, sum_credit, ...account } = r;
+    const balance_minor = balanceMinor(r.type, sum_debit, sum_credit);
     return {
       ...(account as AccountRow),
       debits_posted: sum_debit,
@@ -60,49 +78,98 @@ export function getAccountBalances(
 }
 
 export function getNetWorth(db: Database.Database): NetWorth {
-  const balances = getAccountBalances(db);
-  let assets = 0;
-  let liabilities = 0;
-  for (const b of balances) {
-    if (b.type === "asset") assets += b.balance;
-    else if (b.type === "liability") liabilities += b.balance;
+  const assets: CurrencyTotals = {};
+  const liabilities: CurrencyTotals = {};
+  for (const b of getAccountBalances(db)) {
+    if (b.type === "asset") addMinor(assets, b.currency, b.balance_minor);
+    else if (b.type === "liability") addMinor(liabilities, b.currency, b.balance_minor);
   }
-  return { assets, liabilities, net_worth: assets - liabilities };
+  return { assets, liabilities, net_worth: subtractTotals(assets, liabilities) };
 }
 
-/**
- * Income (credits - debits) and expenses (debits - credits) over a date range.
- * Grouped by (type, currency) so each currency converts with its own exponent.
- */
 export function getPeriodTotals(
   db: Database.Database,
   from: string,
   to: string,
 ): PeriodTotals {
-  let income = 0;
-  let expenses = 0;
+  const income: CurrencyTotals = {};
+  const expenses: CurrencyTotals = {};
   for (const r of getPeriodLegSums(db, from, to)) {
-    if (r.type === "income") income += fromMinorUnits(r.c_minus_d, r.currency);
-    else if (r.type === "expense") expenses += fromMinorUnits(-r.c_minus_d, r.currency);
+    // Guards against a future query widening booking an unexpected type as expense via the else.
+    if (r.type !== "income" && r.type !== "expense") continue;
+    const totals = r.type === "income" ? income : expenses;
+    addMinor(totals, r.currency, balanceMinor(r.type, r.sum_debit, r.sum_credit));
   }
   return { income, expenses };
 }
 
-/** Subtree balance (root inclusive), grouped by (type, currency) for correct conversion. */
-export function getRollupBalance(db: Database.Database, rootId: string): number {
+/** Single-currency by the id grammar, but derived here, not assumed. */
+export function getRollupBalance(db: Database.Database, rootId: string): CurrencyTotals {
+  const totals: CurrencyTotals = {};
   const subtree = getAccountSubtree(db, rootId);
-  if (subtree.length === 0) return 0;
+  if (subtree.length === 0) return totals;
 
-  let total = 0;
   for (const r of getLegSumsForAccounts(db, subtree.map((a) => a.id))) {
-    const debitNormal = r.type === "asset" || r.type === "expense";
-    const minor = debitNormal ? r.sum_debit - r.sum_credit : r.sum_credit - r.sum_debit;
-    total += fromMinorUnits(minor, r.currency);
+    addMinor(totals, r.currency, balanceMinor(r.type, r.sum_debit, r.sum_credit));
   }
-  return total;
+  return totals;
 }
 
-const EQUITY_ADJUST_ID = "equity:adjustments";
+export interface BalanceTreeNode {
+  id: string;
+  name: string;
+  type: AccountType;
+  currency: string;
+  balance_minor: number;
+  /** This account's balance plus every descendant's. */
+  rollup: CurrencyTotals;
+  children: BalanceTreeNode[];
+}
+
+function treeNode(
+  row: AccountBalanceMinor,
+  childrenByParent: Map<string, AccountBalanceMinor[]>,
+): BalanceTreeNode {
+  const children = (childrenByParent.get(row.id) ?? []).map((child) =>
+    treeNode(child, childrenByParent),
+  );
+  const rollup: CurrencyTotals = {};
+  for (const child of children) {
+    for (const [currency, minor] of Object.entries(child.rollup)) addMinor(rollup, currency, minor);
+  }
+  addMinor(rollup, row.currency, row.balance_minor);
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    currency: row.currency,
+    balance_minor: row.balance_minor,
+    rollup,
+    children,
+  };
+}
+
+/** A row whose parent is outside the selection becomes a root here. */
+export function getBalanceTree(
+  db: Database.Database,
+  opts: AccountLegSumsOptions = {},
+): BalanceTreeNode[] {
+  const rows = getAccountBalances(db, opts);
+  const selected = new Set(rows.map((r) => r.id));
+  const childrenByParent = new Map<string, AccountBalanceMinor[]>();
+  const roots: AccountBalanceMinor[] = [];
+
+  for (const row of rows) {
+    if (!row.parent_id || !selected.has(row.parent_id)) {
+      roots.push(row);
+      continue;
+    }
+    const siblings = childrenByParent.get(row.parent_id) ?? [];
+    siblings.push(row);
+    childrenByParent.set(row.parent_id, siblings);
+  }
+  return roots.map((row) => treeNode(row, childrenByParent));
+}
 
 interface AdjustAccountBalanceOpts {
   accountId: string;
@@ -120,11 +187,8 @@ interface AdjustAccountBalanceResult {
   delta: number;
 }
 
-/**
- * Moves an account to `targetAmount` by posting one balancing transaction
- * against `equity:adjustments`. Delta math is integer minor units (no float
- * drift); a zero delta is a no-op.
- */
+/** Ledger comes from the target account, never config. Delta math is integer
+ *  minor units; a zero delta is a no-op. */
 export function adjustAccountBalance(
   db: Database.Database,
   opts: AdjustAccountBalanceOpts,
@@ -132,24 +196,25 @@ export function adjustAccountBalance(
   const account = findAccountById(db, opts.accountId);
   if (!account) throw new Error(`Account "${opts.accountId}" not found.`);
 
-  const target = Number(opts.targetAmount);
-  if (!Number.isFinite(target)) {
-    throw new Error(`targetAmount must be a number, got ${JSON.stringify(opts.targetAmount)}.`);
+  const currency = currencyOf(account.id);
+  const adjustmentsId = structuralAccountId(currency, "adjustments");
+  if (account.id === adjustmentsId) {
+    throw new Error(
+      `Account "${adjustmentsId}" is the balancing side of every adjustment on its own ledger, ` +
+        "so adjusting it would need both legs on one account. Adjust the account that is wrong instead.",
+    );
   }
 
-  const currency = account.currency || config.displayCurrency;
   const currentMinor =
     getAccountBalances(db, { idOrParent: account.id }).find((b) => b.id === account.id)
       ?.balance_minor ?? 0;
-  const targetMinor = toMinorUnits(target, currency);
+  const targetMinor = toMinorUnits(opts.targetAmount, currency);
   const deltaMinor = targetMinor - currentMinor;
   if (deltaMinor === 0) return { transactionId: null, delta: 0 };
 
   const amount = Math.abs(deltaMinor);
   const debitNormal = account.type === "asset" || account.type === "expense";
   const accountIsDebit = (debitNormal && deltaMinor > 0) || (!debitNormal && deltaMinor < 0);
-  const debitAccountId = accountIsDebit ? account.id : EQUITY_ADJUST_ID;
-  const creditAccountId = accountIsDebit ? EQUITY_ADJUST_ID : account.id;
 
   const date =
     opts.date && ISO_DATE_RE.test(opts.date) ? opts.date : todayIso();
@@ -157,14 +222,13 @@ export function adjustAccountBalance(
 
   let transactionId = "";
   const tx = db.transaction((): void => {
-    ensureStructuralAccount(db, "equity:adjustments");
+    ensureStructuralAccount(db, currency, "adjustments");
     transactionId = insertTransaction(db, {
       date,
       description: reason,
-      debit_account_id: debitAccountId,
-      credit_account_id: creditAccountId,
+      debit_account_id: accountIsDebit ? account.id : adjustmentsId,
+      credit_account_id: accountIsDebit ? adjustmentsId : account.id,
       amount,
-      currency,
     }).id;
   });
   tx();

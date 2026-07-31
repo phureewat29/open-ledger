@@ -12,16 +12,10 @@ import {
   runAction,
 } from "../output.js";
 import { openDb } from "../db.js";
-import { commitIngest } from "./ingest-commit.js";
-/**
- * The accepted-input facts, so help text can't drift from the enforcing table;
- * source.ts avoids mupdf/libsql, so it's safe on the startup path.
- */
+import { commitIngest } from "./commit.js";
+// source.ts avoids mupdf/libsql, so this import is safe on the startup path.
 import { MAX_SOURCE_BYTES, SUPPORTED_EXTS } from "../../extract/source.js";
-/**
- * Types only, erased at compile time: the ingest modules load lazily inside
- * each action, keeping libsql/mupdf off the startup path.
- */
+// Types only, erased at compile time; the ingest modules themselves load lazily inside each action.
 import type { IngestEntry, PrepareOutcome, PrepareFailure } from "../../ingest/prepare.js";
 
 type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
@@ -252,9 +246,9 @@ export function registerIngest(program: Command): void {
       [
         "",
         "Behavior: posts one batch of statement rows; each item resolves account hints, links merchants, and raises questions instead of failing.",
-        'Item: {"date":"YYYY-MM-DD","description":"...","debit_account":"expense:food","credit_account":"asset:bank:kbank","amount":135.00,"source_page":2,"row_index":0,"raw_descriptor":"<verbatim bank text>","merchant":{"canonical_name":"..."}}',
-        "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are taken literally (an exact match posts there, a well-formed path is created, a lookalike only raises a question, and a malformed id falls back to expense:uncategorized); set row_index + source_page and pass --file <sf:id> so a re-run is an idempotent duplicate:true no-op.",
-        "Compound rows (payslip, FX): replace debit/credit/amount with linked:[{debit_account,credit_account,amount},...] sharing one account; legs commit atomically under one group_id. Cross-currency rows become two linked legs through equity:conversion:<ccy>.",
+        'Item: {"date":"YYYY-MM-DD","description":"...","debit_account":"thb:expense:food","credit_account":"thb:asset:bank:kbank","amount":135.00,"source_page":2,"row_index":0,"raw_descriptor":"<verbatim bank text>","merchant":{"canonical_name":"..."}}',
+        "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are currency-prefixed (<currency>:<type>:<path>) and both sides must share the prefix; ids are taken literally (an exact match posts there, a well-formed path inside an existing ledger is created, a lookalike only raises a question); commit never opens a new ledger — an id whose currency prefix names no existing ledger is refused, naming the ledger and the accounts create command that opens it, and only ids with no usable prefix fall back to the other side's <currency>:expense:uncategorized with a question; set row_index + source_page and pass --file <sf:id> so a re-run is an idempotent duplicate:true no-op.",
+        "Compound rows (payslip, FX): replace debit/credit/amount with linked:[{debit_account,credit_account,amount},...] sharing one account; legs commit atomically under one group_id. Cross-currency rows become two linked legs through <currency>:equity:conversion, one per ledger, sharing the group.",
         "Output: one result per item, then a summary with batch_id/posted/duplicates/failed. Exit 7 = some rows failed; duplicate:true is a success.",
       ].join("\n"),
     )

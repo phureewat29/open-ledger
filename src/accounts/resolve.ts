@@ -1,15 +1,19 @@
 import type Database from "libsql";
 import {
   createAccount,
+  ensureLedgerRoot,
   ensureStructuralAccount,
-  ensureTopLevelRoot,
+  isLedgerRootId,
+  type AccountRefusal,
 } from "./accounts.js";
 import {
+  ACCOUNT_TYPES,
   findAccountById,
-  TOP_LEVEL_TYPES,
+  ledgerExists,
   type AccountType,
 } from "../db/queries/accounts.js";
 import { merchantExists } from "../db/queries/merchants.js";
+import { currencyOf, typeFromId } from "../lib/ids.js";
 import { findAccountsByFuzzyName } from "./matching.js";
 
 export interface ResolvedMerchant {
@@ -20,17 +24,12 @@ export interface ResolvedMerchant {
 export type AccountHint =
   | { readonly type: "placeholder_created"; readonly accountId: string }
   | { readonly type: "uncategorized_fallback"; readonly accountId: string }
-  /** The account was created as asked and an existing lookalike was found. */
   | {
       readonly type: "similar_account";
       readonly accountId: string;
       readonly similarId: string;
     };
 
-/**
- * A merchant id that doesn't exist is recorded as attempted-unknown, so the
- * caller can raise a question.
- */
 export function resolveMerchantId(
   db: Database.Database,
   merchantId: string | null | undefined,
@@ -40,56 +39,64 @@ export function resolveMerchantId(
   return { merchantId: null, attemptedUnknownId: merchantId };
 }
 
-/**
- * `hint` is null on an exact match. A lookalike never moves the posting: the
- * requested id is created and the lookalike reported as `similar_account`, so
- * money can only land on the account the input actually named.
- */
-export function resolveOnePosting<T extends { account_id: string }>(
+export interface PostingResolution {
+  /** Null when no path could be built; caller supplies the fallback ledger. */
+  readonly accountId: string | null;
+  readonly hint: AccountHint | null;
+}
+
+/** A lookalike is reported, never used: the requested id is still created. */
+export function resolveOnePosting(
   db: Database.Database,
-  posting: T,
-): { posting: T; hint: AccountHint | null } {
-  if (findAccountById(db, posting.account_id)) {
-    return { posting, hint: null };
-  }
-  const similarId = bestFuzzyMatch(db, posting.account_id);
-  const placeholder = ensurePlaceholderAccount(db, posting.account_id);
+  accountId: string,
+): PostingResolution {
+  if (findAccountById(db, accountId)) return { accountId, hint: null };
+
+  const similarId = bestFuzzyMatch(db, accountId);
+  if (!ensurePlaceholderAccount(db, accountId)) return { accountId: null, hint: null };
   return {
-    posting: { ...posting, account_id: placeholder.accountId },
-    hint: accountHint(placeholder, similarId),
+    accountId,
+    hint: similarId
+      ? { type: "similar_account", accountId, similarId }
+      : { type: "placeholder_created", accountId },
   };
 }
 
-/** One hint per side. A fallback outranks a lookalike: the money really did land
- *  on `expense:uncategorized`, so recategorizing it is the caller's next move. */
-function accountHint(placeholder: PlaceholderResult, similarId: string | null): AccountHint {
-  if (placeholder.fellBack) {
-    return { type: "uncategorized_fallback", accountId: placeholder.accountId };
-  }
-  if (similarId) {
-    return { type: "similar_account", accountId: placeholder.accountId, similarId };
-  }
-  return { type: "placeholder_created", accountId: placeholder.accountId };
+/** `<currency>:expense:uncategorized` for a ledger that already exists. */
+export function ensureUncategorizedFallback(db: Database.Database, currency: string): string {
+  return ensureStructuralAccount(db, currency, "uncategorized");
+}
+
+const CURRENCY_HEAD_RE = /^[A-Za-z]{3}:/;
+
+/**
+ * True when the hint's currency head names a ledger that doesn't exist. The
+ * head alone decides; booking elsewhere would relabel the amount at the
+ * wrong exponent.
+ */
+export function namesUnopenedLedger(db: Database.Database, accountId: string): boolean {
+  if (!CURRENCY_HEAD_RE.test(accountId)) return false;
+  return !ledgerExists(db, currencyOf(accountId));
 }
 
 const FUZZY_THRESHOLD = 0.7;
 
 /**
- * The closest existing account to a requested id, or null: advisory only, it
- * never changes where money posts. A child account shares its parent's type
- * and extends its id, so a candidate of another type or one on the same
- * lineage is parentage, not a lookalike. The leaf of `asset:bank:kbank`
- * contains its own parent's name "Bank", and `income:transfers:p2p` has an
- * exact-name expense twin across roots; neither is worth a question.
+ * Closest existing account to a requested id, or null; advisory only.
+ * Excludes cross-ledger and same-lineage matches.
  */
 function bestFuzzyMatch(db: Database.Database, accountId: string): string | null {
-  const type = accountId.split(":")[0] as AccountType;
-  if (!TOP_LEVEL_TYPES.includes(type)) return null;
+  const type = typeFromId(accountId) as AccountType;
+  if (!ACCOUNT_TYPES.includes(type)) return null;
+  const currency = currencyOf(accountId);
   const leaf = leafSegment(accountId).replace(/[-_]+/g, " ");
   if (!leaf) return null;
   const matches = findAccountsByFuzzyName(db, leaf, FUZZY_THRESHOLD);
   const candidate = matches.find(
-    (m) => m.account.type === type && !sharesLineage(m.account.id, accountId),
+    (m) =>
+      m.account.type === type &&
+      currencyOf(m.account.id) === currency &&
+      !sharesLineage(m.account.id, accountId),
   );
   return candidate?.account.id ?? null;
 }
@@ -104,73 +111,65 @@ function leafSegment(id: string): string {
   return segments[segments.length - 1] ?? id;
 }
 
-// `upTo` is 1-based. `ACCOUNT_EXISTS` races are swallowed as a no-op; every other error propagates.
+type WalkResult = { readonly ok: true; readonly created: string[] } | AccountRefusal;
+
+/** `upTo` is 1-based. */
 function walkAncestorChain(
   db: Database.Database,
   segments: string[],
   type: AccountType,
   upTo: number,
-): string[] {
+): WalkResult {
+  const currency = segments[0];
+  const rootId = `${currency}:${type}`;
   const created: string[] = [];
-  if (!findAccountById(db, type)) created.push(type);
-  ensureTopLevelRoot(db, type);
-  for (let i = 2; i <= upTo; i++) {
+  if (!findAccountById(db, rootId)) created.push(rootId);
+  ensureLedgerRoot(db, currency, type);
+  // Segment 3 onward: the ledger root already covers the first two.
+  for (let i = 3; i <= upTo; i++) {
     const id = segments.slice(0, i).join(":");
     if (findAccountById(db, id)) continue;
     const parentId = segments.slice(0, i - 1).join(":");
     const name = humanizeSegment(segments[i - 1]);
-    try {
-      createAccount(db, { id, name, type, parent_id: parentId });
+    const result = createAccount(db, { id, name, type, parent_id: parentId });
+    if (result.ok) {
       created.push(id);
-    } catch (err: any) {
-      if (err?.code === "ACCOUNT_EXISTS") continue;
-      throw err;
+      continue;
     }
+    // A concurrent writer claimed the id first: its row stands, the walk goes on.
+    if (result.reason !== "account_exists") return result;
   }
-  return created;
-}
-
-interface PlaceholderResult {
-  /** The resolved account id: the requested path when it was created, else
-   *  `expense:uncategorized`. */
-  accountId: string;
-  /** True when the path couldn't be built (bad id, unknown type, or a
-   *  hierarchy error) and resolution fell back to `expense:uncategorized`.
-   *  The commit pipeline turns a fallback into a question. */
-  fellBack: boolean;
-}
-
-// Never surfaces an error: always returns a usable id, falling back to `expense:uncategorized`.
-function ensurePlaceholderAccount(db: Database.Database, accountId: string): PlaceholderResult {
-  const segments = accountId.split(":").filter(Boolean);
-  if (segments.length < 2) return { accountId: ensureUncategorizedFallback(db), fellBack: true };
-
-  const type = segments[0] as AccountType;
-  if (!TOP_LEVEL_TYPES.includes(type)) return { accountId: ensureUncategorizedFallback(db), fellBack: true };
-
-  // Any hierarchy failure here degrades to the fallback silently; `--resolve` depends on that.
-  try {
-    walkAncestorChain(db, segments, type, segments.length);
-  } catch {
-    return { accountId: ensureUncategorizedFallback(db), fellBack: true };
-  }
-  return { accountId, fellBack: false };
-}
-
-interface EnsureAccountAncestorsResult {
-  /** The immediate parent id the leaf should be created under, or null for a
-   *  single-segment id (a bare top-level root, nothing to auto-create). */
-  parentId: string | null;
-  /** Ancestor ids created as a side effect, root-to-leaf order; empty when
-   *  every ancestor along the chain already existed. */
-  createdParents: string[];
+  return { ok: true, created };
 }
 
 /**
- * Creates any missing ancestor above the leaf for a multi-segment id (e.g.
- * `asset:bank:ttb`), so `accounts create` doesn't need every intermediate
- * category pre-created. Unlike `ensurePlaceholderAccount`, propagates
- * hierarchy errors as-is so the CLI can surface a real INVALID.
+ * False on a malformed id, unknown type, or unopened ledger; `--resolve`
+ * depends on that contract. A database failure propagates instead.
+ */
+function ensurePlaceholderAccount(db: Database.Database, accountId: string): boolean {
+  const segments = accountId.split(":").filter(Boolean);
+  if (segments.length < 2) return false;
+
+  const type = segments[1] as AccountType;
+  if (!ACCOUNT_TYPES.includes(type)) return false;
+  if (!ledgerExists(db, segments[0])) return false;
+
+  return walkAncestorChain(db, segments, type, segments.length).ok;
+}
+
+interface AncestorsReady {
+  readonly ok: true;
+  /** Parent id for the leaf, or null for a ledger type root. */
+  readonly parentId: string | null;
+  /** Ancestor ids created as a side effect, root-to-leaf order. */
+  readonly createdParents: string[];
+}
+
+export type EnsureAccountAncestorsResult = AncestorsReady | AccountRefusal;
+
+/**
+ * Unlike `ensurePlaceholderAccount`, returns the refusal instead of
+ * swallowing it, and may open a new ledger.
  */
 export function ensureAccountAncestors(
   db: Database.Database,
@@ -178,16 +177,17 @@ export function ensureAccountAncestors(
   type: AccountType,
 ): EnsureAccountAncestorsResult {
   const segments = id.split(":").filter(Boolean);
-  if (segments.length < 2) return { parentId: null, createdParents: [] };
+  if (segments.length < 2 || isLedgerRootId(id)) {
+    return { ok: true, parentId: null, createdParents: [] };
+  }
 
-  const createdParents = walkAncestorChain(db, segments, type, segments.length - 1);
-  const parentId = segments.slice(0, segments.length - 1).join(":");
-  return { parentId, createdParents };
-}
-
-function ensureUncategorizedFallback(db: Database.Database): string {
-  ensureStructuralAccount(db, "expense:uncategorized");
-  return "expense:uncategorized";
+  const walked = walkAncestorChain(db, segments, type, segments.length - 1);
+  if (!walked.ok) return walked;
+  return {
+    ok: true,
+    parentId: segments.slice(0, segments.length - 1).join(":"),
+    createdParents: walked.created,
+  };
 }
 
 function humanizeSegment(segment: string): string {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { countryFileSchema } from "./institutions.js";
 import { findCountryDefaults, availableCountries } from "./defaults.js";
+import { noiseTokens } from "./noise.js";
 import { listDatasets, readDataset } from "./index.js";
 
 describe("institutions dataset", () => {
@@ -65,11 +66,38 @@ describe("defaults dataset", () => {
   });
 });
 
+describe("noise dataset", () => {
+  it("returns a country's noise tokens (case-insensitive)", () => {
+    const th = noiseTokens("th");
+    expect(th).toContain("bkk");
+    expect(th).toContain("bangkok");
+    expect(noiseTokens("TH")).toEqual(th);
+  });
+
+  it("carries only place words: nothing the algorithm already strips for every country", () => {
+    expect(noiseTokens("th")).not.toContain("charge");
+    expect(noiseTokens("th")).not.toContain("pos");
+  });
+
+  it("returns nothing for a country whose file omits the key", () => {
+    expect(noiseTokens("us")).toEqual([]);
+  });
+
+  it("returns nothing for an unknown country", () => {
+    expect(noiseTokens("zz")).toEqual([]);
+  });
+});
+
 describe("generic dataset surface", () => {
   it("listDatasets summarizes each dataset with its countries and row count", () => {
     const summaries = listDatasets();
     const byName = new Map(summaries.map((s) => [s.name, s]));
-    expect([...byName.keys()].sort()).toEqual(["defaults", "institutions"]);
+    expect([...byName.keys()].sort()).toEqual(["defaults", "institutions", "noise"]);
+
+    // Only TH has been read off real statements; the rest omit the key.
+    const noise = byName.get("noise")!;
+    expect(noise.countries).toEqual(["TH"]);
+    expect(noise.rows).toBeGreaterThan(0);
 
     const institutions = byName.get("institutions")!;
     expect(institutions.countries).toContain("TH");

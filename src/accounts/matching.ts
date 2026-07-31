@@ -19,9 +19,8 @@ function queryNumberKey(text: string): string {
   return accountNumberKey(longest);
 }
 
-/** Substring hits get a 0.85 floor ("ttb saving" finds "TTB Savings ••1234" despite
- *  mediocre Levenshtein), and a query carrying an account number matches the row's
- *  masked number; callers confirm before acting, so a same-last-4 collision is recoverable. */
+/** Substring hits get a 0.85 floor; a query carrying an account number matches
+ *  the row's masked number. Callers confirm before acting. */
 export function findAccountsByFuzzyName(
   db: Database.Database,
   query: string,

@@ -1,28 +1,48 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { createAccount } from "../../accounts/accounts.js";
-import { findAccountById, getAccountSubtree, updateAccountMetadata } from "./accounts.js";
-import { freshDb } from "../../../fixtures/db.js";
+
+import {
+  countAccounts,
+  findAccountById,
+  getAccountSubtree,
+  insertStructuralAccount,
+  updateAccountMetadata,
+} from "./accounts.js";
+import { freshDb, seedAccount } from "../../../fixtures/db.js";
 
 describe("getAccountSubtree", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb();
-    createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
-    createAccount(db, { id: "expense:food:groceries", name: "Groceries", type: "expense", parent_id: "expense:food" });
-    createAccount(db, { id: "expense:food:dining", name: "Dining", type: "expense", parent_id: "expense:food" });
-    createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-    createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
+    seedAccount(db, { id: "thb:expense:food" });
+    seedAccount(db, { id: "thb:expense:food:groceries" });
+    seedAccount(db, { id: "thb:expense:food:dining" });
+    seedAccount(db, { id: "thb:asset:cash" });
   });
 
   it("returns the subtree rooted at a given id", () => {
-    const subtree = getAccountSubtree(db, "expense:food");
+    const subtree = getAccountSubtree(db, "thb:expense:food");
     const ids = subtree.map(r => r.id).sort();
     expect(ids).toEqual([
-      "expense:food",
-      "expense:food:dining",
-      "expense:food:groceries",
+      "thb:expense:food",
+      "thb:expense:food:dining",
+      "thb:expense:food:groceries",
     ]);
+  });
+});
+
+describe("insertStructuralAccount", () => {
+  it("swallows a lost race on the id: the winner's row stands, no UNIQUE escapes", () => {
+    // Every caller checks findAccountById first, so a second insert here is a concurrent writer having won in between.
+    const db = freshDb();
+    const root = { id: "thb:asset", name: "Assets (THB)", type: "asset", parent_id: null } as const;
+    insertStructuralAccount(db, { ...root });
+
+    expect(() =>
+      insertStructuralAccount(db, { ...root, name: "Assets (THB) — later writer" }),
+    ).not.toThrow();
+    expect(findAccountById(db, "thb:asset")!.name).toBe("Assets (THB)");
+    expect(countAccounts(db)).toBe(1);
   });
 });
 
@@ -30,18 +50,11 @@ describe("updateAccountMetadata", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb();
-    createAccount(db, {
-      id: "liability:ktc",
-      name: "KTC Card",
-      type: "liability",
-      parent_id: "liability",
-      bank_name: "ktc",
-      due_day: 15,
-    });
+    seedAccount(db, { id: "thb:liability:ktc", name: "KTC Card", bank_name: "ktc", due_day: 15 });
   });
 
   it("returns before/after for changed fields", () => {
-    const result = updateAccountMetadata(db, "liability:ktc", { due_day: 20, statement_day: 28 });
+    const result = updateAccountMetadata(db, "thb:liability:ktc", { due_day: 20, statement_day: 28 });
     expect(Object.keys(result.after).length).toBeGreaterThan(0);
     expect(result.before.due_day).toBe(15);
     expect(result.after.due_day).toBe(20);
@@ -50,14 +63,14 @@ describe("updateAccountMetadata", () => {
   });
 
   it("reports no change when patch is empty", () => {
-    const result = updateAccountMetadata(db, "liability:ktc", {});
+    const result = updateAccountMetadata(db, "thb:liability:ktc", {});
     expect(Object.keys(result.after).length).toBe(0);
   });
 
   it("shallow-merges metadata into the existing blob", () => {
-    updateAccountMetadata(db, "liability:ktc", { metadata: { points_program: "Forever" } });
-    updateAccountMetadata(db, "liability:ktc", { metadata: { points_balance: 1200 } });
-    const row = findAccountById(db, "liability:ktc")!;
+    updateAccountMetadata(db, "thb:liability:ktc", { metadata: { points_program: "Forever" } });
+    updateAccountMetadata(db, "thb:liability:ktc", { metadata: { points_balance: 1200 } });
+    const row = findAccountById(db, "thb:liability:ktc")!;
     expect(JSON.parse(row.metadata_json!)).toEqual({
       points_program: "Forever",
       points_balance: 1200,
@@ -65,11 +78,11 @@ describe("updateAccountMetadata", () => {
   });
 
   it("normalizes a masked number's check digit on the way in", () => {
-    updateAccountMetadata(db, "liability:ktc", { account_number_masked: "••7652-0" });
-    expect(findAccountById(db, "liability:ktc")!.account_number_masked).toBe("••7652");
+    updateAccountMetadata(db, "thb:liability:ktc", { account_number_masked: "••7652-0" });
+    expect(findAccountById(db, "thb:liability:ktc")!.account_number_masked).toBe("••7652");
   });
 
   it("throws on unknown account", () => {
-    expect(() => updateAccountMetadata(db, "asset:nope", { due_day: 1 })).toThrow(/not found/);
+    expect(() => updateAccountMetadata(db, "thb:asset:nope", { due_day: 1 })).toThrow(/not found/);
   });
 });

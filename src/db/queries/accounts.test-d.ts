@@ -8,7 +8,6 @@ describe("z.infer: real call-site type", () => {
     const patchSpec = z.object({
       due_day: int().optional().nullable(),
       statement_day: int().optional().nullable(),
-      points_balance: int().optional().nullable(),
       account_number_masked: str().optional().nullable(),
       bank_name: str().optional().nullable(),
       metadata: json<Record<string, unknown>>().optional(),

@@ -10,8 +10,7 @@ const exitOnEpipe = (err: NodeJS.ErrnoException): void => {
 process.stdout.on("error", exitOnEpipe);
 process.stderr.on("error", exitOnEpipe);
 
-// Actions report their own failures inside runAction; only commander's parse
-// errors reach here, thrown by the exit override wired in buildProgram().
+// runAction reports action failures; only commander's parse errors reach here.
 try {
   buildProgram().parse();
 } catch (err) {

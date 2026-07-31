@@ -9,6 +9,7 @@ import {
   emitSummary,
   fail,
   mapNotFoundError,
+  redactionEnabled,
   requireYes,
   runAction,
   type Column,
@@ -29,12 +30,8 @@ import {
   type ListTransactionsOptions,
   type TransactionRow,
   type TransactionCluster,
-} from "../../db/queries/transactions.js";
-import {
-  findDuplicateTransactions,
   type DuplicateTransactionRow,
-} from "../../db/queries/transactions-dedup.js";
-import { findAccountById } from "../../db/queries/accounts.js";
+} from "../../db/queries/transactions.js";
 import {
   commitTransaction,
   defaultTransactionCommitHooks,
@@ -42,20 +39,22 @@ import {
   type TransactionCommitContext,
   type RawTransactionInput,
 } from "../../ingest/commit.js";
-import { autoMergeStrictDuplicateTransactions } from "../../ingest/dedup.js";
+import { autoMergeStrictDuplicateTransactions, findDuplicateTransactions } from "../../ingest/dedup.js";
+import { requireAccount } from "../accounts.js";
 import { fromMinorUnits, toMinorUnits } from "../../lib/money.js";
 import { clampOffset } from "../../lib/limit.js";
-import { getDisplayCurrency } from "../currency.js";
-import { newBatchId } from "../../lib/ids.js";
+import { formatFixed } from "../currency.js";
+import { currencyOf, newBatchId } from "../../lib/ids.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import { todayIso } from "../../lib/date.js";
+import { noiseTokens } from "../../datasets/noise.js";
+import { config } from "../../config.js";
 import * as z from "zod";
 import { parseInput, str, num } from "../../lib/validate.js";
 
 // Amounts are minor units in the DB; this module converts to/from decimals at the CLI boundary.
 
-// Free-text fields on a transaction that may carry PII. Ids, amount, currency, and
-// dates are structured data the agent needs verbatim and are left intact.
+// Free-text fields that may carry PII; ids, amount, currency, and dates are structured and left intact.
 const TRANSACTION_REDACT_FIELDS = [
   "description",
   "raw_descriptor",
@@ -76,13 +75,14 @@ const LIST_COLUMNS: Column<TransactionView>[] = [
   { header: "Description", value: (t) => t.description },
   { header: "Debit", value: (t) => t.debit_account_name ?? t.debit_account_id },
   { header: "Credit", value: (t) => t.credit_account_name ?? t.credit_account_id },
-  { header: "Amount", value: (t) => t.amount.toFixed(2), align: "right" },
+  { header: "Amount", value: (t) => formatFixed(t.amount, t.currency), align: "right" },
   { header: "Currency", value: (t) => t.currency },
 ];
 
 interface ListTransactionsOpts {
   group?: boolean;
   redact?: boolean;
+  includeVoid?: boolean;
 }
 
 const LIST_TRANSACTIONS_SPEC = z.object({
@@ -96,18 +96,28 @@ const LIST_TRANSACTIONS_SPEC = z.object({
   offset: num().optional(),
 });
 
+// `--amount` is decimal but stored amounts are minor units, so the filter needs a currency:
+// from `--account`'s ledger, else an explicit `--currency` (no display-currency fallback).
+function amountFilterCurrency(account?: string, currency?: string): string {
+  if (account) return currencyOf(account);
+  if (currency) return currency;
+  fail("USAGE", "--amount needs a unit: pass --account <id> or --currency <code>");
+}
+
 async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
   const db = await openDb();
   const parsed = parseInput(LIST_TRANSACTIONS_SPEC, opts as Record<string, unknown>);
-  const listOpts: Omit<ListTransactionsOptions, "group"> = {};
+  const listOpts: Omit<ListTransactionsOptions, "group"> = { includeVoid: !!opts.includeVoid };
   if (parsed.account) listOpts.account = parsed.account;
+  if (parsed.currency) listOpts.ledger = parsed.currency;
   if (parsed.from) listOpts.from = parsed.from;
   if (parsed.to) listOpts.to = parsed.to;
   if (parsed.query) listOpts.query = parsed.query;
-  // Amount crosses the decimal -> minor-unit boundary here; currency defaults
-  // to the configured display currency when the caller doesn't pin one.
   if (parsed.amount !== undefined) {
-    listOpts.amount = toMinorUnits(parsed.amount, parsed.currency ?? getDisplayCurrency());
+    listOpts.amount = toMinorUnits(
+      parsed.amount,
+      amountFilterCurrency(parsed.account, parsed.currency),
+    );
   }
   if (parsed.limit !== undefined) listOpts.limit = parsed.limit;
   if (parsed.offset !== undefined) listOpts.offset = parsed.offset;
@@ -117,10 +127,9 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
   const offset = clampOffset(listOpts.offset);
 
   if (opts.group) {
-    // Offset pages rows before clustering, so a group can straddle a page,
-    // the same way it can straddle the limit.
+    // Offset pages rows before clustering, so a group can straddle a page, same as the limit.
     const clusters = queryTransactions(db, { ...listOpts, group: true });
-    emitClusters(clusters, !!opts.redact);
+    emitClusters(clusters, redactionEnabled(opts));
     const returned = clusters.reduce((n, c) => n + c.transactions.length, 0);
     emitCappedSummary(total, returned, limit, offset);
     return;
@@ -128,7 +137,7 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
 
   const rows = applyRedaction(
     queryTransactions(db, listOpts).map(presentTransaction),
-    !!opts.redact,
+    redactionEnabled(opts),
     TRANSACTION_REDACT_FIELDS,
   );
   emitList(rows, LIST_COLUMNS);
@@ -136,10 +145,12 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
 }
 
 function emitClusters(clusters: TransactionCluster[], redact: boolean): void {
-  const view = clusters.map((c) => ({
+  const raw = clusters.map((c) => ({
     group_id: c.group_id,
-    transactions: applyRedaction(c.transactions.map(presentTransaction), redact, TRANSACTION_REDACT_FIELDS),
+    transactions: c.transactions.map(presentTransaction),
   }));
+  // One redactor build (and one context.md read) for the whole view, not one per cluster.
+  const view = applyRedaction(raw, redact, TRANSACTION_REDACT_FIELDS);
   const mode = currentMode();
   if (mode.json) {
     for (const c of view) emit(c);
@@ -149,7 +160,7 @@ function emitClusters(clusters: TransactionCluster[], redact: boolean): void {
     process.stdout.write(`${c.group_id ?? "(ungrouped)"}\n`);
     for (const t of c.transactions) {
       process.stdout.write(
-        `  ${t.id}  ${t.date}  ${t.description}  ${t.debit_account_name ?? t.debit_account_id} -> ${t.credit_account_name ?? t.credit_account_id}  ${t.amount.toFixed(2)} ${t.currency}\n`,
+        `  ${t.id}  ${t.date}  ${t.description}  ${t.debit_account_name ?? t.debit_account_id} -> ${t.credit_account_name ?? t.credit_account_id}  ${formatFixed(t.amount, t.currency)} ${t.currency}\n`,
       );
     }
   }
@@ -162,7 +173,7 @@ async function showTransaction(id: string, opts: { redact?: boolean }): Promise<
 
   const view: Record<string, unknown> = presentTransaction(detail);
   if (detail.group) view.group = detail.group.map(presentTransaction);
-  emitObject(applyRedaction(view, !!opts.redact, TRANSACTION_REDACT_FIELDS));
+  emitObject(applyRedaction(view, redactionEnabled(opts), TRANSACTION_REDACT_FIELDS));
 }
 
 type DuplicateRow = Omit<DuplicateTransactionRow, "amount"> & {
@@ -174,7 +185,7 @@ const DUPLICATE_COLUMNS: Column<DuplicateRow>[] = [
   { header: "Group", value: (r) => String(r.group), align: "right" },
   { header: "ID", value: (r) => r.id },
   { header: "Date", value: (r) => r.date },
-  { header: "Amount", value: (r) => r.amount.toFixed(2), align: "right" },
+  { header: "Amount", value: (r) => formatFixed(r.amount, r.currency), align: "right" },
   { header: "Currency", value: (r) => r.currency },
   { header: "Description", value: (r) => r.description },
   {
@@ -199,7 +210,7 @@ async function dedupeTransactions(opts: { autoMerge?: boolean; redact?: boolean 
     groups.flatMap((group, i) =>
       group.map((t) => ({ ...t, amount: fromMinorUnits(t.amount, t.currency), group: i })),
     ),
-    !!opts.redact,
+    redactionEnabled(opts),
     TRANSACTION_REDACT_FIELDS,
   );
 
@@ -270,8 +281,9 @@ function buildRawTransaction(opts: AddTransactionOpts): RawTransactionInput {
     opts as Record<string, unknown>,
     ADD_TRANSACTION_FLAGS_OPTS,
   );
-  // str() accepts "": an empty account id must fail USAGE here, not NOT_FOUND downstream.
-  if (!parsed.debit_account_id || !parsed.credit_account_id) {
+  // str() accepts "" and whitespace alike (the flag not being passed); must fail USAGE
+  // here, not NOT_FOUND downstream.
+  if (!parsed.debit_account_id.trim() || !parsed.credit_account_id.trim()) {
     fail("USAGE", "--debit-account and --credit-account cannot be empty");
   }
 
@@ -296,7 +308,8 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
   };
   const outcome = commitTransaction(db, ctx, raw, defaultTransactionCommitHooks(db, ctx));
   if (!outcome.ok) {
-    if (outcome.reason === "currency_mismatch") {
+    // The conversion-pair hint only fits a mismatch between two ledgers that both exist.
+    if (outcome.reason === "currency_mismatch" && !outcome.unopenedLedger) {
       fail("INVALID", outcome.message, { hint: CURRENCY_MISMATCH_HINT });
     }
     fail("INVALID", outcome.message);
@@ -312,19 +325,13 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
 function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   const accountHint =
     "create it with `oled accounts create`, or find a close match with `oled accounts match --query <name>`, or re-run with --resolve";
-  const debit = findAccountById(db, raw.debit_account_id);
-  if (!debit) fail("NOT_FOUND", `account "${raw.debit_account_id}" not found`, { hint: accountHint });
-  const credit = findAccountById(db, raw.credit_account_id);
-  if (!credit) fail("NOT_FOUND", `account "${raw.credit_account_id}" not found`, { hint: accountHint });
+  const debit = requireAccount(db, raw.debit_account_id, accountHint);
+  const credit = requireAccount(db, raw.credit_account_id, accountHint);
 
-  /**
-   * The same both-legs-one-currency rule commitTransaction enforces, applied
-   * inline: this strict path requires both accounts to pre-exist and raises no
-   * questions, so it can't delegate to commitTransaction's currency_mismatch
-   * path; only CURRENCY_MISMATCH_HINT is shared.
-   */
-  const currency = debit.currency || getDisplayCurrency();
-  const creditCurrency = credit.currency || getDisplayCurrency();
+  // Same both-legs-one-ledger rule commitTransaction enforces, applied inline: this path
+  // raises no questions, so it can't delegate to commitTransaction's currency_mismatch path.
+  const currency = currencyOf(debit.id);
+  const creditCurrency = currencyOf(credit.id);
   if (creditCurrency !== currency) {
     fail(
       "INVALID",
@@ -341,12 +348,12 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
       debit_account_id: raw.debit_account_id,
       credit_account_id: raw.credit_account_id,
       amount: toMinorUnits(raw.amount, currency),
-      currency,
-      merchant: raw.merchant ?? null,
+      merchant: raw.merchant
+        ? { ...raw.merchant, noise_tokens: noiseTokens(config.country) }
+        : null,
       merchant_id: raw.merchant_id ?? null,
       raw_descriptor: raw.raw_descriptor ?? null,
       source_page: raw.source_page ?? null,
-      code: raw.code ?? null,
     });
   } catch (err) {
     fail("INVALID", (err as Error).message);
@@ -384,8 +391,10 @@ async function updateTransaction(id: string, opts: Record<string, unknown>): Pro
 async function deleteTransaction(id: string, opts: { yes?: boolean }): Promise<void> {
   requireYes(opts, "deleting this transaction");
   const db = await openDb();
-  if (!deleteTransactionRow(db, id)) fail("NOT_FOUND", `transaction "${id}" not found`);
-  emitObject({ transaction_id: id, deleted: true });
+  const { deleted, unvoided } = deleteTransactionRow(db, id);
+  if (!deleted) fail("NOT_FOUND", `transaction "${id}" not found`);
+  // Deleting a survivor puts its mirrors back into balance derivation.
+  emitObject({ transaction_id: id, deleted: true, unvoided });
 }
 
 const RECATEGORIZE_SPEC = z.object({
@@ -393,14 +402,17 @@ const RECATEGORIZE_SPEC = z.object({
   filter_account: str(),
 });
 
-// The `--filter-account` clarification is folded into the label so a missing
-// flag still explains what that account controls.
+// The `--filter-account` clarification is folded into the label so a missing flag still explains it.
 const RECATEGORIZE_LABELS = {
   filter_account: "--filter-account (recategorize moves that account's transactions)",
 };
 
 async function recategorizeTransactions(opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(RECATEGORIZE_SPEC, opts, { labels: RECATEGORIZE_LABELS });
+  // An empty id reads the same as the flag not being passed.
+  if (!parsed.filter_account.trim()) fail("USAGE", `${RECATEGORIZE_LABELS.filter_account} required`);
+  if (!parsed.set_account.trim()) fail("USAGE", "--set-account required");
+
   const db = await openDb();
   const filter: BulkRecategorizeFilter = { accountId: parsed.filter_account };
 
@@ -408,11 +420,14 @@ async function recategorizeTransactions(opts: Record<string, unknown>): Promise<
   try {
     result = bulkRecategorize(db, filter, { accountId: parsed.set_account });
   } catch (err) {
-    fail("INVALID", (err as Error).message);
+    // bulkRecategorize pre-filters cross-ledger targets, so a missing --set-account
+    // target is the one not-found case reachable here.
+    mapNotFoundError(err, /does not exist/i);
   }
   emitObject({
     affected: result.affected,
     skipped_self_transaction: result.skipped_self_transaction,
+    skipped_currency_mismatch: result.skipped_currency_mismatch,
     sample_transaction_ids: result.sample_transaction_ids,
   });
 }
@@ -426,9 +441,9 @@ export function registerTransactions(program: Command): void {
       [
         "",
         "Behavior: reads the ledger (list, show) and edits it (add, update, delete, recategorize, dedupe, merge).",
-        "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add.",
-        "Direction, not sign: debit the account that grows, amount always positive. Card purchase: debit expense:<cat>, credit liability:credit_card:<x>. Bank spend: debit expense:<cat>, credit asset:bank:<x>. Salary: debit asset:bank:<x>, credit income:salary. A refund reverses the purchase's accounts; a card payment debits the liability and credits the bank; opening balances post against equity:opening-balance.",
-        "Example: oled transactions list --account expense:food --json",
+        "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add. Account ids are currency-prefixed (<currency>:<type>:<path>) everywhere, and both accounts on a transaction must share that prefix.",
+        "Direction, not sign: debit the account that grows, amount always positive. Card purchase: debit thb:expense:<cat>, credit thb:liability:credit_card:<x>. Bank spend: debit thb:expense:<cat>, credit thb:asset:bank:<x>. Salary: debit thb:asset:bank:<x>, credit thb:income:salary. A refund reverses the purchase's accounts; a card payment debits the liability and credits the bank; opening balances post against thb:equity:opening. Money crossing currencies is two linked legs through <currency>:equity:conversion, never one row.",
+        "Example: oled transactions list --account thb:expense:food --json",
       ].join("\n"),
     );
 
@@ -440,10 +455,11 @@ export function registerTransactions(program: Command): void {
     .option("--to <date>", "filter to date")
     .option("--query <text>", "filter by search text")
     .option("--amount <decimal>", "filter by exact amount (decimal)")
-    .option("--currency <code>", "currency for --amount (defaults to the configured display currency)")
+    .option("--currency <code>", "scope rows to that currency's ledger, and the unit --amount is given in; --account names a ledger of its own and wins")
     .option("--limit <n>", "max rows (default 50, max 500)")
     .option("--offset <n>", "rows to skip; repeat with offset += returned while the summary says has_more")
     .option("--group", "fold linked transactions into their group clusters")
+    .option("--include-void", "include mirrors voided by `transactions merge` (hidden by default)")
     .option("--no-redact", "skip PII redaction (on by default)")
     .action(runAction(listTransactions));
 
@@ -457,8 +473,8 @@ export function registerTransactions(program: Command): void {
     .command("add")
     .description("Add a manual transaction; statement rows belong in `ingest commit`")
     .option("--resolve", "create missing account paths and raise questions instead of failing")
-    .option("--debit-account <id>", "debit account id")
-    .option("--credit-account <id>", "credit account id")
+    .option("--debit-account <id>", "debit account id, currency-prefixed (e.g. thb:expense:food)")
+    .option("--credit-account <id>", "credit account id, currency-prefixed (e.g. thb:asset:bank:kbank)")
     .option("--amount <n>", "transaction amount (decimal)")
     .option("--date <date>", "transaction date (defaults to today)")
     .option("--description <text>", "transaction description")

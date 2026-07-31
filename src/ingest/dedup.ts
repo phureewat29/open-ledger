@@ -1,15 +1,34 @@
 import type Database from "libsql";
-import { deleteTransaction } from "../db/queries/transactions.js";
 import {
-  findDuplicateTransactions,
+  listDuplicateCandidateTransactions,
+  voidTransactionAsMirror,
   type DuplicateTransactionRow,
-} from "../db/queries/transactions-dedup.js";
+} from "../db/queries/transactions.js";
+import { clusterDuplicateCandidates } from "./clustering.js";
+
+export interface FindDuplicateTransactionsOptions {
+  /** Day slack when grouping by date. 0 = same-day only. Default 2. */
+  toleranceDays?: number;
+  /** Skip transactions below this amount (minor units). */
+  minAmount?: number;
+}
 
 /**
- * Within each group, keeps the earliest transaction and deletes exact
- * matches on merchant, file, date, and amount (integer minor units, no
- * rounding needed). The group finder already excludes linked legs.
+ * Rows sharing a non-null group_id never match each other (a salary's legs
+ * aren't duplicates); returns components of size >= 2.
  */
+export function findDuplicateTransactions(
+  db: Database.Database,
+  opts: FindDuplicateTransactionsOptions = {},
+): DuplicateTransactionRow[][] {
+  const toleranceDays = Math.max(0, Math.floor(opts.toleranceDays ?? 2));
+  const rows = listDuplicateCandidateTransactions(db, { minAmount: opts.minAmount });
+  return clusterDuplicateCandidates(rows, toleranceDays);
+}
+
+/** Voids exact matches into the earliest transaction, never deletes: a
+ *  delete's `void_of` self-FK (ON DELETE SET NULL) would un-void an
+ *  already-voided mirror. */
 export function autoMergeStrictDuplicateTransactions(db: Database.Database): { merged: number } {
   let merged = 0;
   for (const group of findDuplicateTransactions(db)) {
@@ -26,7 +45,7 @@ function autoMergeStrictGroup(db: Database.Database, group: DuplicateTransaction
   const head = sorted[0];
   if (!head.merchant_id || !head.source_file_id) return 0;
 
-  let deleted = 0;
+  let merged = 0;
   for (let i = 1; i < sorted.length; i++) {
     const cand = sorted[i];
     if (
@@ -35,9 +54,9 @@ function autoMergeStrictGroup(db: Database.Database, group: DuplicateTransaction
       cand.date === head.date &&
       cand.amount === head.amount
     ) {
-      deleteTransaction(db, cand.id);
-      deleted++;
+      const { alreadyVoid } = voidTransactionAsMirror(db, cand.id, head.id);
+      if (!alreadyVoid) merged++;
     }
   }
-  return deleted;
+  return merged;
 }

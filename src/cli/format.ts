@@ -12,13 +12,13 @@ export function formatInt(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-/** Left-pad a key/value label to `width`, optionally bold (padding first so the ANSI codes don't count toward the width). */
+// Pads before applying bold, so the ANSI codes don't count toward the width.
 function padLabel(label: string, width: number, opts: { bold?: boolean } = {}): string {
   const padded = label.padEnd(width);
   return opts.bold ? chalk.bold(padded) : padded;
 }
 
-/** Human output only (TTY: aligned two-column, piped: tab-separated); never emits JSON, the caller owns --json. */
+// Human output only (TTY: aligned two-column, piped: tab-separated); the caller owns --json.
 export function printKeyValues(
   mode: OutputMode,
   rows: [string, string | number][],

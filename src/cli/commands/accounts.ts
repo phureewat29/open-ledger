@@ -9,36 +9,44 @@ import {
   emitObject,
   emitSummary,
   fail,
+  failReason,
   mapNotFoundError,
   readStdinBatch,
+  redactionEnabled,
   requireYes,
   runAction,
   type Column,
 } from "../output.js";
 import { openDb } from "../db.js";
-import { errorMessage } from "../../lib/result.js";
 import {
   createAccount as createAccountRow,
   mergeAccounts as mergeAccountRows,
   deleteAccount as deleteAccountRow,
+  validateAccountId,
+  type AccountRefusal,
 } from "../../accounts/accounts.js";
 import {
   getAccountBalances,
+  getBalanceTree,
   getRollupBalance,
   adjustAccountBalance,
   type AccountBalanceMinor,
+  type BalanceTreeNode,
 } from "../../accounts/balances.js";
 import {
   findAccountById,
   renameAccount,
   updateAccountMetadata,
-  TOP_LEVEL_TYPES,
+  ACCOUNT_TYPES,
   type AccountType,
   type CreateAccountInput,
+  type UpdateAccountMetadataPatch,
 } from "../../db/queries/accounts.js";
 import { findAccountsByFuzzyName, type FuzzyAccountMatch } from "../../accounts/matching.js";
 import { ensureAccountAncestors } from "../../accounts/resolve.js";
+import { failAccountNotFound, requireAccount } from "../accounts.js";
 import { fromMinorUnits } from "../../lib/money.js";
+import { formatFixed, toDecimalTotals } from "../currency.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
 import { parseInput, safeParse, str, num, int, json } from "../../lib/validate.js";
@@ -62,9 +70,9 @@ const ACCOUNT_COLUMNS: Column<PresentedAccount>[] = [
   { header: "Name", value: (a) => a.name },
   { header: "Type", value: (a) => a.type },
   { header: "Parent", value: (a) => a.parent_id ?? "" },
-  { header: "Balance", value: (a) => a.balance.toFixed(2), align: "right" },
-  { header: "Debits", value: (a) => a.debits_posted.toFixed(2), align: "right" },
-  { header: "Credits", value: (a) => a.credits_posted.toFixed(2), align: "right" },
+  { header: "Balance", value: (a) => formatFixed(a.balance, a.currency), align: "right" },
+  { header: "Debits", value: (a) => formatFixed(a.debits_posted, a.currency), align: "right" },
+  { header: "Credits", value: (a) => formatFixed(a.credits_posted, a.currency), align: "right" },
   { header: "Currency", value: (a) => a.currency },
 ];
 
@@ -75,76 +83,63 @@ const MATCH_COLUMNS: Column<FuzzyAccountMatch>[] = [
   { header: "Similarity", value: (m) => m.similarity.toFixed(3), align: "right" },
 ];
 
-interface AccountTreeNode {
+interface PresentedTreeNode {
   id: string;
   name: string;
   type: string;
+  currency: string;
   balance: number;
-  rollup: number;
-  children: AccountTreeNode[];
+  rollup: Record<string, number>;
+  children: PresentedTreeNode[];
 }
 
-function buildAccountTree(
-  db: Database.Database,
-  type: AccountType | undefined,
-): AccountTreeNode[] {
-  const rows = getAccountBalances(db, type ? { type } : {});
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const childrenMap = new Map<string, AccountBalanceMinor[]>();
-  const roots: AccountBalanceMinor[] = [];
-  for (const r of rows) {
-    if (r.parent_id && byId.has(r.parent_id)) {
-      const arr = childrenMap.get(r.parent_id) ?? [];
-      arr.push(r);
-      childrenMap.set(r.parent_id, arr);
-    } else {
-      roots.push(r);
-    }
-  }
-  // Per-currency sums convert in sorted order to match getRollupBalance, so the two can't drift.
-  const build = (row: AccountBalanceMinor): { node: AccountTreeNode; sums: Map<string, number> } => {
-    const sums = new Map<string, number>();
-    const children = (childrenMap.get(row.id) ?? []).map((childRow) => {
-      const built = build(childRow);
-      for (const [currency, minor] of built.sums) {
-        sums.set(currency, (sums.get(currency) ?? 0) + minor);
-      }
-      return built.node;
-    });
-    sums.set(row.currency, (sums.get(row.currency) ?? 0) + row.balance_minor);
-
-    let rollup = 0;
-    for (const currency of [...sums.keys()].sort()) {
-      rollup += fromMinorUnits(sums.get(currency)!, currency);
-    }
-    return {
-      node: { id: row.id, name: row.name, type: row.type, balance: row.balance, rollup, children },
-      sums,
-    };
+function presentTreeNode(node: BalanceTreeNode): PresentedTreeNode {
+  return {
+    id: node.id,
+    name: node.name,
+    type: node.type,
+    currency: node.currency,
+    balance: fromMinorUnits(node.balance_minor, node.currency),
+    rollup: toDecimalTotals(node.rollup),
+    children: node.children.map(presentTreeNode),
   };
-  return roots.map((row) => build(row).node);
 }
 
-function renderTreeTty(nodes: AccountTreeNode[], depth = 0): void {
+/** One `<code> amount` pair per currency, in the key order `toDecimalTotals` fixed. */
+function formatTotals(totals: Record<string, number>): string {
+  return Object.entries(totals)
+    .map(([currency, amount]) => `${currency} ${formatFixed(amount, currency)}`)
+    .join(" ");
+}
+
+function renderTreeTty(nodes: PresentedTreeNode[], depth = 0): void {
   for (const n of nodes) {
     const indent = "  ".repeat(depth);
     process.stdout.write(
-      `${indent}${n.name} (${n.id})  ${n.balance.toFixed(2)} [rollup ${n.rollup.toFixed(2)}]\n`,
+      `${indent}${n.name} (${n.id})  ${formatFixed(n.balance, n.currency)} [rollup ${formatTotals(n.rollup)}]\n`,
     );
     renderTreeTty(n.children, depth + 1);
   }
 }
 
-function flattenTree(nodes: AccountTreeNode[], depth: number, out: string[]): void {
+function flattenTree(nodes: PresentedTreeNode[], depth: number, out: string[]): void {
   for (const n of nodes) {
     out.push(
-      [String(depth), n.id, n.name, n.type, n.balance.toFixed(2), n.rollup.toFixed(2)].join("\t"),
+      [
+        String(depth),
+        n.id,
+        n.name,
+        n.type,
+        n.currency,
+        formatFixed(n.balance, n.currency),
+        formatTotals(n.rollup),
+      ].join("\t"),
     );
     flattenTree(n.children, depth + 1, out);
   }
 }
 
-function renderTreePlain(nodes: AccountTreeNode[]): void {
+function renderTreePlain(nodes: PresentedTreeNode[]): void {
   const out: string[] = [];
   flattenTree(nodes, 0, out);
   if (out.length) process.stdout.write(out.join("\n") + "\n");
@@ -153,8 +148,8 @@ function renderTreePlain(nodes: AccountTreeNode[]): void {
 // Fails an invalid --type with the same wording zod produces for `accounts create --type`.
 function parseAccountTypeFilter(type: string | undefined): AccountType | undefined {
   if (type === undefined) return undefined;
-  if (!TOP_LEVEL_TYPES.includes(type as AccountType)) {
-    fail("USAGE", `--type must be one of ${TOP_LEVEL_TYPES.join(", ")}, got "${type}"`);
+  if (!ACCOUNT_TYPES.includes(type as AccountType)) {
+    fail("USAGE", `--type must be one of ${ACCOUNT_TYPES.join(", ")}, got "${type}"`);
   }
   return type as AccountType;
 }
@@ -169,7 +164,7 @@ async function listAccounts(opts: ListAccountsOpts): Promise<void> {
   const type = parseAccountTypeFilter(opts.type);
   const rows = applyRedaction(
     getAccountBalances(db, type ? { type } : {}).map(presentAccount),
-    !!opts.redact,
+    redactionEnabled(opts),
     ACCOUNT_REDACT_FIELDS,
   );
   emitList(rows, ACCOUNT_COLUMNS);
@@ -184,7 +179,11 @@ interface TreeAccountsOpts {
 async function treeAccounts(opts: TreeAccountsOpts): Promise<void> {
   const db = await openDb();
   const type = parseAccountTypeFilter(opts.type);
-  const roots = applyRedaction(buildAccountTree(db, type), !!opts.redact, ACCOUNT_REDACT_FIELDS);
+  const roots = applyRedaction(
+    getBalanceTree(db, type ? { type } : {}).map(presentTreeNode),
+    redactionEnabled(opts),
+    ACCOUNT_REDACT_FIELDS,
+  );
   const mode = currentMode();
   if (mode.json) {
     // One object per root so every stdout line stays a single JSON object.
@@ -201,8 +200,7 @@ async function treeAccounts(opts: TreeAccountsOpts): Promise<void> {
 
 async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise<void> {
   const db = await openDb();
-  const account = findAccountById(db, id);
-  if (!account) fail("NOT_FOUND", `account "${id}" not found`);
+  const account = requireAccount(db, id);
   const balances = getAccountBalances(db, { idOrParent: id });
   const self = balances.find((b) => b.id === id);
   const children = balances
@@ -215,10 +213,10 @@ async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise
         balance: self?.balance ?? 0,
         debits_posted: self ? fromMinorUnits(self.debits_posted, self.currency) : 0,
         credits_posted: self ? fromMinorUnits(self.credits_posted, self.currency) : 0,
-        rollup: getRollupBalance(db, id),
+        rollup: toDecimalTotals(getRollupBalance(db, id)),
         children,
       },
-      !!opts.redact,
+      redactionEnabled(opts),
       ACCOUNT_REDACT_FIELDS,
     ),
   );
@@ -227,12 +225,11 @@ async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise
 const CREATE_ACCOUNT_SPEC = z.object({
   id: str(),
   name: str(),
-  type: z.enum(TOP_LEVEL_TYPES as unknown as [AccountType, ...AccountType[]]),
+  type: z.enum(ACCOUNT_TYPES as unknown as [AccountType, ...AccountType[]]),
   parent_id: str().optional(),
   subtype: str().optional(),
   bank_name: str().optional(),
   account_number_masked: str().optional(),
-  currency: str().optional(),
   due_day: int().optional(),
   statement_day: int().optional(),
   metadata: json<Record<string, unknown>>().optional(),
@@ -244,53 +241,74 @@ const CREATE_ACCOUNT_ALIASES = {
   account_number_masked: ["masked"],
 };
 
-interface CreateOneAccountResult {
+interface CreatedAccount {
+  readonly ok: true;
   id: string;
   created_parents: string[];
   account_number_masked?: string | null;
 }
 
-/** Auto-creates missing ancestors from the id's colon segments when no parent was
- *  given; skipped for an unrecognized type so `createAccountRow` reports a clean
- *  INVALID. Throws on failure, including the `ACCOUNT_EXISTS`-coded duplicate. */
-function createOneAccount(
-  db: Database.Database,
-  parsed: z.infer<typeof CREATE_ACCOUNT_SPEC>,
-): CreateOneAccountResult {
-  let parentId = parsed.parent_id ?? null;
-  let createdParents: string[] = [];
-  if (parsed.parent_id === undefined && TOP_LEVEL_TYPES.includes(parsed.type)) {
-    const ancestors = ensureAccountAncestors(db, parsed.id, parsed.type);
-    if (ancestors.parentId !== null) {
-      parentId = ancestors.parentId;
-      createdParents = ancestors.createdParents;
-    }
-  }
+type CreateOneAccountOutcome = CreatedAccount | AccountRefusal;
 
-  const input: CreateAccountInput = {
-    id: parsed.id,
-    name: parsed.name,
-    type: parsed.type,
-    parent_id: parentId,
-    subtype: parsed.subtype ?? null,
-    bank_name: parsed.bank_name ?? null,
-    account_number_masked: parsed.account_number_masked ?? null,
-    currency: parsed.currency,
-    due_day: parsed.due_day ?? null,
-    statement_day: parsed.statement_day ?? null,
-    metadata: parsed.metadata ?? null,
-  };
-  createAccountRow(db, input);
-
-  const result: CreateOneAccountResult = { id: input.id, created_parents: createdParents };
-  // Echo the stored (post-normalization) value rather than re-deriving it.
-  if (parsed.account_number_masked !== undefined) {
-    result.account_number_masked = findAccountById(db, input.id)?.account_number_masked ?? null;
+// db.transaction rolls back only on throw, so a refusal must throw to undo any
+// parent-ledger write that preceded it.
+class RefusedCreate extends Error {
+  constructor(readonly failure: AccountRefusal) {
+    super(failure.message);
   }
-  return result;
 }
 
-function maskedResultField(result: CreateOneAccountResult): Record<string, unknown> {
+// Auto-creates missing ancestors when no parent was given; the whole chain is one
+// transaction, so a refused leaf can't leave an unwanted ledger open.
+export function createOneAccount(
+  db: Database.Database,
+  parsed: z.infer<typeof CREATE_ACCOUNT_SPEC>,
+): CreateOneAccountOutcome {
+  const grammar = validateAccountId(parsed.id, parsed.type);
+  if (!grammar.ok) return grammar;
+
+  try {
+    return db.transaction((): CreateOneAccountOutcome => {
+      let parentId = parsed.parent_id ?? null;
+      let createdParents: string[] = [];
+      if (parsed.parent_id === undefined) {
+        const ancestors = ensureAccountAncestors(db, parsed.id, parsed.type);
+        if (!ancestors.ok) throw new RefusedCreate(ancestors);
+        if (ancestors.parentId !== null) {
+          parentId = ancestors.parentId;
+          createdParents = ancestors.createdParents;
+        }
+      }
+
+      const input: CreateAccountInput = {
+        id: parsed.id,
+        name: parsed.name,
+        type: parsed.type,
+        parent_id: parentId,
+        subtype: parsed.subtype ?? null,
+        bank_name: parsed.bank_name ?? null,
+        account_number_masked: parsed.account_number_masked ?? null,
+        due_day: parsed.due_day ?? null,
+        statement_day: parsed.statement_day ?? null,
+        metadata: parsed.metadata ?? null,
+      };
+      const created = createAccountRow(db, input);
+      if (!created.ok) throw new RefusedCreate(created);
+
+      const result: CreatedAccount = { ok: true, id: input.id, created_parents: createdParents };
+      // Echo the stored (post-normalization) value rather than re-deriving it.
+      if (parsed.account_number_masked !== undefined) {
+        result.account_number_masked = findAccountById(db, input.id)?.account_number_masked ?? null;
+      }
+      return result;
+    })();
+  } catch (err) {
+    if (err instanceof RefusedCreate) return err.failure;
+    throw err;
+  }
+}
+
+function maskedResultField(result: CreatedAccount): Record<string, unknown> {
   return result.account_number_masked !== undefined
     ? { account_number_masked: result.account_number_masked }
     : {};
@@ -299,26 +317,21 @@ function maskedResultField(result: CreateOneAccountResult): Record<string, unkno
 async function createSingleAccount(opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(CREATE_ACCOUNT_SPEC, opts, { aliases: CREATE_ACCOUNT_ALIASES });
   const db = await openDb();
-  let result: CreateOneAccountResult;
-  try {
-    result = createOneAccount(db, parsed);
-  } catch (err) {
-    mapNotFoundError(err, /does not exist/i);
-  }
+  const outcome = createOneAccount(db, parsed);
+  if (!outcome.ok) failReason(outcome);
   emitObject({
-    id: result.id,
+    id: outcome.id,
     created: true,
-    created_parents: result.created_parents,
-    ...maskedResultField(result),
+    created_parents: outcome.created_parents,
+    ...maskedResultField(outcome),
   });
 }
 
 // json/color are global flags, not per-account options.
 const NON_ACCOUNT_FLAG_KEYS = new Set(["input", "json", "color"]);
 
-/** `ingest commit`'s batch shape: one result row per item, a summary row, exit
- *  PARTIAL(7) on any failure. `ACCOUNT_EXISTS` counts as an idempotent success
- *  (`duplicate: true`) so re-running a batch is a no-op. */
+// One result row per item plus a summary row, exit PARTIAL(7) on any failure;
+// `account_exists` counts as an idempotent success (`duplicate: true`).
 async function createAccountsBatch(inputPath: string | undefined): Promise<void> {
   const items = await readStdinBatch(inputPath);
   if (items.length === 0) fail("USAGE", "no account data provided");
@@ -344,8 +357,8 @@ async function createAccountsBatch(inputPath: string | undefined): Promise<void>
       continue;
     }
 
-    try {
-      const one = createOneAccount(db, parsed.value);
+    const one = createOneAccount(db, parsed.value);
+    if (one.ok) {
       created++;
       results.push({
         type: "result",
@@ -356,15 +369,15 @@ async function createAccountsBatch(inputPath: string | undefined): Promise<void>
         created_parents: one.created_parents,
         ...maskedResultField(one),
       });
-    } catch (err: any) {
-      if (err?.code === "ACCOUNT_EXISTS") {
-        duplicates++;
-        results.push({ type: "result", index, ok: true, id: parsed.value.id, duplicate: true });
-        continue;
-      }
-      failed++;
-      results.push({ type: "result", index, ok: false, message: errorMessage(err) });
+      continue;
     }
+    if (one.reason === "account_exists") {
+      duplicates++;
+      results.push({ type: "result", index, ok: true, id: parsed.value.id, duplicate: true });
+      continue;
+    }
+    failed++;
+    results.push({ type: "result", index, ok: false, message: one.message });
   }
 
   const mode = currentMode();
@@ -409,6 +422,7 @@ async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
   try {
     result = mergeAccountRows(db, parsed.from, parsed.to);
   } catch (err) {
+    // A cross-ledger merge's message matches neither not-found pattern, so it maps to INVALID.
     mapNotFoundError(err, /does not exist/i);
   }
   emitObject({
@@ -416,12 +430,13 @@ async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
     to: parsed.to,
     moved: result.moved,
     deleted_self_transactions: result.deletedSelfTransactions,
+    moved_merchant_defaults: result.movedMerchantDefaults,
   });
 }
 
 async function deleteAccount(id: string, opts: { yes?: boolean }): Promise<void> {
   const db = await openDb();
-  if (!findAccountById(db, id)) fail("NOT_FOUND", `account "${id}" not found`);
+  requireAccount(db, id);
   requireYes(opts, "deleting this account");
   try {
     deleteAccountRow(db, id);
@@ -483,20 +498,32 @@ const UPDATE_ACCOUNT_ALIASES = {
   bank_name: ["bank"],
 };
 
+// Reward points aren't a ledger unit, so they ride in the metadata blob rather than a stored column.
+function buildAccountPatch(
+  parsed: Omit<z.infer<typeof UPDATE_ACCOUNT_SPEC>, "name">,
+): UpdateAccountMetadataPatch {
+  const { points_balance, metadata, ...rest } = parsed;
+  const patch: UpdateAccountMetadataPatch = { ...rest };
+  if (metadata !== undefined) patch.metadata = metadata;
+  if (points_balance !== undefined) patch.metadata = { ...patch.metadata, points_balance };
+  return patch;
+}
+
 async function updateAccount(id: string, opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(UPDATE_ACCOUNT_SPEC, opts, {
     aliases: UPDATE_ACCOUNT_ALIASES,
     atLeastOne:
       "at least one of --name, --due-day, --statement-day, --points, --masked, --bank, --metadata is required",
   });
-  const { name, ...patch } = parsed;
+  const { name, ...rest } = parsed;
+  const patch = buildAccountPatch(rest);
 
   const db = await openDb();
   const result: Record<string, unknown> = { id };
 
   if (name !== undefined) {
     const changes = renameAccount(db, id, name);
-    if (changes === 0) fail("NOT_FOUND", `account "${id}" not found`);
+    if (changes === 0) failAccountNotFound(db, id);
     result.name = name;
     result.renamed = true;
   }
@@ -508,7 +535,8 @@ async function updateAccount(id: string, opts: Record<string, unknown>): Promise
     } catch (err) {
       mapNotFoundError(err, /does not exist/i);
     }
-    Object.assign(result, metaResult);
+    result.before = metaResult.before;
+    result.after = metaResult.after;
   }
 
   emitObject(result);
@@ -522,8 +550,9 @@ export function registerAccounts(program: Command): void {
       "after",
       [
         "",
-        "Behavior: manages the chart of accounts, colon-paths under asset, liability, income, expense, equity.",
+        "Behavior: manages the chart of accounts. Ids are <currency>:<type>:<path> — the currency comes first and every id needs it: thb:asset:bank:kbank, usd:expense:food. Types are asset, liability, income, expense, equity; thb:asset is a ledger's type root.",
         "Typical flow: match to reuse an existing account before create; read balances with tree or show.",
+        "One ledger per currency: an account's currency is its id prefix, and a transaction's two accounts must share it. A USD balance lives under usd:, never under thb:.",
         "Example: oled accounts match --query groceries --json",
       ].join("\n"),
     );
@@ -551,14 +580,13 @@ export function registerAccounts(program: Command): void {
   accounts
     .command("create")
     .description("Create a new account (single via flags, or batch via --input)")
-    .option("--id <id>", "account id")
+    .option("--id <id>", "account id, currency-prefixed (e.g. thb:asset:bank:kbank)")
     .option("--name <name>", "account name")
     .option("--type <type>", "account type")
     .option("--parent <id>", "parent account id")
     .option("--subtype <s>", "account subtype")
     .option("--bank <name>", "bank name")
     .option("--masked <number>", "masked account number")
-    .option("--currency <code>", "currency code")
     .option("--due-day <n>", "payment due day")
     .option("--statement-day <n>", "statement closing day")
     .option("--metadata <json>", "additional metadata as JSON")

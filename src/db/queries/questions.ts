@@ -2,13 +2,11 @@ import type Database from "libsql";
 import { randomUUID } from "crypto";
 import { parseJsonOrNull } from "../../lib/json.js";
 import { clampLimit, clampOffset } from "../../lib/limit.js";
+import { ISO_NOW_SQL, ISO_SHIFTED_SQL } from "../timestamps.js";
 
-interface QuestionTarget {
+interface RecordQuestionInput {
   transaction_id?: string | null;
   account_id: string | null;
-}
-
-interface RecordQuestionInput extends QuestionTarget {
   file_id: string | null;
   batch_id?: string | null;
   kind?: string | null;
@@ -36,8 +34,7 @@ interface ClosedQuestion {
   prompt: string;
   kind: string | null;
   answer: string;
-  /** Stable signature from context_json the rule synthesizer keys a learned
-   *  rule on (so future questions with different prose still match); null learns nothing. */
+  /** Stable signature from context_json the rule synthesizer keys a learned rule on; null learns nothing. */
   rule_key: string | null;
 }
 
@@ -58,12 +55,6 @@ export function recordQuestion(db: Database.Database, input: RecordQuestionInput
     input.options ? JSON.stringify(input.options) : null,
     input.context ? JSON.stringify(input.context) : null,
   );
-  if (input.transaction_id) {
-    db.prepare(`UPDATE transactions SET has_question = 1 WHERE id = ?`).run(input.transaction_id);
-  }
-  if (input.account_id) {
-    db.prepare(`UPDATE accounts SET has_question = 1 WHERE id = ?`).run(input.account_id);
-  }
   return id;
 }
 
@@ -74,24 +65,12 @@ export function closeQuestion(
   answer: string,
 ): ClosedQuestion | null {
   const row = db
-    .prepare(
-      `SELECT prompt, kind, transaction_id, account_id, context_json FROM questions WHERE id = ?`,
-    )
+    .prepare(`SELECT prompt, kind, context_json FROM questions WHERE id = ?`)
     .get(id) as
-    | {
-        prompt: string;
-        kind: string | null;
-        transaction_id: string | null;
-        account_id: string | null;
-        context_json: string | null;
-      }
+    | { prompt: string; kind: string | null; context_json: string | null }
     | undefined;
   if (!row) return null;
   db.prepare(`DELETE FROM questions WHERE id = ?`).run(id);
-  maybeClearHasQuestionFlags(db, {
-    transaction_id: row.transaction_id,
-    account_id: row.account_id,
-  });
   return {
     prompt: row.prompt,
     kind: row.kind,
@@ -105,22 +84,6 @@ function extractRuleKey(contextJson: string | null): string | null {
   return typeof parsed?.rule_key === "string" ? parsed.rule_key : null;
 }
 
-// Safe to call after any resolution; idempotent.
-function maybeClearHasQuestionFlags(db: Database.Database, target: QuestionTarget): void {
-  if (target.transaction_id) {
-    const open = db
-      .prepare(`SELECT 1 FROM questions WHERE transaction_id = ? LIMIT 1`)
-      .get(target.transaction_id);
-    if (!open) db.prepare(`UPDATE transactions SET has_question = 0 WHERE id = ?`).run(target.transaction_id);
-  }
-  if (target.account_id) {
-    const open = db
-      .prepare(`SELECT 1 FROM questions WHERE account_id = ? LIMIT 1`)
-      .get(target.account_id);
-    if (!open) db.prepare(`UPDATE accounts SET has_question = 0 WHERE id = ?`).run(target.account_id);
-  }
-}
-
 interface CountQuestionsScope {
   file_id?: string;
   transaction_id?: string;
@@ -131,7 +94,7 @@ interface CountQuestionsScope {
 }
 
 const ACTIVE_DEFERRED_CLAUSE =
-  "(deferred_until IS NULL OR deferred_until <= datetime('now'))";
+  `(deferred_until IS NULL OR deferred_until <= ${ISO_NOW_SQL})`;
 
 export function countQuestions(db: Database.Database, scope: CountQuestionsScope = {}): number {
   const conditions: string[] = [];
@@ -187,10 +150,7 @@ export function listQuestions(
   ).all(...params) as QuestionRow[];
 }
 
-/**
- * `listQuestions`/`countQuestions` hide deferred rows by default until the
- * timestamp passes; pass `includeDeferred: true` for an unfiltered view.
- */
+/** `listQuestions`/`countQuestions` hide deferred rows by default until the timestamp passes (`includeDeferred: true` shows all). */
 export function deferQuestion(
   db: Database.Database,
   id: string,
@@ -198,7 +158,7 @@ export function deferQuestion(
 ): boolean {
   const safeDays = Math.max(1, Math.floor(days));
   const result = db
-    .prepare(`UPDATE questions SET deferred_until = datetime('now', ?) WHERE id = ?`)
+    .prepare(`UPDATE questions SET deferred_until = ${ISO_SHIFTED_SQL} WHERE id = ?`)
     .run(`+${safeDays} days`, id);
   return result.changes > 0;
 }

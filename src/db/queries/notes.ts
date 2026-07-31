@@ -18,16 +18,18 @@ export function countNotes(db: Database.Database): number {
   return row.n;
 }
 
-/**
- * Idempotent on (category, content): a verbatim repeat is a no-op. Semantic
- * dedup (different wording for the same note) is the calling agent's job.
- */
-export function addNote(db: Database.Database, content: string, category = "fact"): void {
+/** Idempotent on (category, content): a verbatim repeat returns the existing row unchanged. Semantic dedup is the calling agent's job. */
+export function addNote(db: Database.Database, content: string, category = "fact"): NoteRow {
   const existing = db
-    .prepare(`SELECT 1 FROM notes WHERE category = ? AND content = ? LIMIT 1`)
-    .get(category, content);
-  if (existing) return;
-  db.prepare(`INSERT INTO notes (content, category) VALUES (?, ?)`).run(content, category);
+    .prepare(`SELECT id, content, category, created_at FROM notes WHERE category = ? AND content = ? LIMIT 1`)
+    .get(category, content) as NoteRow | undefined;
+  if (existing) return existing;
+  const { lastInsertRowid } = db
+    .prepare(`INSERT INTO notes (content, category) VALUES (?, ?)`)
+    .run(content, category);
+  return db
+    .prepare(`SELECT id, content, category, created_at FROM notes WHERE id = ?`)
+    .get(lastInsertRowid) as NoteRow;
 }
 
 export function deleteNote(db: Database.Database, id: number): NoteRow | null {

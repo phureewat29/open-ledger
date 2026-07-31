@@ -4,12 +4,10 @@ import { Command } from "commander";
 import { visibleLength, ANSI_RE } from "./format.js";
 import { ValidationError } from "../lib/validate.js";
 import { errorMessage } from "../lib/result.js";
+import { DBNotReadyError } from "../db/errors.js";
+import type { AccountFailure } from "../accounts/accounts.js";
 
-/**
- * emit()/emitSummary() no-op outside --json, so a stray call from a command's
- * human layout can't corrupt it. A single-result command should use
- * emitObject() instead, which renders in every mode.
- */
+/** emit()/emitSummary() no-op outside --json; use emitObject() for a single result instead. */
 
 export const EXIT = {
   OK: 0,
@@ -24,7 +22,8 @@ export const EXIT = {
 
 export type ExitCode = keyof typeof EXIT;
 
-class CliError extends Error {
+// Not exported: fail() is the only construction site for CLIError.
+class CLIError extends Error {
   readonly code: ExitCode;
   readonly hint?: string;
   readonly details?: unknown;
@@ -34,20 +33,19 @@ class CliError extends Error {
     opts?: { hint?: string; details?: unknown },
   ) {
     super(message);
-    this.name = "CliError";
+    this.name = "CLIError";
     this.code = code;
     this.hint = opts?.hint;
     this.details = opts?.details;
   }
 }
 
-/** Never returns, so callers can use it as a value guard. */
 export function fail(
   code: ExitCode,
   message: string,
   opts?: { hint?: string; details?: unknown },
 ): never {
-  throw new CliError(code, message, opts);
+  throw new CLIError(code, message, opts);
 }
 
 export interface OutputMode {
@@ -59,10 +57,7 @@ export interface OutputMode {
   color: boolean;
 }
 
-/**
- * ORs flags across the whole ancestor chain: commander leaves a global flag
- * on whichever level declared/consumed it, so walking up finds it regardless.
- */
+// ORs flags across the ancestor chain: commander leaves a global flag wherever it was consumed.
 function resolveMode(cmd?: Command): OutputMode {
   let json = false;
   let noColorFlag = false;
@@ -86,18 +81,13 @@ function getOutputMode(cmd?: Command): OutputMode {
   return current;
 }
 
-/** The mode resolved for the running action (lazily defaulted for direct calls). */
 export function currentMode(): OutputMode {
   if (!current) current = resolveMode(undefined);
   return current;
 }
 
-/**
- * libsql attaches `_metadata: { duration }` to every `.get()` row, so any
- * command that spreads a row into its payload would publish it. Stripped once
- * here at the boundary rather than at 39 query sites. Top level only: `.all()`
- * rows carry no `_metadata`, so nested arrays never need it.
- */
+// libsql attaches `_metadata: { duration }` to every `.get()` row; stripped once here.
+// `.all()` rows carry no `_metadata`, so nested arrays don't need it.
 function stripMetadata<T>(value: T): T {
   if (value === null || typeof value !== "object" || !("_metadata" in value)) return value;
   const rest = { ...(value as Record<string, unknown>) };
@@ -195,6 +185,12 @@ export function requireYes(opts: { yes?: boolean }, what: string): void {
   }
 }
 
+// Redaction is on unless --no-redact set opts.redact === false; it's undefined for a
+// direct call, so `!!opts.redact` reads backwards.
+export function redactionEnabled(opts: { redact?: boolean }): boolean {
+  return opts.redact !== false;
+}
+
 /** Empty string when stdin is a TTY (no pipe). */
 async function readStdinToEnd(): Promise<string> {
   if (process.stdin.isTTY) return "";
@@ -205,11 +201,8 @@ async function readStdinToEnd(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/**
- * Reads batch rows from `--input <file>` or stdin: the CLI's only stdin
- * read, kept because batches outgrow argv. Auto-detects a JSON array (first
- * non-ws char is `[`) vs NDJSON; row validation is the caller's job.
- */
+// Reads `--input <file>` or stdin, auto-detecting a JSON array (leading `[`) vs NDJSON.
+// Row validation is the caller's job.
 export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   const from = inputPath ?? "stdin";
   let source: string;
@@ -261,36 +254,36 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-const NOT_READY_PATTERNS = [
-  "failed to open database",
-  "corrupt database",
-  "not a database",
-  "file is encrypted",
-  "not configured",
-  "not an openledger database",
-];
-
-function isNotReadyError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message.toLowerCase() : "";
-  return NOT_READY_PATTERNS.some((p) => msg.includes(p));
-}
-
-function toCliError(err: unknown): CliError {
-  if (err instanceof CliError) return err;
+export function toCLIError(err: unknown): CLIError {
+  if (err instanceof CLIError) return err;
   if (err instanceof ValidationError) {
-    return new CliError("USAGE", err.message, {
+    return new CLIError("USAGE", err.message, {
       hint: "append --help to the command for its flags and usage",
     });
   }
-  if (isNotReadyError(err)) {
-    return new CliError("NOT_READY", (err as Error).message, {
+  if (err instanceof DBNotReadyError) {
+    return new CLIError("NOT_READY", err.message, {
       hint: "run `oled config --init` to configure the harness",
     });
   }
-  return new CliError("GENERIC", errorMessage(err));
+  return new CLIError("GENERIC", errorMessage(err));
 }
 
-/** Domain errors are thrown as plain `Error`s, so they're matched by message, not type. */
+// Record<Union, ExitCode> fails the build if a reason case is unhandled.
+export const REASON_EXIT: Record<AccountFailure, ExitCode> = {
+  account_exists: "INVALID",
+  parent_not_found: "NOT_FOUND",
+  invalid_hierarchy: "INVALID",
+};
+
+export function failReason(
+  failure: { reason: AccountFailure; message: string },
+  hint?: string,
+): never {
+  fail(REASON_EXIT[failure.reason], failure.message, hint === undefined ? undefined : { hint });
+}
+
+// Matches error message text, for throw sites that use a plain `Error` instead of a typed reason.
 export function mapNotFoundError(err: unknown, extraNotFound?: RegExp): never {
   const message = errorMessage(err);
   if (/not found/i.test(message) || (extraNotFound && extraNotFound.test(message))) {
@@ -300,7 +293,7 @@ export function mapNotFoundError(err: unknown, extraNotFound?: RegExp): never {
 }
 
 function reportError(err: unknown): number {
-  const cliErr = toCliError(err);
+  const cliErr = toCLIError(err);
   if (currentMode().json) {
     const payload: Record<string, unknown> = {
       code: `E_${cliErr.code}`,
@@ -316,11 +309,7 @@ function reportError(err: unknown): number {
   return EXIT[cliErr.code];
 }
 
-/**
- * At the parse boundary commander aborts before any action runs, so nothing
- * resolved the mode and `--json` may still be unparsed, so argv is the only
- * signal left.
- */
+// Commander aborts at parse before any action runs, so `--json` may still be unparsed here; argv is the only signal left.
 export function jsonRequested(): boolean {
   return process.argv.includes("--json");
 }
@@ -330,10 +319,7 @@ export function reportParseError(err: unknown): void {
   process.exitCode = reportError(err);
 }
 
-/**
- * The command is commander's last positional arg. Sets `process.exitCode` rather
- * than calling `process.exit` so buffered stdout/stderr flush before the process ends.
- */
+// Sets process.exitCode rather than calling process.exit so buffered stdout/stderr flush before exit.
 export function runAction<A extends unknown[]>(
   fn: (...args: A) => unknown | Promise<unknown>,
 ): (...args: A) => Promise<void> {

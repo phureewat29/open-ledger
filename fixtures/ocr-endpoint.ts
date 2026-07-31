@@ -15,11 +15,7 @@ const liveOcrSource: OcrConfigSource = {
 
 export const liveOcr: OcrSettings | null = resolveOcr(liveOcrSource);
 
-/**
- * The url alone decides whether OCR is configured, so a model without one would
- * skip every live suite while looking deliberate. Half-set env is a mistake, and
- * a mistake must not read as a clean skip.
- */
+/** The url alone decides whether OCR is configured; half-set env is a mistake and must not read as a clean skip. */
 if (!liveOcr && liveOcrSource.ocrModel) {
   throw new Error("OLED_OCR_MODEL is set without OLED_OCR_BASE_URL: the live OCR suites would skip silently");
 }

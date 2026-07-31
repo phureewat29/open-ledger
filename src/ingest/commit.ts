@@ -1,31 +1,41 @@
 import type Database from "libsql";
-import { config } from "../config.js";
 import {
+  ensureUncategorizedFallback,
+  namesUnopenedLedger,
   resolveOnePosting,
   resolveMerchantId,
   type AccountHint,
+  type PostingResolution,
   type ResolvedMerchant,
 } from "../accounts/resolve.js";
-import { findAccountCurrency } from "../db/queries/accounts.js";
 import {
+  findTransactionById,
   insertTransaction,
   insertLinkedTransactions,
+  invalidTransaction,
   validateTransaction,
+  validateTransactionFields,
   type TransactionInput,
   type ValidateTransactionResult,
 } from "../db/queries/transactions.js";
-import { deriveTransactionId, deriveGroupId, newTransactionId, newGroupId } from "../lib/ids.js";
+import {
+  currencyOf,
+  deriveTransactionId,
+  deriveGroupId,
+  isLedgerScopedId,
+  newTransactionId,
+  newGroupId,
+  typeFromId,
+} from "../lib/ids.js";
 import { toMinorUnits } from "../lib/money.js";
-import { ISO_DATE_RE } from "../lib/date.js";
+import { ACCOUNT_TYPES, ledgerExists, type AccountType } from "../db/queries/accounts.js";
 import { recordQuestion } from "../db/queries/questions.js";
 import type { MerchantUpsertInput } from "../db/queries/merchants.js";
+import { noiseTokens } from "../datasets/noise.js";
+import { config } from "../config.js";
 
-/**
- * Both legs must share a currency (derived from the accounts, never trusted
- * from input); a cross-currency move needs a linked conversion pair.
- */
 export const CURRENCY_MISMATCH_HINT =
-  "add a linked conversion pair (one leg per currency, sharing a group)";
+  "add a linked conversion pair through <currency>:equity:conversion (one leg per currency, sharing a group)";
 
 export interface TransactionCommitContext {
   readonly batchId: string | null;
@@ -47,17 +57,48 @@ export interface RawTransactionInput {
   credit_account_id: string;
   // DECIMAL in `currency`; converted to minor units during commit.
   amount: number;
-  // Agent-supplied hint; the DERIVED currency from the resolved accounts
-  // wins, and a conflict is reported via `currencyOverridden`.
+  // Hint only; account ids' currency wins, conflict surfaces as `currencyOverridden`.
   currency?: string | null;
-  code?: string | null;
-  user_ref?: string | null;
   source_page?: number | null;
   row_index?: number | null;
   leg_index?: number | null;
 }
 
 type TransactionDropReason = "dirty_input" | "currency_mismatch";
+
+/** `unopenedLedger` flags the currency_mismatch whose repair is opening that
+ *  ledger, not a conversion pair; callers branch on it, not on message text. */
+interface CommitDrop {
+  ok: false;
+  reason: TransactionDropReason;
+  message: string;
+  raisedQuestions: number;
+  unopenedLedger?: string;
+}
+
+export type TransactionSide = "debit" | "credit";
+
+export type SideHow =
+  | "exact"
+  | "similar_account"
+  | "placeholder_created"
+  | "uncategorized_fallback"
+  | "as_committed";
+
+/** Callers emit these fields verbatim: declared key order is the NDJSON key order. */
+export interface CommittedSide {
+  side: TransactionSide;
+  requested: string;
+  resolved: string;
+  how: SideHow;
+  similar_to?: string;
+}
+
+/** `unknown` means the row named a merchant id no merchant here answers to. */
+export interface CommittedMerchant {
+  how: "none" | "unknown" | "linked";
+  merchant_id?: string;
+}
 
 type TransactionCommitOutcome =
   | {
@@ -66,29 +107,24 @@ type TransactionCommitOutcome =
       duplicate: boolean;
       raisedQuestions: number;
       currencyOverridden: boolean;
+      /** Debit first, then credit. */
+      sides: CommittedSide[];
+      merchant: CommittedMerchant;
     }
-  | {
-      ok: false;
-      reason: TransactionDropReason;
-      message: string;
-      raisedQuestions: number;
-    };
+  | CommitDrop;
 
+/** No `sides` here: each leg has its own pair; the group is what's reported. */
 type LinkedTransactionsOutcome =
   | {
       ok: true;
       group_id: string;
       results: { id: string; duplicate: boolean }[];
       raisedQuestions: number;
+      /** True when any leg stated a currency its accounts overruled. */
+      currencyOverridden: boolean;
+      merchant: CommittedMerchant;
     }
-  | {
-      ok: false;
-      reason: TransactionDropReason;
-      message: string;
-      raisedQuestions: number;
-    };
-
-export type TransactionSide = "debit" | "credit";
+  | CommitDrop;
 
 export interface TransactionCommitHooks {
   onCommitted(transactionId: string): void;
@@ -97,11 +133,11 @@ export interface TransactionCommitHooks {
   /** A well-formed multi-segment hint was silently auto-created as a placeholder
    *  account. Reported for the per-side resolution summary; raises NO question. */
   onPlaceholderAccount(side: TransactionSide, accountId: string, transactionId: string): void;
-  /** A hint couldn't be built into a well-formed path and fell back to
-   *  `expense:uncategorized`. Raises the `uncategorized` question. */
+  /** A hint couldn't be built into a well-formed path and fell back to the
+   *  other side's `<currency>:expense:uncategorized`. Raises the `uncategorized`
+   *  question. */
   onUncategorizedFallback(side: TransactionSide, accountId: string, transactionId: string): void;
-  /** The side posted to `accountId`, created as asked; `similarId` is an
-   *  existing lookalike the caller may want to merge. Raises `similar_accounts`. */
+  /** `similarId` is an existing lookalike to maybe merge. Raises `similar_accounts`. */
   onSimilarAccount(
     side: TransactionSide,
     accountId: string,
@@ -112,6 +148,13 @@ export interface TransactionCommitHooks {
     input: RawTransactionInput,
     debit: { id: string; currency: string },
     credit: { id: string; currency: string },
+  ): void;
+  /** Whole row refused before anything was written. Raises `currency_mismatch`. */
+  onUnknownLedger(
+    input: RawTransactionInput,
+    side: TransactionSide,
+    accountId: string,
+    ledger: string,
   ): void;
 }
 
@@ -131,10 +174,7 @@ function accountPairKey(a: string, b: string): string {
   return `account-pair:${lo}|${hi}`;
 }
 
-/**
- * Every raise() no-ops when `ctx.batchId` is null; raised questions attach to
- * `transaction_id`, or none for pre-insert failures.
- */
+/** raise() no-ops without a `ctx.batchId`. */
 export function defaultTransactionCommitHooks(
   db: Database.Database,
   ctx: TransactionCommitContext,
@@ -173,8 +213,7 @@ export function defaultTransactionCommitHooks(
       });
     },
 
-    // Empty on purpose: a well-formed placeholder path is unambiguous, so it is
-    // recorded for the resolution summary but raises no question.
+    // Empty on purpose: placeholder paths are unambiguous, no question raised.
     onPlaceholderAccount: () => {},
 
     onUncategorizedFallback: (side, accountId, transactionId) =>
@@ -185,13 +224,12 @@ export function defaultTransactionCommitHooks(
         prompt:
           `The ${side} side couldn't be matched to a well-formed account and was booked to ` +
           `"${accountId}". Recategorize it onto a real account, or re-run with a full ` +
-          `colon-path hint (e.g. expense:food:dining).`,
+          `currency-prefixed colon-path hint (e.g. thb:expense:food:dining).`,
         context: { rule_key: accountIdKey(accountId), placeholder_id: accountId, side },
       }),
 
-    // Anchored on the lookalike, not the created account: the natural repair is
-    // `accounts merge --from <created> --to <lookalike>`, which deletes the
-    // created row; anchoring there would cascade this question away unanswered.
+    // Anchored on the lookalike: merging deletes the created row, which would
+    // otherwise cascade this question away unanswered.
     onSimilarAccount: (side, accountId, similarId, transactionId) =>
       raise({
         transaction_id: transactionId,
@@ -216,21 +254,64 @@ export function defaultTransactionCommitHooks(
         kind: "currency_mismatch",
         prompt:
           `Transaction "${input.description}" on ${input.date} moves money between ` +
-          `${debit.id} (${debit.currency}) and ${credit.id} (${credit.currency}), which use ` +
-          `different currencies. A single transaction can't cross currencies: record it as a ` +
-          `linked conversion pair (one transaction out of ${debit.currency}, one into ` +
-          `${credit.currency}, sharing a group) so the FX conversion is explicit.`,
+          `${debit.id} (${debit.currency}) and ${credit.id} (${credit.currency}), which are ` +
+          `different ledgers. A single transaction can't cross currencies: record it as a ` +
+          `linked conversion pair (one leg into ${debit.currency.toLowerCase()}:equity:conversion, one out of ` +
+          `${credit.currency.toLowerCase()}:equity:conversion, sharing a group) so the FX conversion is explicit.`,
         context: { debit, credit, date: input.date, description: input.description },
+      }),
+
+    // account_id stays null: the named account can't exist without the ledger.
+    onUnknownLedger: (input, side, accountId, ledger) =>
+      raise({
+        transaction_id: null,
+        account_id: null,
+        kind: "currency_mismatch",
+        prompt:
+          `Transaction "${input.description}" on ${input.date} books its ${side} side to ` +
+          `"${accountId}", whose ledger "${ledger}" does not exist here. Opening a ledger is a ` +
+          `deliberate act, never an ingest side effect: ` +
+          (ACCOUNT_TYPES.includes(typeFromId(accountId) as AccountType)
+            ? `create the account first ` +
+              `(\`oled accounts create --id ${accountId} --name <name> --type ${typeFromId(accountId)}\`), ` +
+              `or fix the currency prefix and re-ingest. Nothing was posted.`
+            : `fix the id to <currency>:<type>:<path> against an open ledger and re-ingest. ` +
+              `Nothing was posted.`),
+        context: {
+          side,
+          account_id: accountId,
+          ledger,
+          date: input.date,
+          description: input.description,
+        },
       }),
   };
 }
 
+/** One side, resolved: the hint is null only when it posted exactly as asked. */
+interface PreparedSide {
+  side: TransactionSide;
+  requested: string;
+  resolved: string;
+  hint: AccountHint | null;
+}
+
 interface PreparedTransaction {
   input: TransactionInput;
-  hints: { side: TransactionSide; hint: AccountHint }[];
+  /** Debit first, then credit. */
+  sides: PreparedSide[];
   merchant: ResolvedMerchant;
   currencyOverridden: boolean;
   raw: RawTransactionInput;
+}
+
+interface UnopenedLedgerRefusal {
+  ok: false;
+  reason: "unknown_ledger";
+  message: string;
+  side: TransactionSide;
+  accountId: string;
+  ledger: string;
 }
 
 type PrepareResult =
@@ -242,105 +323,145 @@ type PrepareResult =
       message: string;
       debit: { id: string; currency: string };
       credit: { id: string; currency: string };
-    };
+    }
+  | UnopenedLedgerRefusal;
+
+type PrepareFailure = Extract<PrepareResult, { ok: false }>;
 
 function validateRawTransaction(input: RawTransactionInput): ValidateTransactionResult {
-  if (!ISO_DATE_RE.test(input.date ?? "")) {
-    return { ok: false, reason: "date must be an ISO date (YYYY-MM-DD)." };
-  }
-  if (!input.description || !input.description.trim()) {
-    return { ok: false, reason: "description must not be empty." };
-  }
-  if (!input.debit_account_id || !input.debit_account_id.trim()) {
-    return { ok: false, reason: "debit_account_id must not be empty." };
-  }
-  if (!input.credit_account_id || !input.credit_account_id.trim()) {
-    return { ok: false, reason: "credit_account_id must not be empty." };
-  }
-  if (input.debit_account_id === input.credit_account_id) {
-    return { ok: false, reason: "debit and credit accounts must differ." };
+  const fields = validateTransactionFields(input);
+  if (!fields.ok) return fields;
+  // tx: ids make re-ingest idempotent; a caller-supplied id must stay in that namespace.
+  if (input.id != null && !input.id.startsWith("tx:")) {
+    return invalidTransaction('id must start with "tx:".');
   }
   if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount <= 0) {
-    return { ok: false, reason: "amount must be a positive number." };
+    return invalidTransaction("amount must be a positive number.");
+  }
+  // 3 is the largest ISO exponent; an amount overflowing x1000 fits no currency's minor units.
+  if (input.amount * 1000 > Number.MAX_SAFE_INTEGER) {
+    return invalidTransaction("amount is too large to hold in any currency's minor units.");
   }
   return { ok: true };
 }
 
-function accountCurrency(db: Database.Database, id: string): string {
-  return findAccountCurrency(db, id) || config.displayCurrency;
+/** An unplaced side carries the fallback as its own hint, so it explains itself. */
+function preparedSide(
+  side: TransactionSide,
+  requested: string,
+  resolved: string,
+  posting: PostingResolution,
+): PreparedSide {
+  const hint = posting.accountId
+    ? posting.hint
+    : ({ type: "uncategorized_fallback", accountId: resolved } as const);
+  return { side, requested, resolved, hint };
 }
 
-/** Resolution never redirects a side, so two distinct inputs land on one account
- *  only when both fell back to `expense:uncategorized`, left to the dirty_input
- *  backstop, the same as before. */
+/** An unplaced side inherits the other side's ledger; both unplaced is dirty_input. */
 function resolveTransactionAccounts(
   db: Database.Database,
   debitAccountId: string,
   creditAccountId: string,
-): { debitId: string; creditId: string; hints: { side: TransactionSide; hint: AccountHint }[] } {
-  const debitRes = resolveOnePosting(db, { account_id: debitAccountId });
-  const creditRes = resolveOnePosting(db, { account_id: creditAccountId });
+): { ok: true; debit: PreparedSide; credit: PreparedSide } | { ok: false } {
+  const debit = resolveOnePosting(db, debitAccountId);
+  const credit = resolveOnePosting(db, creditAccountId);
+  if (!debit.accountId && !credit.accountId) return { ok: false };
 
-  const hints: { side: TransactionSide; hint: AccountHint }[] = [];
-  if (debitRes.hint) hints.push({ side: "debit", hint: debitRes.hint });
-  if (creditRes.hint) hints.push({ side: "credit", hint: creditRes.hint });
+  const debitId = debit.accountId ?? ensureUncategorizedFallback(db, currencyOf(credit.accountId!));
+  const creditId = credit.accountId ?? ensureUncategorizedFallback(db, currencyOf(debit.accountId!));
 
   return {
-    debitId: debitRes.posting.account_id,
-    creditId: creditRes.posting.account_id,
-    hints,
+    ok: true,
+    debit: preparedSide("debit", debitAccountId, debitId, debit),
+    credit: preparedSide("credit", creditAccountId, creditId, credit),
   };
 }
 
-/** Currency comes from the resolved accounts, never from input.
- *  A cross-currency pair is reported as a mismatch rather than merged. */
-function deriveTransactionCurrency(
+/** Refuses the whole row before either side resolves, so a good side's
+ *  placeholder tree can't outlive a refused row. */
+function unopenedLedgerRefusal(
   db: Database.Database,
-  debitId: string,
-  creditId: string,
-):
-  | { ok: true; currency: string }
-  | { ok: false; debit: { id: string; currency: string }; credit: { id: string; currency: string } } {
-  const debitCur = accountCurrency(db, debitId);
-  const creditCur = accountCurrency(db, creditId);
-  if (debitCur !== creditCur) {
-    return {
-      ok: false,
-      debit: { id: debitId, currency: debitCur },
-      credit: { id: creditId, currency: creditCur },
-    };
-  }
-  return { ok: true, currency: debitCur };
+  side: TransactionSide,
+  accountId: string,
+): UnopenedLedgerRefusal | null {
+  if (!namesUnopenedLedger(db, accountId)) return null;
+  const ledger = currencyOf(accountId).toLowerCase();
+  return {
+    ok: false,
+    reason: "unknown_ledger",
+    side,
+    accountId,
+    ledger,
+    message:
+      `${side} ${accountId} names ledger "${ledger}", which does not exist here; ` +
+      "open it with `oled accounts create`, or fix the currency prefix",
+  };
 }
 
-/** Doesn't touch the transactions table, but resolving may create placeholder
- *  accounts; on a currency mismatch those side effects remain with nothing inserted. */
+/** Only heads naming an EXISTING ledger count as a mismatch; an unopened
+ *  ledger is `unopenedLedgerRefusal`'s to catch. */
+function crossLedger(
+  db: Database.Database,
+  debitAccountId: string,
+  creditAccountId: string,
+): boolean {
+  if (!isLedgerScopedId(debitAccountId) || !isLedgerScopedId(creditAccountId)) return false;
+  const debitCurrency = currencyOf(debitAccountId);
+  const creditCurrency = currencyOf(creditAccountId);
+  if (debitCurrency === creditCurrency) return false;
+  return ledgerExists(db, debitCurrency) && ledgerExists(db, creditCurrency);
+}
+
+/** Pure-read refusals only, decided before resolution writes anything; shared
+ *  with the compound pre-scan so a bad later leg is caught first. */
+function refuseRow(db: Database.Database, input: RawTransactionInput): PrepareFailure | null {
+  const raw = validateRawTransaction(input);
+  if (!raw.ok) return { ok: false, reason: "dirty_input", message: raw.message };
+
+  const unopened =
+    unopenedLedgerRefusal(db, "debit", input.debit_account_id) ??
+    unopenedLedgerRefusal(db, "credit", input.credit_account_id);
+  if (unopened) return unopened;
+
+  if (crossLedger(db, input.debit_account_id, input.credit_account_id)) {
+    const debit = { id: input.debit_account_id, currency: currencyOf(input.debit_account_id) };
+    const credit = { id: input.credit_account_id, currency: currencyOf(input.credit_account_id) };
+    return {
+      ok: false,
+      reason: "currency_mismatch",
+      message: `debit ${debit.id} is ${debit.currency}, credit ${credit.id} is ${credit.currency}`,
+      debit,
+      credit,
+    };
+  }
+  return null;
+}
+
 function prepareTransaction(
   db: Database.Database,
   ctx: TransactionCommitContext,
   input: RawTransactionInput,
 ): PrepareResult {
-  const raw = validateRawTransaction(input);
-  if (!raw.ok) return { ok: false, reason: "dirty_input", message: raw.reason };
+  const refused = refuseRow(db, input);
+  if (refused) return refused;
 
-  const { debitId, creditId, hints } = resolveTransactionAccounts(
+  const resolved = resolveTransactionAccounts(
     db,
     input.debit_account_id,
     input.credit_account_id,
   );
-
-  const cur = deriveTransactionCurrency(db, debitId, creditId);
-  if (!cur.ok) {
+  if (!resolved.ok) {
     return {
       ok: false,
-      reason: "currency_mismatch",
-      message: `debit ${cur.debit.id} is ${cur.debit.currency}, credit ${cur.credit.id} is ${cur.credit.currency}`,
-      debit: cur.debit,
-      credit: cur.credit,
+      reason: "dirty_input",
+      message: "neither account id names a path in an existing ledger.",
     };
   }
-  const currency = cur.currency;
-  const currencyOverridden = !!input.currency && input.currency !== currency;
+  const { debit, credit } = resolved;
+
+  const currency = currencyOf(debit.resolved);
+  const currencyOverridden = !!input.currency && input.currency.toUpperCase() !== currency;
 
   const amountMinor = toMinorUnits(input.amount, currency);
   const merchant = resolveMerchantId(db, input.merchant_id);
@@ -361,24 +482,26 @@ function prepareTransaction(
     date: input.date,
     description: input.description,
     merchant_id: merchant.merchantId,
-    merchant: input.merchant ?? null,
+    // Resolved here because db/queries may not read `src/datasets/`.
+    merchant: input.merchant
+      ? { ...input.merchant, noise_tokens: noiseTokens(config.country) }
+      : null,
     raw_descriptor: input.raw_descriptor ?? null,
     source_file_id: input.source_file_id ?? ctx.fileId ?? null,
     source_page: input.source_page ?? null,
-    debit_account_id: debitId,
-    credit_account_id: creditId,
+    debit_account_id: debit.resolved,
+    credit_account_id: credit.resolved,
     amount: amountMinor,
-    currency,
-    code: input.code ?? null,
-    user_ref: input.user_ref ?? null,
   };
 
-  // Backstop: both sides can still fall back to `expense:uncategorized`, which
-  // validateTransaction catches as debit == credit.
+  // Backstop: a shared fallback account surfaces as validateTransaction's debit == credit check.
   const v = validateTransaction(built);
-  if (!v.ok) return { ok: false, reason: "dirty_input", message: v.reason };
+  if (!v.ok) return { ok: false, reason: "dirty_input", message: v.message };
 
-  return { ok: true, prepared: { input: built, hints, merchant, currencyOverridden, raw: input } };
+  return {
+    ok: true,
+    prepared: { input: built, sides: [debit, credit], merchant, currencyOverridden, raw: input },
+  };
 }
 
 interface HintDispatchArgs {
@@ -387,40 +510,141 @@ interface HintDispatchArgs {
   transactionId: string;
 }
 
-/** This union is also dispatched in cli/commands/ingest-commit.ts, so a new
- *  variant must be handled in both; the Record makes the compiler enforce it
- *  here. Returns the number of questions raised. */
+interface SideOutcome {
+  how: SideHow;
+  similar_to?: string;
+  /** Questions this hint raised. */
+  raised: number;
+}
+
+/** Each arm raises the question its hint earns and names how the side landed. */
 const HINT_DISPATCH: {
-  [K in AccountHint["type"]]: (hint: Extract<AccountHint, { type: K }>, args: HintDispatchArgs) => number;
+  [K in AccountHint["type"]]: (
+    hint: Extract<AccountHint, { type: K }>,
+    args: HintDispatchArgs,
+  ) => SideOutcome;
 } = {
   placeholder_created: (hint, { hooks, side, transactionId }) => {
     hooks.onPlaceholderAccount(side, hint.accountId, transactionId);
-    return 0;
+    return { how: "placeholder_created", raised: 0 };
   },
   uncategorized_fallback: (hint, { hooks, side, transactionId }) => {
     hooks.onUncategorizedFallback(side, hint.accountId, transactionId);
-    return 1;
+    return { how: "uncategorized_fallback", raised: 1 };
   },
   similar_account: (hint, { hooks, side, transactionId }) => {
     hooks.onSimilarAccount(side, hint.accountId, hint.similarId, transactionId);
-    return 1;
+    return { how: "similar_account", similar_to: hint.similarId, raised: 1 };
   },
 };
+
+const POSTED_EXACTLY: SideOutcome = { how: "exact", raised: 0 };
+
+type CommitFailure = Extract<TransactionCommitOutcome, { ok: false }>;
+
+/** Unopened ledger reports as `currency_mismatch`; its own message names the
+ *  missing ledger. */
+const PREPARE_FAILURE_DISPATCH: {
+  [K in PrepareFailure["reason"]]: (
+    failure: Extract<PrepareFailure, { reason: K }>,
+    hooks: TransactionCommitHooks,
+    input: RawTransactionInput,
+  ) => TransactionDropReason;
+} = {
+  dirty_input: (failure, hooks, input) => {
+    hooks.onDirtyInput(input, failure.message);
+    return "dirty_input";
+  },
+  currency_mismatch: (failure, hooks, input) => {
+    hooks.onCurrencyMismatch(input, failure.debit, failure.credit);
+    return "currency_mismatch";
+  },
+  unknown_ledger: (failure, hooks, input) => {
+    hooks.onUnknownLedger(input, failure.side, failure.accountId, failure.ledger);
+    return "currency_mismatch";
+  },
+};
+
+function reportPrepareFailure(
+  failure: PrepareFailure,
+  hooks: TransactionCommitHooks,
+  input: RawTransactionInput,
+): CommitFailure {
+  const reason = PREPARE_FAILURE_DISPATCH[failure.reason](failure as never, hooks, input);
+  return {
+    ok: false,
+    reason,
+    message: failure.message,
+    raisedQuestions: 1,
+    ...(failure.reason === "unknown_ledger" ? { unopenedLedger: failure.ledger } : {}),
+  };
+}
 
 function applyTransactionHints(
   hooks: TransactionCommitHooks,
   transactionId: string,
   prepared: PreparedTransaction,
-): number {
+): { sides: CommittedSide[]; raisedQuestions: number } {
   let raised = 0;
   if (prepared.merchant.attemptedUnknownId) {
     hooks.onUnknownMerchant(prepared.raw, transactionId, prepared.merchant.attemptedUnknownId);
     raised++;
   }
-  for (const { side, hint } of prepared.hints) {
-    raised += HINT_DISPATCH[hint.type](hint as never, { hooks, side, transactionId });
+
+  const sides: CommittedSide[] = [];
+  for (const { side, requested, resolved, hint } of prepared.sides) {
+    const outcome = hint
+      ? HINT_DISPATCH[hint.type](hint as never, { hooks, side, transactionId })
+      : POSTED_EXACTLY;
+    raised += outcome.raised;
+    sides.push({
+      side,
+      requested,
+      resolved,
+      how: outcome.how,
+      ...(outcome.similar_to ? { similar_to: outcome.similar_to } : {}),
+    });
   }
-  return raised;
+  return { sides, raisedQuestions: raised };
+}
+
+/** `unknown` merchant id still commits, unlinked. `committedId` reads back an
+ *  upsert's id, assigned only at insert time. */
+function committedMerchant(
+  prepared: PreparedTransaction,
+  committedId: () => string | null,
+): CommittedMerchant {
+  const { raw, merchant } = prepared;
+  if (!raw.merchant && !raw.merchant_id) return { how: "none" };
+  if (merchant.attemptedUnknownId) return { how: "unknown" };
+  const id = merchant.merchantId ?? committedId();
+  if (!id) return { how: "linked" };
+  return { how: "linked", merchant_id: id };
+}
+
+/** Reports what the stored row holds now, not what this run resolved (it may
+ *  have been recategorized since). */
+function reportStoredRow(
+  db: Database.Database,
+  transactionId: string,
+  prepared: PreparedTransaction,
+): { sides: CommittedSide[]; merchant: CommittedMerchant } {
+  const stored = findTransactionById(db, transactionId);
+  const sides: CommittedSide[] = [
+    {
+      side: "debit",
+      requested: prepared.raw.debit_account_id,
+      resolved: stored?.debit_account_id ?? prepared.input.debit_account_id,
+      how: "as_committed",
+    },
+    {
+      side: "credit",
+      requested: prepared.raw.credit_account_id,
+      resolved: stored?.credit_account_id ?? prepared.input.credit_account_id,
+      how: "as_committed",
+    },
+  ];
+  return { sides, merchant: committedMerchant(prepared, () => stored?.merchant_id ?? null) };
 }
 
 /** A duplicate re-commit is a no-op: no questions raised, no balance change. */
@@ -431,34 +655,33 @@ export function commitTransaction(
   hooks: TransactionCommitHooks = defaultTransactionCommitHooks(db, ctx),
 ): TransactionCommitOutcome {
   const prep = prepareTransaction(db, ctx, input);
-  if (!prep.ok) {
-    if (prep.reason === "currency_mismatch") {
-      hooks.onCurrencyMismatch(input, prep.debit, prep.credit);
-    } else {
-      hooks.onDirtyInput(input, prep.message);
-    }
-    return { ok: false, reason: prep.reason, message: prep.message, raisedQuestions: 1 };
-  }
+  if (!prep.ok) return reportPrepareFailure(prep, hooks, input);
+  const prepared = prep.prepared;
 
-  const { id, duplicate } = insertTransaction(db, prep.prepared.input);
+  const { id, duplicate } = insertTransaction(db, prepared.input);
   if (duplicate) {
+    const stored = reportStoredRow(db, id, prepared);
     return {
       ok: true,
       transactionId: id,
       duplicate: true,
       raisedQuestions: 0,
-      currencyOverridden: prep.prepared.currencyOverridden,
+      currencyOverridden: prepared.currencyOverridden,
+      sides: stored.sides,
+      merchant: stored.merchant,
     };
   }
 
   hooks.onCommitted(id);
-  const raised = applyTransactionHints(hooks, id, prep.prepared);
+  const { sides, raisedQuestions } = applyTransactionHints(hooks, id, prepared);
   return {
     ok: true,
     transactionId: id,
     duplicate: false,
-    raisedQuestions: raised,
-    currencyOverridden: prep.prepared.currencyOverridden,
+    raisedQuestions,
+    currencyOverridden: prepared.currencyOverridden,
+    sides,
+    merchant: committedMerchant(prepared, () => findTransactionById(db, id)?.merchant_id ?? null),
   };
 }
 
@@ -482,8 +705,6 @@ export interface LinkedTransactionLeg {
   currency?: string | null;
   /** Falls back to the header's description when omitted. */
   description?: string;
-  code?: string | null;
-  user_ref?: string | null;
 }
 
 function mergeHeaderLeg(
@@ -505,8 +726,6 @@ function mergeHeaderLeg(
     credit_account_id: leg.credit_account_id,
     amount: leg.amount,
     currency: leg.currency ?? null,
-    code: leg.code ?? null,
-    user_ref: leg.user_ref ?? null,
     row_index: header.row_index ?? null,
     leg_index: legIndex,
   };
@@ -530,18 +749,19 @@ export function commitLinkedTransactions(
       ? deriveGroupId(ctx.fileHash, header.source_page ?? 0, header.row_index)
       : newGroupId());
 
+  const merged = legs.map((leg, i) => mergeHeaderLeg(header, leg, groupId, i));
+
+  // Pre-scan every leg's pure refusals first: a resolution write for leg 0
+  // must not outlive a refusal of leg 1.
+  for (const raw of merged) {
+    const refused = refuseRow(db, raw);
+    if (refused) return reportPrepareFailure(refused, hooks, raw);
+  }
+
   const preps: PreparedTransaction[] = [];
-  for (let i = 0; i < legs.length; i++) {
-    const raw = mergeHeaderLeg(header, legs[i], groupId, i);
+  for (const raw of merged) {
     const prep = prepareTransaction(db, ctx, raw);
-    if (!prep.ok) {
-      if (prep.reason === "currency_mismatch") {
-        hooks.onCurrencyMismatch(raw, prep.debit, prep.credit);
-      } else {
-        hooks.onDirtyInput(raw, prep.message);
-      }
-      return { ok: false, reason: prep.reason, message: prep.message, raisedQuestions: 1 };
-    }
+    if (!prep.ok) return reportPrepareFailure(prep, hooks, raw);
     preps.push(prep.prepared);
   }
 
@@ -556,7 +776,19 @@ export function commitLinkedTransactions(
     const r = results[i];
     if (r.duplicate) continue;
     hooks.onCommitted(r.id);
-    raised += applyTransactionHints(hooks, r.id, preps[i]);
+    raised += applyTransactionHints(hooks, r.id, preps[i]).raisedQuestions;
   }
-  return { ok: true, group_id, results, raisedQuestions: raised };
+  // Every leg carries the header's merchant, so the first one speaks for the group.
+  const merchant = committedMerchant(
+    preps[0],
+    () => findTransactionById(db, results[0].id)?.merchant_id ?? null,
+  );
+  return {
+    ok: true,
+    group_id,
+    results,
+    raisedQuestions: raised,
+    currencyOverridden: preps.some((p) => p.currencyOverridden),
+    merchant,
+  };
 }

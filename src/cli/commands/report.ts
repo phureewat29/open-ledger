@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { printKeyValues } from "../format.js";
 import { openDb } from "../db.js";
 import { currentMode, emit, fail, runAction } from "../output.js";
+import { toDecimalTotals } from "../currency.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
 
 interface ShowReportOpts {
@@ -18,32 +19,37 @@ async function showReport(opts: ShowReportOpts): Promise<void> {
     fail("USAGE", `--to must be an ISO date (YYYY-MM-DD), got "${opts.to}"`);
   }
 
-  const { getPeriodTotals } = await import("../../accounts/balances.js");
+  const { getPeriodTotals, subtractTotals } = await import("../../accounts/balances.js");
   const db = await openDb();
   const totals = getPeriodTotals(db, opts.from, opts.to);
+  // Net is taken in minor units per currency before anything becomes decimal; a THB
+  // income and a USD expense share no common net.
   const result = {
     from: opts.from,
     to: opts.to,
-    income: totals.income,
-    expenses: totals.expenses,
-    net: totals.income - totals.expenses,
+    income: toDecimalTotals(totals.income),
+    expenses: toDecimalTotals(totals.expenses),
+    net: toDecimalTotals(subtractTotals(totals.income, totals.expenses)),
   };
   const mode = currentMode();
   if (mode.json) {
     emit(result);
     return;
   }
-  printKeyValues(
-    mode,
-    [
-      ["from", result.from],
-      ["to", result.to],
-      ["income", result.income],
-      ["expenses", result.expenses],
-      ["net", result.net],
-    ],
-    { bold: mode.color },
-  );
+  const rows: [string, string | number][] = [
+    ["from", result.from],
+    ["to", result.to],
+  ];
+  for (const [label, amounts] of [
+    ["income", result.income],
+    ["expenses", result.expenses],
+    ["net", result.net],
+  ] as const) {
+    for (const [currency, amount] of Object.entries(amounts)) {
+      rows.push([`${label}.${currency}`, amount]);
+    }
+  }
+  printKeyValues(mode, rows, { bold: mode.color });
 }
 
 export function registerReport(program: Command): void {

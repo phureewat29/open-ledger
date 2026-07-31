@@ -1,8 +1,12 @@
 import type Database from "libsql";
-import type { AccountRow, AccountType } from "./accounts.js";
+import {
+  ACCOUNT_COLUMNS_SQL,
+  ACCOUNT_CURRENCY_SQL,
+  type AccountRow,
+  type AccountType,
+} from "./accounts.js";
 
-// Leg expansion only: the normal-balance rule and decimal conversion are the
-// caller's, in src/accounts/balances.ts.
+// Leg expansion only: the normal-balance rule and decimal conversion are the caller's (src/accounts/balances.ts).
 
 /** Debit + credit legs of every non-void transaction, one row per leg (`void_of`
  *  rows excluded so a merged mirror never double-counts). */
@@ -42,7 +46,7 @@ export function getAccountLegSums(
 
   return db
     .prepare(
-      `SELECT a.*,
+      `SELECT ${ACCOUNT_COLUMNS_SQL},
               COALESCE(SUM(CASE WHEN t.side = 'D' THEN t.amount ELSE 0 END), 0) AS sum_debit,
               COALESCE(SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE 0 END), 0) AS sum_credit
          FROM accounts a
@@ -54,39 +58,33 @@ export function getAccountLegSums(
     .all(...params) as AccountLegSums[];
 }
 
-interface PeriodLegSums {
-  type: AccountType;
-  currency: string;
-  /** Direction is the caller's to apply. */
-  c_minus_d: number;
-}
-
-/**
- * Income and expense legs dated within `from`..`to`, netted per
- * (type, currency) so each currency converts with its own exponent.
- */
-export function getPeriodLegSums(
-  db: Database.Database,
-  from: string,
-  to: string,
-): PeriodLegSums[] {
-  return db
-    .prepare(
-      `SELECT a.type AS type, a.currency AS currency,
-              SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE -t.amount END) AS c_minus_d
-         FROM (${TRANSACTION_LEGS}) t
-         JOIN accounts a ON a.id = t.acct
-         WHERE t.date BETWEEN ? AND ? AND a.type IN ('income', 'expense')
-         GROUP BY a.type, a.currency`,
-    )
-    .all(from, to) as PeriodLegSums[];
-}
-
 interface TypeCurrencyLegSums {
   type: AccountType;
   currency: string;
   sum_debit: number;
   sum_credit: number;
+}
+
+/**
+ * Income and expense legs dated within `from`..`to`, summed per
+ * (type, currency) so each ledger is netted and converted on its own.
+ */
+export function getPeriodLegSums(
+  db: Database.Database,
+  from: string,
+  to: string,
+): TypeCurrencyLegSums[] {
+  return db
+    .prepare(
+      `SELECT a.type AS type, ${ACCOUNT_CURRENCY_SQL} AS currency,
+              COALESCE(SUM(CASE WHEN t.side = 'D' THEN t.amount ELSE 0 END), 0) AS sum_debit,
+              COALESCE(SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE 0 END), 0) AS sum_credit
+         FROM (${TRANSACTION_LEGS}) t
+         JOIN accounts a ON a.id = t.acct
+         WHERE t.date BETWEEN ? AND ? AND a.type IN ('income', 'expense')
+         GROUP BY a.type, ${ACCOUNT_CURRENCY_SQL}`,
+    )
+    .all(from, to) as TypeCurrencyLegSums[];
 }
 
 /** Leg sums for a set of accounts (a subtree), grouped by (type, currency). */
@@ -100,13 +98,13 @@ export function getLegSumsForAccounts(
 
   return db
     .prepare(
-      `SELECT a.type AS type, a.currency AS currency,
+      `SELECT a.type AS type, ${ACCOUNT_CURRENCY_SQL} AS currency,
               COALESCE(SUM(CASE WHEN t.side = 'D' THEN t.amount ELSE 0 END), 0) AS sum_debit,
               COALESCE(SUM(CASE WHEN t.side = 'C' THEN t.amount ELSE 0 END), 0) AS sum_credit
          FROM accounts a
          LEFT JOIN (${TRANSACTION_LEGS}) t ON t.acct = a.id
          WHERE a.id IN (${placeholders})
-         GROUP BY a.type, a.currency`,
+         GROUP BY a.type, ${ACCOUNT_CURRENCY_SQL}`,
     )
     .all(...ids) as TypeCurrencyLegSums[];
 }

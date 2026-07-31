@@ -1,10 +1,7 @@
 export interface PatchField {
   /** SQL column; defaults to the patch key when omitted. */
   column?: string;
-  /**
-   * Normalize the incoming value before binding; the transformed value is
-   * both the bound param and the audit `after` value.
-   */
+  /** Normalize the incoming value before binding; the transformed value is both the bound param and the audit `after` value. */
   transform?: (value: unknown) => unknown;
 }
 
@@ -16,13 +13,8 @@ interface PatchResult {
   after: Record<string, unknown>;
 }
 
-/**
- * Builds `SET` fragments, params, and before/after snapshots for every `spec`
- * key present in `patch`. A key participates only when `patch[key] !==
- * undefined` (absent leaves the column untouched; explicit `null` binds SQL
- * NULL). No `changed` flag: callers test `sets.length` themselves after
- * appending any hand-written fields.
- */
+// A key participates only when `patch[key] !== undefined` (explicit `null`
+// binds SQL NULL); callers test `sets.length` for emptiness.
 export function buildPatch<Row extends object>(
   spec: Record<string, PatchField>,
   current: Row,
@@ -42,8 +34,7 @@ export function buildPatch<Row extends object>(
     const value = field.transform ? field.transform(patchRecord[key]) : patchRecord[key];
 
     sets.push(`${column} = ?`);
-    // libsql cannot bind `undefined`; a transform should never produce one,
-    // but this keeps the "params never contain undefined" contract airtight.
+    // libsql cannot bind `undefined`; this keeps that contract airtight even if a transform produces one.
     params.push(value === undefined ? null : value);
     before[key] = currentRecord[column];
     after[key] = value;

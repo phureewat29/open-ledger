@@ -32,7 +32,6 @@ function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
   return redacted as RedactedConfig;
 }
 
-/** Redacted config plus the resolved context.md path (there's no separate `context` command). */
 function showPayload(): Record<string, unknown> {
   return { ...redactConfig(appConfig), context_path: getContextPath() };
 }
@@ -59,13 +58,23 @@ function printConfig(mode: OutputMode, data: Record<string, unknown>): void {
   printKeyValues(mode, flattenRows(data));
 }
 
+/** The display currency names a ledger (`<currency>:<type>`), so anything but three
+ *  letters can never become one. */
+const CURRENCY_CODE_RE = /^[a-z]{3}$/i;
+
 /** Every flag the bare `config` action accepts; snake_case so parseInput auto-bridges commander's camelCase opts. */
 const CONVERGE_FLAGS_SPEC = z.object({
   data_dir: str().optional(),
   db: str().optional(),
   init: bool().optional(),
   locale: str().optional(),
-  currency: str().optional(),
+  // Not str(): must fail USAGE before saveConfig persists a bad code.
+  currency: z
+    .string()
+    .regex(CURRENCY_CODE_RE, "must be a 3-letter currency code, e.g. THB")
+    // Rows derive currency as uppercase from the id prefix.
+    .transform((code) => code.toUpperCase())
+    .optional(),
   user_name: str().optional(),
   country: str().optional(),
   ocr_url: str().optional(),
@@ -74,9 +83,10 @@ const CONVERGE_FLAGS_SPEC = z.object({
 
 type ConvergeFlags = z.infer<typeof CONVERGE_FLAGS_SPEC>;
 
-/** Every field converge writes from flags. `ocrApiKey` is absent by design: it is env-only (OLED_OCR_API_KEY). */
+// ocrApiKey is absent by design: env-only (OLED_OCR_API_KEY).
 type ConvergedConfig = Pick<
   OpenLedgerConfig,
+  | "country"
   | "dataDir"
   | "dbPath"
   | "displayLocale"
@@ -86,13 +96,10 @@ type ConvergedConfig = Pick<
   | "ocrModel"
 >;
 
-/**
- * Precedence: flag > env var > persisted file > dataset default > code
- * default (displayLocale/currency have no env var tier). `country` defaults
- * to "th" and is validated, so an unknown name never reaches the file.
- */
+// Precedence: flag > persisted file > dataset default; country is validated first
+// so an unknown name never reaches the file.
 function resolveConvergedConfig(flags: ConvergeFlags): ConvergedConfig {
-  const country = flags.country ?? "th";
+  const country = flags.country ?? appConfig.country;
   const defaults = findCountryDefaults(country);
   if (!defaults) {
     fail("USAGE", `unknown country "${country}"`, {
@@ -102,6 +109,7 @@ function resolveConvergedConfig(flags: ConvergeFlags): ConvergedConfig {
   const persisted = loadPersistedConfig();
 
   return {
+    country: defaults.country,
     dataDir: flags.data_dir ?? appConfig.dataDir,
     dbPath: flags.db ?? appConfig.dbPath,
     displayLocale: flags.locale || persisted.displayLocale || defaults.locale,
@@ -120,10 +128,10 @@ async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
   // openDb() runs the migration against the (freshly) configured db path.
   const db = await openDb();
 
-  // Seeds structural accounts the ledger auto-references so first ingest resolves them; idempotent.
-  const { ensureStructuralAccount } = await import("../../accounts/accounts.js");
-  for (const id of ["expense:uncategorized", "equity:adjustments", "equity:opening-balance"] as const) {
-    ensureStructuralAccount(db, id);
+  // Seeds the display-currency ledger's structural accounts so first ingest resolves them.
+  const { STRUCTURAL_ACCOUNTS, ensureStructuralAccount } = await import("../../accounts/accounts.js");
+  for (const kind of Object.keys(STRUCTURAL_ACCOUNTS) as (keyof typeof STRUCTURAL_ACCOUNTS)[]) {
+    ensureStructuralAccount(db, converged.displayCurrency, kind);
   }
 
   // createContextTemplate no-ops if the file exists, so this never clobbers edits.
@@ -131,10 +139,7 @@ async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
   createContextTemplate(converged.userName);
 }
 
-/**
- * Idempotent: each value resolves to an explicit flag or the already-loaded
- * singleton, so converging with no new flags is a no-op.
- */
+// Idempotent: each value resolves to an explicit flag or the already-loaded singleton.
 async function convergeConfig(flags: ConvergeFlags): Promise<void> {
   const converged = resolveConvergedConfig(flags);
   // 0700: the data dir holds the raw statements, the most sensitive files here.
@@ -171,7 +176,7 @@ export function registerConfig(program: Command): void {
     .option("--init", "initialize the harness (config, database, data dir); any other setting flag initializes too")
     .option("--locale <locale>", "locale")
     .option("--currency <code>", "default currency code")
-    .option("--country <code>", "seed locale/currency from a country's defaults (default: th)")
+    .option("--country <code>", "country whose reference data applies; also seeds locale/currency (default: th)")
     .option("--user-name <name>", "user display name")
     .option("--ocr-url <url>", "OCR endpoint base URL, e.g. http://127.0.0.1:1234/v1 (enables OCR on its own)")
     .option("--ocr-model <id>", "OCR model id served at --ocr-url; picks the built-in prompt and render profile")

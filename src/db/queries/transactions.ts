@@ -1,26 +1,31 @@
 import type Database from "libsql";
-import { accountExists } from "./accounts.js";
+import { accountCurrencySQL, accountExists } from "./accounts.js";
 import { upsertMerchant, type MerchantUpsertInput } from "./merchants.js";
 import { buildPatch, type PatchField } from "../../lib/patch.js";
-import { newGroupId, newTransactionId } from "../../lib/ids.js";
+import { currencyOf, newGroupId, newTransactionId } from "../../lib/ids.js";
 import { clampLimit, clampOffset } from "../../lib/limit.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
 
+/** `noise_tokens` lives here, not on `TransactionInput`, so only rows claiming an alias carry one. */
+export interface TransactionMerchantInput extends MerchantUpsertInput {
+  noise_tokens: readonly string[];
+}
+
 /**
- * TigerBeetle-style single-row transaction: one debit account, one credit
- * account, one positive minor-unit `amount` (INTEGER). Decimal <-> minor
- * conversion happens at the CLI/pipeline boundary, never here.
+ * One debit account, one credit account, one positive minor-unit `amount`
+ * (INTEGER). Decimal <-> minor conversion happens at the CLI/pipeline
+ * boundary, never here.
  */
 export interface TransactionInput {
   /** Pre-assigned id (`tx:`+hash) so mid-ingest questions can reference the transaction before commit. */
   id?: string;
-  /** Links sibling legs (e.g. a salary split into net/tax/social-security, an FX pair). */
+  /** Links sibling legs (e.g. a split transaction, an FX pair). */
   group_id?: string | null;
   date: string;
   description: string;
   /** Pre-resolved merchant id. Overrides any `merchant` upsert when set. */
   merchant_id?: string | null;
-  merchant?: MerchantUpsertInput | null;
+  merchant?: TransactionMerchantInput | null;
   raw_descriptor?: string | null;
   source_file_id?: string | null;
   source_page?: number | null;
@@ -28,9 +33,6 @@ export interface TransactionInput {
   credit_account_id: string;
   /** Integer minor units. Positive (enforced by validateTransaction + CHECK). */
   amount: number;
-  currency: string;
-  code?: string | null;
-  user_ref?: string | null;
 }
 
 export interface TransactionRow {
@@ -45,13 +47,10 @@ export interface TransactionRow {
   debit_account_id: string;
   credit_account_id: string;
   amount: number;
+  /** Not stored: derived from the debit account's ledger (the cross-ledger trigger guarantees the credit side matches). */
   currency: string;
-  code: string | null;
-  user_ref: string | null;
-  /** Set to the surviving twin's id when `transactions merge` voided this row
-   *  into it; NULL means live. See `voidTransactionAsMirror`. */
+  /** The surviving twin's id once `voidTransactionAsMirror` voids this row into it; NULL means live. */
   void_of: string | null;
-  has_question: number;
   created_at: string;
   debit_account_name: string | null;
   credit_account_name: string | null;
@@ -63,33 +62,61 @@ interface TransactionDetail extends TransactionRow {
   group?: TransactionRow[];
 }
 
-export type ValidateTransactionResult = { ok: true } | { ok: false; reason: string };
+export type ValidateTransactionResult =
+  | { ok: true }
+  | { ok: false; reason: "invalid_transaction"; message: string };
 
-/** Amount must already be an integer in minor units: this layer never sees decimals. */
-export function validateTransaction(input: TransactionInput): ValidateTransactionResult {
+const TRANSACTION_VALID: ValidateTransactionResult = { ok: true };
+
+/** The fields a transaction carries whichever form its amount is in. */
+export interface TransactionFields {
+  date: string;
+  description: string;
+  debit_account_id: string;
+  credit_account_id: string;
+}
+
+/**
+ * Shared with `validateRawTransaction` (src/ingest/commit.ts) so both
+ * validators agree on wording; messages are field-first since they surface as
+ * an agent's `dirty_input` reason.
+ */
+export function validateTransactionFields(input: TransactionFields): ValidateTransactionResult {
   if (!ISO_DATE_RE.test(input.date ?? "")) {
-    return { ok: false, reason: "Transaction date must be an ISO date (YYYY-MM-DD)." };
+    return invalidTransaction("date must be an ISO date (YYYY-MM-DD).");
   }
   if (!input.description || !input.description.trim()) {
-    return { ok: false, reason: "Transaction description must not be empty." };
-  }
-  if (!Number.isInteger(input.amount) || input.amount <= 0) {
-    return { ok: false, reason: "Transaction amount must be a positive integer in minor units." };
+    return invalidTransaction("description must not be empty.");
   }
   if (!input.debit_account_id || !input.debit_account_id.trim()) {
-    return { ok: false, reason: "Transaction debit_account_id must not be empty." };
+    return invalidTransaction("debit_account_id must not be empty.");
   }
   if (!input.credit_account_id || !input.credit_account_id.trim()) {
-    return { ok: false, reason: "Transaction credit_account_id must not be empty." };
+    return invalidTransaction("credit_account_id must not be empty.");
   }
   if (input.debit_account_id === input.credit_account_id) {
-    return { ok: false, reason: "Transaction debit and credit accounts must differ." };
+    return invalidTransaction("debit and credit accounts must differ.");
   }
-  return { ok: true };
+  return TRANSACTION_VALID;
+}
+
+export function invalidTransaction(message: string): ValidateTransactionResult {
+  return { ok: false, reason: "invalid_transaction", message };
+}
+
+/** `isSafeInteger` subsumes the `amount <= 9007199254740991` CHECK, so an
+ *  out-of-range amount fails here instead of aborting the insert on raw DDL text. */
+export function validateTransaction(input: TransactionInput): ValidateTransactionResult {
+  const fields = validateTransactionFields(input);
+  if (!fields.ok) return fields;
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    return invalidTransaction("amount must be a positive integer in minor units.");
+  }
+  return TRANSACTION_VALID;
 }
 
 const INSERT_COLUMNS =
-  "id, group_id, date, description, merchant_id, raw_descriptor, source_file_id, source_page, debit_account_id, credit_account_id, amount, currency, code, user_ref";
+  "id, group_id, date, description, merchant_id, raw_descriptor, source_file_id, source_page, debit_account_id, credit_account_id, amount";
 
 function insertParams(id: string, merchantId: string | null, input: TransactionInput): any[] {
   return [
@@ -104,9 +131,6 @@ function insertParams(id: string, merchantId: string | null, input: TransactionI
     input.debit_account_id,
     input.credit_account_id,
     input.amount,
-    input.currency,
-    input.code ?? null,
-    input.user_ref ?? null,
   ];
 }
 
@@ -119,18 +143,18 @@ export function insertTransaction(
   input: TransactionInput,
 ): { id: string; duplicate: boolean } {
   const check = validateTransaction(input);
-  if (!check.ok) throw new Error(check.reason);
+  if (!check.ok) throw new Error(check.message);
 
   const id = input.id ?? newTransactionId();
   let merchantId = input.merchant_id ?? null;
   if (!merchantId && input.merchant) {
-    merchantId = upsertMerchant(db, input.merchant).id;
+    merchantId = upsertMerchant(db, input.merchant, input.merchant.noise_tokens).id;
   }
 
   const result = db
     .prepare(
       `INSERT INTO transactions (${INSERT_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
     )
     .run(...insertParams(id, merchantId, input));
@@ -171,19 +195,19 @@ const LIST_FROM = `FROM transactions t
    LEFT JOIN accounts ca ON ca.id = t.credit_account_id
    LEFT JOIN merchants m ON m.id = t.merchant_id`;
 
+/** `currency` reads off the debit account only; the cross-ledger trigger guarantees
+ *  the credit side matches. Same projection as `accountCurrencySQL` (accounts.ts). */
 const ROW_SELECT = `SELECT t.id, t.group_id, t.date, t.description, t.merchant_id,
         t.raw_descriptor, t.source_file_id, t.source_page,
-        t.debit_account_id, t.credit_account_id, t.amount, t.currency,
-        t.code, t.user_ref, t.void_of, t.has_question, t.created_at,
+        t.debit_account_id, t.credit_account_id, t.amount,
+        ${accountCurrencySQL("da")} AS currency,
+        t.void_of, t.created_at,
         da.name AS debit_account_name,
         ca.name AS credit_account_name,
         m.canonical_name AS merchant_name
    ${LIST_FROM}`;
 
-/**
- * Loads one transaction; when grouped, `group` carries every member (self
- * included) ordered by id. Null if the id doesn't exist.
- */
+/** `group` carries every member of the group (self included), ordered by id. */
 export function findTransactionById(db: Database.Database, id: string): TransactionDetail | null {
   const row = db.prepare(`${ROW_SELECT} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
   if (!row) return null;
@@ -197,6 +221,8 @@ export function findTransactionById(db: Database.Database, id: string): Transact
 export interface ListTransactionsOptions {
   /** Match either side (debit OR credit) of the transaction. */
   account?: string;
+  /** ISO code of the ledger to scope rows to. Ignored when `account` is set. */
+  ledger?: string;
   from?: string;
   to?: string;
   /** LIKE over description, raw_descriptor, merchant name, either account name. */
@@ -208,6 +234,8 @@ export interface ListTransactionsOptions {
   offset?: number;
   /** When true, fold rows into per-group_id clusters (NULLs stay standalone). */
   group?: boolean;
+  /** Voided mirrors are hidden by default, so counts agree with balances. */
+  includeVoid?: boolean;
 }
 
 export interface TransactionCluster {
@@ -215,7 +243,10 @@ export interface TransactionCluster {
   transactions: TransactionRow[];
 }
 
-type ListFilters = Pick<ListTransactionsOptions, "account" | "from" | "to" | "query" | "amount">;
+type ListFilters = Pick<
+  ListTransactionsOptions,
+  "account" | "ledger" | "from" | "to" | "query" | "amount" | "includeVoid"
+>;
 
 // Shared by listTransactions/countTransactions so a filtered count matches the list.
 // `params` align positionally with the `?` placeholders in `whereSql`.
@@ -223,9 +254,15 @@ function buildListWhere(opts: ListFilters): { whereSql: string; params: any[] } 
   const conditions: string[] = [];
   const params: any[] = [];
 
+  if (!opts.includeVoid) conditions.push("t.void_of IS NULL");
   if (opts.account) {
     conditions.push("(t.debit_account_id = ? OR t.credit_account_id = ?)");
     params.push(opts.account, opts.account);
+  }
+  // Same expression the `currency` column is projected from, so filtering matches what's reported.
+  if (opts.ledger && !opts.account) {
+    conditions.push(`${accountCurrencySQL("da")} = upper(?)`);
+    params.push(opts.ledger);
   }
   if (opts.from) {
     conditions.push("t.date >= ?");
@@ -281,11 +318,7 @@ export function listTransactions(
   return opts.group ? clusterByGroup(rows) : rows;
 }
 
-/**
- * Fold rows into per-group clusters, preserving the incoming (date DESC, id
- * DESC) order for cluster first-appearance. Rows with a null group_id each
- * become their own standalone cluster.
- */
+/** Preserves incoming order for cluster first-appearance; null `group_id` rows each become their own cluster. */
 function clusterByGroup(rows: TransactionRow[]): TransactionCluster[] {
   const clusters: TransactionCluster[] = [];
   const byGroup = new Map<string, TransactionCluster>();
@@ -305,8 +338,22 @@ function clusterByGroup(rows: TransactionRow[]): TransactionCluster[] {
   return clusters;
 }
 
-export function deleteTransaction(db: Database.Database, id: string): boolean {
-  return db.prepare(`DELETE FROM transactions WHERE id = ?`).run(id).changes > 0;
+/** Deleting a surviving twin un-voids its mirrors (`void_of` FK, ON DELETE SET NULL); the count is reported. */
+export function deleteTransaction(
+  db: Database.Database,
+  id: string,
+): { deleted: boolean; unvoided: number } {
+  let deleted = false;
+  let unvoided = 0;
+  const tx = db.transaction((): void => {
+    unvoided = (
+      db.prepare(`SELECT COUNT(*) AS n FROM transactions WHERE void_of = ?`).get(id) as { n: number }
+    ).n;
+    deleted = db.prepare(`DELETE FROM transactions WHERE id = ?`).run(id).changes > 0;
+    if (!deleted) unvoided = 0;
+  });
+  tx();
+  return { deleted, unvoided };
 }
 
 export interface BulkRecategorizeFilter {
@@ -322,13 +369,16 @@ interface BulkRecategorizeResult {
   affected: number;
   /** Rows skipped because moving them would make debit == credit. */
   skipped_self_transaction: number;
+  /** Rows skipped because the target sits on another ledger. */
+  skipped_currency_mismatch: number;
   sample_transaction_ids: string[];
 }
 
 /**
- * Re-points every matching transaction's `:from` side (debit OR credit) to
- * `:to`. Rows whose other side already equals `:to` are skipped (would
- * violate the debit<>credit CHECK) and counted in `skipped_self_transaction`.
+ * Re-points every matching transaction's `:from` side to `:to`. Rows whose
+ * other side already equals `:to` are skipped (would violate the debit<>credit
+ * CHECK); rows on another ledger are skipped before the cross-ledger trigger
+ * would abort the statement.
  */
 export function bulkRecategorize(
   db: Database.Database,
@@ -351,7 +401,9 @@ export function bulkRecategorize(
 
   let affected = 0;
   let skipped = 0;
+  let skippedCurrency = 0;
   let sample: string[] = [];
+  const toCurrency = currencyOf(to);
   const tx = db.transaction((): void => {
     const rows = db
       .prepare(
@@ -364,6 +416,10 @@ export function bulkRecategorize(
       const other = r.debit_account_id === from ? r.credit_account_id : r.debit_account_id;
       if (other === to) {
         skipped++;
+        continue;
+      }
+      if (currencyOf(other) !== toCurrency) {
+        skippedCurrency++;
         continue;
       }
       toUpdate.push(r.id);
@@ -382,15 +438,18 @@ export function bulkRecategorize(
       .run(from, to, from, to, ...toUpdate).changes;
   });
   tx();
-  return { affected, skipped_self_transaction: skipped, sample_transaction_ids: sample };
+  return {
+    affected,
+    skipped_self_transaction: skipped,
+    skipped_currency_mismatch: skippedCurrency,
+    sample_transaction_ids: sample,
+  };
 }
 
 /**
  * The re-point step of `mergeAccounts` (src/accounts/accounts.ts). Rows that
- * would become a degenerate self-transaction (one side `fromId`, the other
- * already `toId`) are deleted FIRST, since the debit<>credit CHECK forbids that
- * state even transiently; then the remainder is re-pointed. Does not touch the
- * accounts table.
+ * would become a degenerate self-transaction are deleted FIRST, since the
+ * debit<>credit CHECK forbids that state even transiently.
  */
 export function repointTransactions(
   db: Database.Database,
@@ -438,7 +497,6 @@ export function countTransactionsBySourceFile(db: Database.Database, fileId: str
   ).n;
 }
 
-/** The "account still in use" guard before deleting an account. */
 export function accountHasTransactions(db: Database.Database, accountId: string): boolean {
   return !!db
     .prepare(
@@ -461,11 +519,7 @@ const TRANSACTION_META_PATCH: Record<string, PatchField> = {
   source_page: {},
 };
 
-/**
- * Amount, currency, and the account columns are intentionally not accepted
- * here: moving accounts is `bulkRecategorize`'s job, and amount/currency edits
- * must go through delete + re-record to keep minor-unit invariants intact.
- */
+/** Amount and account columns aren't accepted here: moving accounts is `bulkRecategorize`'s job, and amount edits go through delete + re-record. */
 export function updateTransactionMeta(
   db: Database.Database,
   id: string,
@@ -479,7 +533,6 @@ export function updateTransactionMeta(
 
 interface VoidCandidate {
   amount: number;
-  currency: string;
   debit_account_id: string;
   credit_account_id: string;
   void_of: string | null;
@@ -488,7 +541,7 @@ interface VoidCandidate {
 /**
  * Voids `fromId` into surviving `toId` (sets `void_of=toId`); never deletes,
  * so re-ingesting the mirror's source file can't resurrect it. Requires
- * matching amount/currency/both accounts but not date (statement vs. posting
+ * matching amount and both accounts, but not date (statement vs. posting
  * dates legitimately differ). Re-voiding an already-void row is a no-op.
  */
 export function voidTransactionAsMirror(
@@ -499,7 +552,7 @@ export function voidTransactionAsMirror(
   if (fromId === toId) throw new Error("Cannot merge a transaction into itself.");
 
   const select = db.prepare(
-    `SELECT amount, currency, debit_account_id, credit_account_id, void_of FROM transactions WHERE id = ?`,
+    `SELECT amount, debit_account_id, credit_account_id, void_of FROM transactions WHERE id = ?`,
   );
   const from = select.get(fromId) as VoidCandidate | undefined;
   if (!from) throw new Error(`transaction "${fromId}" not found`);
@@ -511,15 +564,60 @@ export function voidTransactionAsMirror(
 
   if (
     from.amount !== to.amount ||
-    from.currency !== to.currency ||
     from.debit_account_id !== to.debit_account_id ||
     from.credit_account_id !== to.credit_account_id
   ) {
     throw new Error(
-      `transactions "${fromId}" and "${toId}" are not mirrors (amount, currency, and both accounts must match)`,
+      `transactions "${fromId}" and "${toId}" are not mirrors (amount and both accounts must match)`,
     );
   }
 
   db.prepare(`UPDATE transactions SET void_of = ? WHERE id = ?`).run(toId, fromId);
   return { alreadyVoid: false };
+}
+
+export interface DuplicateTransactionRow {
+  id: string;
+  group_id: string | null;
+  date: string;
+  description: string;
+  amount: number;
+  currency: string;
+  source_file_id: string | null;
+  merchant_id: string | null;
+  debit_account_id: string;
+  credit_account_id: string;
+  debit_account_name: string | null;
+  credit_account_name: string | null;
+}
+
+/**
+ * Adjustments legitimately repeat on one account/amount/day and aren't
+ * duplicate statement rows. The `adjustments` literal duplicates
+ * `STRUCTURAL_ACCOUNTS.adjustments` (src/accounts/accounts.ts) — layering
+ * forbids importing it here, so keep both in sync by hand.
+ */
+const NOT_ADJUSTMENT = `t.debit_account_id NOT LIKE '%:equity:adjustments'
+          AND t.credit_account_id NOT LIKE '%:equity:adjustments'`;
+
+/** Live, non-adjustment rows eligible for duplicate detection; clustering them
+ *  lives beside its caller in `src/ingest/clustering.ts`. */
+export function listDuplicateCandidateTransactions(
+  db: Database.Database,
+  opts: { minAmount?: number } = {},
+): DuplicateTransactionRow[] {
+  return db
+    .prepare(
+      `SELECT t.id, t.group_id, t.date, t.description, t.amount,
+              ${accountCurrencySQL("da")} AS currency,
+              t.source_file_id, t.merchant_id, t.debit_account_id, t.credit_account_id,
+              da.name AS debit_account_name, ca.name AS credit_account_name
+         FROM transactions t
+         LEFT JOIN accounts da ON da.id = t.debit_account_id
+         LEFT JOIN accounts ca ON ca.id = t.credit_account_id
+        WHERE t.void_of IS NULL
+          AND t.amount >= ?
+          AND ${NOT_ADJUSTMENT}`,
+    )
+    .all(opts.minAmount ?? 0) as DuplicateTransactionRow[];
 }

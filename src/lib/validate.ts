@@ -1,8 +1,7 @@
 import * as z from "zod";
 import type { Result } from "./result.js";
 
-/** Thrown by `parseInput` on a failed parse. `src/lib/` has no dependency on
- *  `src/cli/`, so the CLI layer maps this to its own error/exit-code type. */
+/** Thrown by `parseInput`; `src/lib/` can't depend on `src/cli/`, so the CLI layer maps this to its own error/exit-code type. */
 export class ValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -15,8 +14,7 @@ export class ValidationError extends Error {
 const toStringInput = (value: unknown): unknown =>
   typeof value === "string" || value === undefined ? value : String(value);
 
-/** Non-finite results pass the raw value through so z.number rejects it and the
- *  formatter echoes the original in `got "<value>"`; "" and null coerce to 0 via Number(). */
+/** Non-finite results pass through so z.number rejects them and the formatter echoes the original in `got "<value>"`. */
 const toNumberInput = (value: unknown): unknown => {
   if (typeof value === "number") return value;
   const n = Number(value);

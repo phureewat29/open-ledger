@@ -4,14 +4,13 @@ import { config, getConfigPath, getDataDir } from "../../config.js";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { sep } from "path";
-import { formatAmount } from "../currency.js";
+import { formatAmount, toDecimalTotals } from "../currency.js";
 import { banner, visibleLength, ANSI_RE, formatInt } from "../format.js";
-import { currentMode, emit, runAction } from "../output.js";
+import { currentMode, emit, redactionEnabled, runAction } from "../output.js";
 import { tryExecute } from "../../lib/result.js";
 import { openDb } from "../db.js";
 
-/** Rewrites a leading home-directory prefix to "~/"; any other string passes through
- *  unchanged, so calling it on non-path values (e.g. error prose) is a safe no-op. */
+// Rewrites a leading home dir prefix to "~/"; any other string (e.g. error prose) passes through unchanged.
 function homeRelative(p: string): string {
   const prefix = homedir() + sep;
   return p.startsWith(prefix) ? "~" + sep + p.slice(prefix.length) : p;
@@ -40,7 +39,13 @@ export interface StatusReport {
   counts: Counts | null;
   files: { ingested: number; pending: number; failed: number } | null;
   questions: { open: number; deferred: number } | null;
-  net_worth: { assets: number; liabilities: number; net_worth: number } | null;
+  // Keys are currencies with an asset/liability account (report's are currencies
+  // with legs in range), so an untouched ledger still reports {"THB":0}.
+  net_worth: {
+    assets: Record<string, number>;
+    liabilities: Record<string, number>;
+    net_worth: Record<string, number>;
+  } | null;
 }
 
 /** `status` never creates the ledger, so a missing db file is reported, not opened. */
@@ -49,8 +54,7 @@ const NO_LEDGER = "no ledger yet";
 async function buildReport(): Promise<StatusReport> {
   const report: StatusReport = {
     type: "status",
-    // A converge has run, which is what `oled config --init` does; a db file on
-    // its own says nothing about configuration.
+    // `configured` means a converge has run (`oled config --init`); a db file alone doesn't imply that.
     configured: existsSync(getConfigPath()),
     config_path: homeRelative(getConfigPath()),
     data_dir: homeRelative(getDataDir()),
@@ -68,8 +72,7 @@ async function buildReport(): Promise<StatusReport> {
     net_worth: null,
   };
 
-  // Orienting must not create a ledger: openDb() would migrate an empty file
-  // into existence, so a missing db is reported instead of opened.
+  // openDb() would migrate a missing file into existence, so check existsSync first.
   if (!existsSync(config.dbPath)) {
     report.db.error = NO_LEDGER;
     return report;
@@ -103,23 +106,25 @@ async function buildReport(): Promise<StatusReport> {
   const open = countQuestions(db);
   const total = countQuestions(db, { includeDeferred: true });
   report.questions = { open, deferred: Math.max(0, total - open) };
-  report.net_worth = getNetWorth(db);
+  const worth = getNetWorth(db);
+  report.net_worth = {
+    assets: toDecimalTotals(worth.assets),
+    liabilities: toDecimalTotals(worth.liabilities),
+    net_worth: toDecimalTotals(worth.net_worth),
+  };
 
   return report;
 }
 
-// Paths are home-relativized facts, not free text: only error prose and the
-// user name can still carry PII by the time redaction runs.
+// Paths are home-relativized facts, not free text; only error prose and user_name can still carry PII.
 const STATUS_REDACT_FIELDS = ["error", "user_name"] as const;
 
-/** Redaction is on unless `--no-redact` explicitly turned it off, so bare `oled`
- *  (which has no such flag) masks the same fields `oled status` does. */
+// Redaction defaults on, so bare `oled` (no --no-redact flag) masks the same fields `status` does.
 export async function showStatus(opts: { redact?: boolean } = {}): Promise<void> {
   let report = await buildReport();
-  // Decided before redaction: the redacted report's paths and error prose are
-  // display strings, not facts to branch on.
+  // Decided before redaction: paths and error prose are display strings, not facts to branch on.
   const ledgerMissing = !report.db.reachable && !existsSync(config.dbPath);
-  if (opts.redact !== false) {
+  if (redactionEnabled(opts)) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
     report = applyRedaction(report, true, STATUS_REDACT_FIELDS);
   }
@@ -169,19 +174,19 @@ function renderPlain(r: StatusReport): void {
     );
   }
   if (r.net_worth) {
-    lines.push(
-      ["net_worth", r.net_worth.net_worth],
-      ["assets", r.net_worth.assets],
-      ["liabilities", r.net_worth.liabilities],
-    );
+    // One key per currency, never a scalar: different currencies must not be added together.
+    for (const [label, totals] of Object.entries(r.net_worth)) {
+      for (const [currency, amount] of Object.entries(totals)) {
+        lines.push([`${label}.${currency}`, amount]);
+      }
+    }
   }
   process.stdout.write(lines.map(([k, v]) => `${k}\t${v}`).join("\n") + "\n");
 }
 
 const LABEL_WIDTH = 18;
 
-/** Exported for the display test: this renderer runs only on a real TTY, so no
- *  subprocess suite can ever execute it. */
+// Exported for the display test: this renderer only runs on a real TTY, so no subprocess suite executes it.
 export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false): void {
   const dim = (s: string) => (color ? chalk.dim(s) : s);
   const bold = (s: string) => (color ? chalk.bold.yellow(s) : s);
@@ -210,8 +215,7 @@ export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false
     ],
   ]);
 
-  // status always exits 0, so an unreachable db needs a pointer to whatever
-  // resolves it: creating the ledger, or diagnosing one that will not open.
+  // status always exits 0, so an unreachable db needs its own pointer to what resolves it.
   if (!r.db.reachable) {
     const next = ledgerMissing
       ? "run `oled config --init` to create one"
@@ -248,13 +252,34 @@ export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false
     section("Pipeline", rows);
   }
 
-  if (r.net_worth) {
-    section("Financial", [
-      ["Net worth", formatAmount(r.net_worth.net_worth)],
-      ["Assets", dim(formatAmount(r.net_worth.assets))],
-      ["Liabilities", dim(formatAmount(r.net_worth.liabilities))],
-    ]);
+  const financial = r.net_worth ? financialRows(r.net_worth, dim) : [];
+  if (financial.length) section("Financial", financial);
+}
+
+// Ledgers in ISO order; each amount formats in its own currency, not the display currency.
+function financialRows(
+  worth: NonNullable<StatusReport["net_worth"]>,
+  dim: (s: string) => string,
+): [string, string][] {
+  const currencies = [
+    ...new Set([
+      ...Object.keys(worth.net_worth),
+      ...Object.keys(worth.assets),
+      ...Object.keys(worth.liabilities),
+    ]),
+  ].sort();
+
+  const rows: [string, string][] = [];
+  for (const currency of currencies) {
+    const amount = (totals: Record<string, number>): string =>
+      formatAmount(totals[currency] ?? 0, currency);
+    rows.push(
+      [`${currency} net worth`, amount(worth.net_worth)],
+      [`${currency} assets`, dim(amount(worth.assets))],
+      [`${currency} liabilities`, dim(amount(worth.liabilities))],
+    );
   }
+  return rows;
 }
 
 function stripBanner(): string {

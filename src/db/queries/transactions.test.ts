@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "libsql";
-import { createAccount } from "../../accounts/accounts.js";
 import {
   getAccountBalances,
   getNetWorth,
@@ -9,6 +8,7 @@ import {
 } from "../../accounts/balances.js";
 import {
   validateTransaction,
+  validateTransactionFields,
   insertTransaction,
   insertLinkedTransactions,
   findTransactionById,
@@ -22,26 +22,22 @@ import {
   updateTransactionMeta,
   type TransactionInput,
 } from "./transactions.js";
-import { findDuplicateTransactions } from "./transactions-dedup.js";
-import { freshDb } from "../../../fixtures/db.js";
+import { freshDb, seedAccount } from "../../../fixtures/db.js";
 
 function seedChartOfAccounts(db: Database.Database): void {
-  createAccount(db, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-  createAccount(db, { id: "asset:cash", name: "Cash", type: "asset", parent_id: "asset" });
-  createAccount(db, { id: "asset:bank", name: "KBank Savings", type: "asset", parent_id: "asset" });
-  createAccount(db, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
-  createAccount(db, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
-  createAccount(db, { id: "expense:transport", name: "Transport", type: "expense", parent_id: "expense" });
+  seedAccount(db, { id: "thb:asset:cash" });
+  seedAccount(db, { id: "thb:asset:bank", name: "KBank Savings" });
+  seedAccount(db, { id: "thb:expense:food" });
+  seedAccount(db, { id: "thb:expense:transport" });
 }
 
 function tf(over: Partial<TransactionInput> = {}): TransactionInput {
   return {
     date: "2026-05-01",
     description: "Coffee",
-    debit_account_id: "expense:food",
-    credit_account_id: "asset:cash",
+    debit_account_id: "thb:expense:food",
+    credit_account_id: "thb:asset:cash",
     amount: 15000,
-    currency: "THB",
     ...over,
   };
 }
@@ -66,12 +62,56 @@ describe("validateTransaction", () => {
     expect(validateTransaction(tf({ amount: -100 }))).toMatchObject({ ok: false });
   });
 
+  it("rejects an amount past 2^53-1 here, so the DDL ceiling is never the one to report it", () => {
+    // The `amount <= 9007199254740991` CHECK would abort the insert with DDL
+    // text; the agent must read the same pinned prose every other refusal uses.
+    for (const amount of [Number.MAX_SAFE_INTEGER + 1, 1e32]) {
+      expect(validateTransaction(tf({ amount }))).toEqual({
+        ok: false,
+        reason: "invalid_transaction",
+        message: "amount must be a positive integer in minor units.",
+      });
+    }
+    expect(validateTransaction(tf({ amount: Number.MAX_SAFE_INTEGER }))).toEqual({ ok: true });
+  });
+
   it("rejects empty account ids and debit == credit", () => {
     expect(validateTransaction(tf({ debit_account_id: "" }))).toMatchObject({ ok: false });
     expect(validateTransaction(tf({ credit_account_id: "" }))).toMatchObject({ ok: false });
-    expect(validateTransaction(tf({ debit_account_id: "asset:cash", credit_account_id: "asset:cash" }))).toMatchObject({
+    expect(validateTransaction(tf({ debit_account_id: "thb:asset:cash", credit_account_id: "thb:asset:cash" }))).toMatchObject({
       ok: false,
     });
+  });
+
+  it("refuses with a typed reason and the message the caller reports", () => {
+    expect(validateTransaction(tf({ amount: 0 }))).toEqual({
+      ok: false,
+      reason: "invalid_transaction",
+      message: "amount must be a positive integer in minor units.",
+    });
+  });
+
+  it("delegates the form-independent rules, so both amount forms refuse alike", () => {
+    // validateRawTransaction (src/ingest/commit.ts) reaches the same five rules
+    // with a decimal amount; the wording an agent reads back is this one.
+    for (const [over, message] of [
+      [{ date: "2026/05/01" }, "date must be an ISO date (YYYY-MM-DD)."],
+      [{ description: "  " }, "description must not be empty."],
+      [{ debit_account_id: "" }, "debit_account_id must not be empty."],
+      [{ credit_account_id: "" }, "credit_account_id must not be empty."],
+      [{ credit_account_id: "thb:expense:food" }, "debit and credit accounts must differ."],
+    ] as const) {
+      expect(validateTransaction(tf(over))).toEqual({
+        ok: false,
+        reason: "invalid_transaction",
+        message,
+      });
+      expect(validateTransactionFields(tf(over))).toEqual({
+        ok: false,
+        reason: "invalid_transaction",
+        message,
+      });
+    }
   });
 });
 
@@ -90,7 +130,7 @@ describe("insertTransaction", () => {
   });
 
   it("upserts a merchant when supplied", () => {
-    insertTransaction(db, tf({ id: "tx:mc", merchant: { canonical_name: "Starbucks" } }));
+    insertTransaction(db, tf({ id: "tx:mc", merchant: { canonical_name: "Starbucks", noise_tokens: [] } }));
     expect(findTransactionById(db, "tx:mc")?.merchant_name).toBe("Starbucks");
   });
 });
@@ -102,7 +142,7 @@ describe("insertLinkedTransactions", () => {
   it("shares one group id across every leg", () => {
     const res = insertLinkedTransactions(db, [
       tf({ id: "tx:a" }),
-      tf({ id: "tx:b", debit_account_id: "expense:transport" }),
+      tf({ id: "tx:b", debit_account_id: "thb:expense:transport" }),
     ]);
     expect(res.results.map((r) => r.id)).toEqual(["tx:a", "tx:b"]);
     expect(res.group_id.startsWith("tg:")).toBe(true);
@@ -114,7 +154,7 @@ describe("insertLinkedTransactions", () => {
     expect(() =>
       insertLinkedTransactions(db, [
         tf({ id: "tx:a" }),
-        tf({ id: "tx:b", debit_account_id: "asset:cash", credit_account_id: "asset:cash" }),
+        tf({ id: "tx:b", debit_account_id: "thb:asset:cash", credit_account_id: "thb:asset:cash" }),
       ]),
     ).toThrow();
     expect(countTransactions(db)).toBe(0);
@@ -132,7 +172,7 @@ describe("findTransactionById", () => {
   it("joins account + merchant names and carries the full group", () => {
     const res = insertLinkedTransactions(db, [
       tf({ id: "tx:a" }),
-      tf({ id: "tx:b", debit_account_id: "expense:transport" }),
+      tf({ id: "tx:b", debit_account_id: "thb:expense:transport" }),
     ]);
     const detail = findTransactionById(db, "tx:a")!;
     expect(detail.debit_account_name).toBe("Food");
@@ -146,8 +186,8 @@ describe("listTransactions", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb(seedChartOfAccounts);
-    insertTransaction(db, tf({ id: "tx:1", description: "Coffee", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000 }));
-    insertTransaction(db, tf({ id: "tx:2", description: "Taxi", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 20000 }));
+    insertTransaction(db, tf({ id: "tx:1", description: "Coffee", debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:cash", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:2", description: "Taxi", debit_account_id: "thb:expense:transport", credit_account_id: "thb:asset:bank", amount: 20000 }));
   });
 
   it("orders by date DESC, id DESC", () => {
@@ -155,9 +195,9 @@ describe("listTransactions", () => {
   });
 
   it("matches an account on EITHER side", () => {
-    expect(listTransactions(db, { account: "asset:cash" }).map((r) => r.id)).toEqual(["tx:1"]);
-    expect(listTransactions(db, { account: "expense:food" }).map((r) => r.id)).toEqual(["tx:1"]);
-    expect(listTransactions(db, { account: "asset:bank" }).map((r) => r.id)).toEqual(["tx:2"]);
+    expect(listTransactions(db, { account: "thb:asset:cash" }).map((r) => r.id)).toEqual(["tx:1"]);
+    expect(listTransactions(db, { account: "thb:expense:food" }).map((r) => r.id)).toEqual(["tx:1"]);
+    expect(listTransactions(db, { account: "thb:asset:bank" }).map((r) => r.id)).toEqual(["tx:2"]);
   });
 
   it("queries over description and either account name", () => {
@@ -175,7 +215,7 @@ describe("listTransactions", () => {
   it("clusters by group when requested (nulls standalone)", () => {
     const linked = insertLinkedTransactions(db, [
       tf({ id: "tx:g1", amount: 5000 }),
-      tf({ id: "tx:g2", debit_account_id: "expense:transport", amount: 5000 }),
+      tf({ id: "tx:g2", debit_account_id: "thb:expense:transport", amount: 5000 }),
     ]);
     const clusters = listTransactions(db, { group: true });
     const grouped = clusters.find((c) => c.group_id === linked.group_id);
@@ -186,13 +226,91 @@ describe("listTransactions", () => {
   });
 });
 
+describe("listTransactions by ledger", () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = freshDb((seeded) => {
+      seedChartOfAccounts(seeded);
+      seedAccount(seeded, { id: "jpy:asset:cash" });
+      seedAccount(seeded, { id: "jpy:expense:food" });
+    });
+    // 15.00 THB and 1500 JPY are the same integer at rest: only the ledger the
+    // account ids carry tells the two rows apart.
+    insertTransaction(db, tf({ id: "tx:thb", amount: 1500 }));
+    insertTransaction(
+      db,
+      tf({
+        id: "tx:jpy",
+        debit_account_id: "jpy:expense:food",
+        credit_account_id: "jpy:asset:cash",
+        amount: 1500,
+      }),
+    );
+  });
+
+  it("scopes rows to one ledger, and the count agrees with the listing", () => {
+    expect(listTransactions(db, { ledger: "jpy" }).map((r) => r.id)).toEqual(["tx:jpy"]);
+    expect(countTransactions(db, { ledger: "jpy" })).toBe(1);
+    expect(listTransactions(db, { ledger: "thb" }).map((r) => r.id)).toEqual(["tx:thb"]);
+    expect(countTransactions(db, { ledger: "thb" })).toBe(1);
+    // The code is compared upper-cased on both sides, as the emitted one is.
+    expect(listTransactions(db, { ledger: "JPY" }).map((r) => r.id)).toEqual(["tx:jpy"]);
+  });
+
+  it("narrows an amount both ledgers share at rest", () => {
+    expect(listTransactions(db, { amount: 1500 }).map((r) => r.id).sort()).toEqual([
+      "tx:jpy",
+      "tx:thb",
+    ]);
+    expect(listTransactions(db, { amount: 1500, ledger: "jpy" }).map((r) => r.id)).toEqual([
+      "tx:jpy",
+    ]);
+  });
+
+  it("leaves an account filter alone: the id already names a ledger, and it wins", () => {
+    expect(
+      listTransactions(db, { account: "thb:expense:food", ledger: "jpy" }).map((r) => r.id),
+    ).toEqual(["tx:thb"]);
+    expect(countTransactions(db, { account: "thb:expense:food", ledger: "jpy" })).toBe(1);
+  });
+});
+
 describe("deleteTransaction", () => {
   it("removes a row and reports success", () => {
     const db = freshDb(seedChartOfAccounts);
     insertTransaction(db, tf({ id: "tx:1" }));
-    expect(deleteTransaction(db, "tx:1")).toBe(true);
-    expect(deleteTransaction(db, "tx:1")).toBe(false);
+    expect(deleteTransaction(db, "tx:1")).toEqual({ deleted: true, unvoided: 0 });
+    expect(deleteTransaction(db, "tx:1")).toEqual({ deleted: false, unvoided: 0 });
     expect(countTransactions(db)).toBe(0);
+  });
+
+  it("un-voids the mirrors of a deleted survivor and reports how many", () => {
+    const db = freshDb(seedChartOfAccounts);
+    insertTransaction(db, tf({ id: "tx:orig" }));
+    insertTransaction(db, tf({ id: "tx:mirror" }));
+    voidTransactionAsMirror(db, "tx:mirror", "tx:orig");
+
+    expect(deleteTransaction(db, "tx:orig")).toEqual({ deleted: true, unvoided: 1 });
+    expect(findTransactionById(db, "tx:mirror")?.void_of).toBeNull();
+  });
+
+  it("un-voids every mirror of a deleted survivor, and the balance doubles back to reflect both returning live", () => {
+    const db = freshDb(seedChartOfAccounts);
+    insertTransaction(db, tf({ id: "tx:orig", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:mirror1", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:mirror2", amount: 15000 }));
+    voidTransactionAsMirror(db, "tx:mirror1", "tx:orig");
+    voidTransactionAsMirror(db, "tx:mirror2", "tx:orig");
+
+    const balanceOf = (id: string): number =>
+      getAccountBalances(db).find((b) => b.id === id)!.balance;
+    expect(balanceOf("thb:asset:cash")).toBe(-150);
+
+    expect(deleteTransaction(db, "tx:orig")).toEqual({ deleted: true, unvoided: 2 });
+
+    expect(findTransactionById(db, "tx:mirror1")?.void_of).toBeNull();
+    expect(findTransactionById(db, "tx:mirror2")?.void_of).toBeNull();
+    expect(balanceOf("thb:asset:cash")).toBe(-300);
   });
 });
 
@@ -200,58 +318,49 @@ describe("bulkRecategorize", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb(seedChartOfAccounts);
-    insertTransaction(db, tf({ id: "tx:d", debit_account_id: "expense:food", credit_account_id: "asset:cash" }));
-    insertTransaction(db, tf({ id: "tx:c", debit_account_id: "asset:cash", credit_account_id: "expense:food" }));
-    insertTransaction(db, tf({ id: "tx:self", debit_account_id: "expense:food", credit_account_id: "expense:transport" }));
+    insertTransaction(db, tf({ id: "tx:d", debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:cash" }));
+    insertTransaction(db, tf({ id: "tx:c", debit_account_id: "thb:asset:cash", credit_account_id: "thb:expense:food" }));
+    insertTransaction(db, tf({ id: "tx:self", debit_account_id: "thb:expense:food", credit_account_id: "thb:expense:transport" }));
   });
 
   it("moves both sides and skips would-be self-transactions", () => {
-    const res = bulkRecategorize(db, { accountId: "expense:food" }, { accountId: "expense:transport" });
+    const res = bulkRecategorize(db, { accountId: "thb:expense:food" }, { accountId: "thb:expense:transport" });
     expect(res.affected).toBe(2);
     expect(res.skipped_self_transaction).toBe(1);
-    expect(findTransactionById(db, "tx:d")?.debit_account_id).toBe("expense:transport");
-    expect(findTransactionById(db, "tx:c")?.credit_account_id).toBe("expense:transport");
-    expect(findTransactionById(db, "tx:self")?.debit_account_id).toBe("expense:food");
-    expect(findTransactionById(db, "tx:self")?.credit_account_id).toBe("expense:transport");
+    expect(findTransactionById(db, "tx:d")?.debit_account_id).toBe("thb:expense:transport");
+    expect(findTransactionById(db, "tx:c")?.credit_account_id).toBe("thb:expense:transport");
+    expect(findTransactionById(db, "tx:self")?.debit_account_id).toBe("thb:expense:food");
+    expect(findTransactionById(db, "tx:self")?.credit_account_id).toBe("thb:expense:transport");
   });
 
   it("throws when the target account does not exist", () => {
-    expect(() => bulkRecategorize(db, { accountId: "expense:food" }, { accountId: "expense:nope" })).toThrow(
+    expect(() => bulkRecategorize(db, { accountId: "thb:expense:food" }, { accountId: "thb:expense:nope" })).toThrow(
       /does not exist/,
     );
   });
 
   it("refuses the no-op where set == filter account", () => {
-    expect(() => bulkRecategorize(db, { accountId: "expense:food" }, { accountId: "expense:food" })).toThrow(
+    expect(() => bulkRecategorize(db, { accountId: "thb:expense:food" }, { accountId: "thb:expense:food" })).toThrow(
       /no-op/,
     );
   });
-});
 
-describe("findDuplicateTransactions", () => {
-  let db: Database.Database;
-  beforeEach(() => { db = freshDb(seedChartOfAccounts); });
+  it("pre-filters rows whose other side sits on another ledger, before the cross-ledger trigger would abort the statement", () => {
+    seedAccount(db, { id: "usd:asset:cash", name: "Cash (USD)" });
 
-  it("detects cross-group duplicates but excludes intra-group members", () => {
-    insertLinkedTransactions(db, [
-      tf({ id: "tx:same1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 5000 }),
-      tf({ id: "tx:same2", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 5000 }),
-    ]);
-    insertTransaction(db, tf({ id: "tx:dup1", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
-    insertTransaction(db, tf({ id: "tx:dup2", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
+    const res = bulkRecategorize(db, { accountId: "thb:expense:food" }, { accountId: "usd:asset:cash" });
 
-    const groups = findDuplicateTransactions(db);
-    expect(groups).toHaveLength(1);
-    expect(groups[0].map((r) => r.id).sort()).toEqual(["tx:dup1", "tx:dup2"]);
-  });
-
-  it("excludes voided rows from candidates", () => {
-    insertTransaction(db, tf({ id: "tx:dupA", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
-    insertTransaction(db, tf({ id: "tx:dupB", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 7000 }));
-    expect(findDuplicateTransactions(db)).toHaveLength(1);
-
-    voidTransactionAsMirror(db, "tx:dupB", "tx:dupA");
-    expect(findDuplicateTransactions(db)).toHaveLength(0);
+    // All three seeded rows touch thb:expense:food on one side; every one of
+    // them has a THB account on the other side, so all three are pre-filtered
+    // before the cross-ledger trigger would ever see the UPDATE.
+    expect(res).toEqual({
+      affected: 0,
+      skipped_self_transaction: 0,
+      skipped_currency_mismatch: 3,
+      sample_transaction_ids: [],
+    });
+    expect(findTransactionById(db, "tx:d")?.debit_account_id).toBe("thb:expense:food");
+    expect(findTransactionById(db, "tx:c")?.credit_account_id).toBe("thb:expense:food");
   });
 });
 
@@ -266,7 +375,7 @@ describe("counts + updateTransactionMeta", () => {
 
   it("counts total and by source file", () => {
     insertTransaction(db, tf({ id: "tx:1", source_file_id: "sf:1" }));
-    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "expense:transport" }));
+    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "thb:expense:transport" }));
     expect(countTransactions(db)).toBe(2);
     expect(countTransactionsBySourceFile(db, "sf:1")).toBe(1);
   });
@@ -309,15 +418,12 @@ describe("voidTransactionAsMirror", () => {
     expect(() => voidTransactionAsMirror(db, "tx:a", "tx:missing")).toThrow(/not found/);
   });
 
-  it("refuses when amount, currency, or accounts differ", () => {
+  it("refuses when amount or either account differs", () => {
     insertTransaction(db, tf({ id: "tx:amt", amount: 99999 }));
     expect(() => voidTransactionAsMirror(db, "tx:amt", "tx:a")).toThrow(/mirror/);
 
-    insertTransaction(db, tf({ id: "tx:pair", debit_account_id: "expense:transport", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:pair", debit_account_id: "thb:expense:transport", amount: 15000 }));
     expect(() => voidTransactionAsMirror(db, "tx:pair", "tx:a")).toThrow(/mirror/);
-
-    insertTransaction(db, tf({ id: "tx:ccy", amount: 15000, currency: "USD" }));
-    expect(() => voidTransactionAsMirror(db, "tx:ccy", "tx:a")).toThrow(/mirror/);
   });
 
   it("refuses merging into a voided row", () => {
@@ -339,20 +445,43 @@ describe("void excludes rows from balance derivation", () => {
     getAccountBalances(db).find((b) => b.id === id)!.balance;
 
   it("double-counts before void, counts once after", () => {
-    expect(balanceOf("asset:cash")).toBe(-300);
-    expect(balanceOf("expense:food")).toBe(300);
+    expect(balanceOf("thb:asset:cash")).toBe(-300);
+    expect(balanceOf("thb:expense:food")).toBe(300);
 
     voidTransactionAsMirror(db, "tx:mirror", "tx:orig");
 
-    expect(balanceOf("asset:cash")).toBe(-150);
-    expect(balanceOf("expense:food")).toBe(150);
+    expect(balanceOf("thb:asset:cash")).toBe(-150);
+    expect(balanceOf("thb:expense:food")).toBe(150);
   });
 
   it("also excludes void from net worth, period totals, and rollup", () => {
     voidTransactionAsMirror(db, "tx:mirror", "tx:orig");
-    expect(getNetWorth(db).net_worth).toBe(-150);
-    expect(getPeriodTotals(db, "2026-01-01", "2026-12-31").expenses).toBe(150);
-    expect(getRollupBalance(db, "expense")).toBe(150);
+    expect(getNetWorth(db).net_worth).toEqual({ THB: -15000 });
+    expect(getPeriodTotals(db, "2026-01-01", "2026-12-31").expenses).toEqual({ THB: 15000 });
+    expect(getRollupBalance(db, "thb:expense")).toEqual({ THB: 15000 });
+  });
+});
+
+describe("listTransactions / countTransactions void filtering", () => {
+  it("excludes the voided mirror by default, includes it with includeVoid, and counts agree with both", () => {
+    const db = freshDb(seedChartOfAccounts);
+    insertTransaction(db, tf({ id: "tx:orig", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:mirror", amount: 15000 }));
+
+    expect(listTransactions(db).map((r) => r.id)).toEqual(
+      expect.arrayContaining(["tx:orig", "tx:mirror"]),
+    );
+    expect(countTransactions(db)).toBe(2);
+
+    voidTransactionAsMirror(db, "tx:mirror", "tx:orig");
+
+    expect(listTransactions(db).map((r) => r.id)).toEqual(["tx:orig"]);
+    expect(countTransactions(db)).toBe(1);
+
+    const withVoid = listTransactions(db, { includeVoid: true });
+    expect(withVoid.map((r) => r.id).sort()).toEqual(["tx:mirror", "tx:orig"]);
+    expect(countTransactions(db, { includeVoid: true })).toBe(2);
+    expect(countTransactions(db, { includeVoid: true })).toBe(withVoid.length);
   });
 });
 
@@ -374,9 +503,9 @@ describe("countTransactions with filters", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb(seedChartOfAccounts);
-    insertTransaction(db, tf({ id: "tx:1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 15000 }));
-    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "expense:transport", credit_account_id: "asset:bank", amount: 20000 }));
-    insertTransaction(db, tf({ id: "tx:3", debit_account_id: "expense:food", credit_account_id: "asset:bank", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:1", debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:cash", amount: 15000 }));
+    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "thb:expense:transport", credit_account_id: "thb:asset:bank", amount: 20000 }));
+    insertTransaction(db, tf({ id: "tx:3", debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:bank", amount: 15000 }));
   });
 
   it("counts every row with no filter", () => {
@@ -385,9 +514,9 @@ describe("countTransactions with filters", () => {
 
   it("matches the row count of the same list filter", () => {
     for (const opts of [
-      { account: "expense:food" },
+      { account: "thb:expense:food" },
       { amount: 15000 },
-      { account: "asset:bank", amount: 20000 },
+      { account: "thb:asset:bank", amount: 20000 },
       { query: "KBank" },
     ]) {
       expect(countTransactions(db, opts)).toBe(listTransactions(db, opts).length);
@@ -399,23 +528,23 @@ describe("repointTransactions", () => {
   let db: Database.Database;
   beforeEach(() => {
     db = freshDb(seedChartOfAccounts);
-    createAccount(db, { id: "expense:food:dining", name: "Dining", type: "expense", parent_id: "expense:food" });
+    seedAccount(db, { id: "thb:expense:food:dining" });
   });
 
   it("moves both columns and deletes would-be self-transactions", () => {
-    insertTransaction(db, tf({ id: "tx:1", debit_account_id: "expense:food", credit_account_id: "asset:cash", amount: 10000 }));
-    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "asset:cash", credit_account_id: "expense:food", amount: 10000 }));
-    insertTransaction(db, tf({ id: "tx:self", debit_account_id: "expense:food", credit_account_id: "expense:food:dining", amount: 10000 }));
+    insertTransaction(db, tf({ id: "tx:1", debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:cash", amount: 10000 }));
+    insertTransaction(db, tf({ id: "tx:2", debit_account_id: "thb:asset:cash", credit_account_id: "thb:expense:food", amount: 10000 }));
+    insertTransaction(db, tf({ id: "tx:self", debit_account_id: "thb:expense:food", credit_account_id: "thb:expense:food:dining", amount: 10000 }));
 
-    const res = repointTransactions(db, "expense:food", "expense:food:dining");
+    const res = repointTransactions(db, "thb:expense:food", "thb:expense:food:dining");
     expect(res.deletedSelfTransactions).toBe(1);
     expect(res.moved).toBe(2);
-    expect(findTransactionById(db, "tx:1")?.debit_account_id).toBe("expense:food:dining");
-    expect(findTransactionById(db, "tx:2")?.credit_account_id).toBe("expense:food:dining");
+    expect(findTransactionById(db, "tx:1")?.debit_account_id).toBe("thb:expense:food:dining");
+    expect(findTransactionById(db, "tx:2")?.credit_account_id).toBe("thb:expense:food:dining");
     expect(findTransactionById(db, "tx:self")).toBeNull();
   });
 
   it("refuses re-pointing an account to itself", () => {
-    expect(() => repointTransactions(db, "expense:food", "expense:food")).toThrow();
+    expect(() => repointTransactions(db, "thb:expense:food", "thb:expense:food")).toThrow();
   });
 });

@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import type { QuestionRow } from "../../db/queries/questions.js";
-import { emitCappedSummary, emitList, fail, runAction, type Column } from "../output.js";
+import { emitCappedSummary, emitList, fail, redactionEnabled, runAction, type Column } from "../output.js";
 import { clampOffset } from "../../lib/limit.js";
 import { openDb } from "../db.js";
 import * as z from "zod";
@@ -33,8 +33,7 @@ function toListRow(row: QuestionRow): QuestionListRow {
   };
 }
 
-// `prompt` is the only free-text field; options/context are structured JSON
-// carrying ids the agent needs verbatim, so they're left intact.
+// `prompt` is the only free-text field; options/context are structured JSON the agent needs verbatim.
 const QUESTION_REDACT_FIELDS = ["prompt"] as const;
 
 const LIST_COLUMNS: Column<QuestionListRow>[] = [
@@ -89,7 +88,7 @@ async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
   const filter = { batch_id: parsed.batch, includeDeferred: !!opts.includeDeferred };
   const rows = queryQuestions(db, { ...filter, limit: parsed.limit, offset: parsed.offset });
   let listRows = rows.map(toListRow);
-  if (opts.redact) {
+  if (redactionEnabled(opts)) {
     const { applyRedaction } = await import("../../privacy/redactor.js");
     listRows = applyRedaction(listRows, true, QUESTION_REDACT_FIELDS);
   }
@@ -150,7 +149,7 @@ export function registerQuestions(program: Command): void {
         "",
         "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
         "Typical flow: list --json, resolve each by kind, then answer (--also <id,id> closes siblings) or defer.",
-        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert or update; currency_mismatch -> re-post as linked legs through equity:conversion:<ccy>.",
+        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert or update; currency_mismatch -> when both ledgers exist, re-post as linked legs through <currency>:equity:conversion (one per ledger, sharing a group); when the named ledger doesn't exist yet, open it with accounts create or fix the prefix, then re-run ingest commit.",
         "Example: oled questions list --json",
       ].join("\n"),
     );

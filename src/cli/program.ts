@@ -42,30 +42,24 @@ const GLOBAL_OPTIONS = [
   { name: "--no-color", desc: "Disable ANSI color output" },
 ];
 
-/** `oled ingest list` for a leaf, `oled` for the root: the command whose help answers the error. */
+// `oled ingest list` for a leaf, `oled` for the root.
 function commandPath(cmd: Command): string {
   const names: string[] = [];
   for (let c: Command | null = cmd; c; c = c.parent) names.unshift(c.name());
   return names.join(" ");
 }
 
-/**
- * Parse failures never reach runAction, so they are mapped onto the same error
- * contract here: USAGE, with the erroring command's own help as the hint.
- * --help and --version already printed and keep their exit code.
- */
+// Parse failures never reach runAction; map them onto the same error contract here.
 function parseFailureHandler(cmd: Command): (err: CommanderError) => void {
   return (err) => {
     if (err.exitCode === 0) return;
-    // A noun reached without a verb: commander printed the noun's help screen,
-    // which is the answer for a human. --json promised one error line instead.
+    // commander already printed help for a bare noun; --json needs one error line instead.
     if (err.code === "commander.help") {
       if (!jsonRequested()) return;
       fail("USAGE", `${commandPath(cmd)} needs a subcommand`, {
         hint: `one of: ${cmd.commands.map((sub) => sub.name()).join(", ")}`,
       });
     }
-    // The root takes no positional argument, so a stray one is a mistyped command.
     if (err.code === "commander.excessArguments" && !cmd.parent) {
       fail("USAGE", `unknown command '${cmd.args[0]}'`, {
         hint: "run `oled --help` for the list of commands",
@@ -77,15 +71,13 @@ function parseFailureHandler(cmd: Command): (err: CommanderError) => void {
   };
 }
 
-/** Builds the full commander program: pure construction, callers own `.parse()` / `.parseAsync()`. */
 export function buildProgram(): Command {
   const require = createRequire(import.meta.url);
   const { version } = require("../../package.json");
 
   const program = new Command();
 
-  // Required so a command with BOTH a bare action and subcommands (config)
-  // dispatches the subcommand instead of swallowing its options into the bare action.
+  // Needed so a command with both a bare action and subcommands (config) dispatches the subcommand.
   program.enablePositionalOptions();
 
   program
@@ -93,8 +85,7 @@ export function buildProgram(): Command {
     .description("The Harness Layer for Personal Finance")
     .version(version)
     .addHelpCommand(false)
-    // Bare `oled` reports harness status: the same action as `status`, which
-    // redacts by default; `oled status --no-redact` is the way to opt out.
+    // Bare `oled` runs the same action as `status`, which redacts by default.
     .action(runAction(showStatus));
 
   registerOpen(program);
@@ -112,17 +103,13 @@ export function buildProgram(): Command {
   registerNotes(program);
   registerDatasets(program);
 
-  // --json/--no-color on every command so they work before or after the
-  // subcommand name (getOutputMode() OR-walks the chain to find them), and an
-  // exit override per command so a parse failure names its own help.
+  // --json/--no-color repeated on every command so they work before or after the subcommand name.
   function configureEveryLevel(cmd: Command): void {
     cmd
       .option("--json", "Emit NDJSON (machine-readable) instead of human output")
       .option("--no-color", "Disable ANSI color output")
       .exitOverride(parseFailureHandler(cmd))
-      // Commander writes its own plain-text error line, and a help screen for a
-      // verbless noun, before exiting; under --json the CliError contract is the
-      // only thing allowed on stderr.
+      // Under --json, the CLIError contract is the only thing allowed on stderr.
       .configureOutput({
         outputError: () => {},
         writeErr: (str) => {
@@ -134,8 +121,7 @@ export function buildProgram(): Command {
   configureEveryLevel(program);
 
   program.configureHelp({
-    // configureHelp is inherited by subcommands, so guard explicitly: only the
-    // root gets the branded screen; subcommands keep commander's default formatter.
+    // configureHelp is inherited by subcommands, so guard explicitly: only the root gets the branded screen.
     formatHelp: (cmd, helper) =>
       cmd === program
         ? helpScreen(COMMANDS, GLOBAL_OPTIONS)

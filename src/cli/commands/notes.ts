@@ -1,14 +1,19 @@
 import type { Command } from "commander";
-import type { NoteRow } from "../../db/queries/notes.js";
-import { emitList, emitSummary, fail, requireYes, runAction, type Column } from "../output.js";
+import {
+  listNotes as queryNotes,
+  addNote as addNoteRow,
+  deleteNote as deleteNoteRow,
+  type NoteRow,
+} from "../../db/queries/notes.js";
+import { applyRedaction } from "../../privacy/redactor.js";
+import { emitList, emitSummary, fail, redactionEnabled, requireYes, runAction, type Column } from "../output.js";
 import { openDb } from "../db.js";
 import * as z from "zod";
 import { parseInput, str, num } from "../../lib/validate.js";
 
 const VALID_CATEGORIES = ["rule", "preference", "fact"] as const;
 
-// `content` is the only free-text field; id/category/created_at are
-// structured data left verbatim.
+// `content` is the only free-text field; id/category/created_at are structured data left verbatim.
 const NOTE_REDACT_FIELDS = ["content"] as const;
 
 const NOTE_COLUMNS: Column<NoteRow>[] = [
@@ -23,13 +28,8 @@ interface ListNotesOpts {
 }
 
 async function listNotes(opts: ListNotesOpts): Promise<void> {
-  const { listNotes: queryNotes } = await import("../../db/queries/notes.js");
   const db = await openDb();
-  let rows = queryNotes(db);
-  if (opts.redact) {
-    const { applyRedaction } = await import("../../privacy/redactor.js");
-    rows = applyRedaction(rows, true, NOTE_REDACT_FIELDS);
-  }
+  const rows = applyRedaction(queryNotes(db), redactionEnabled(opts), NOTE_REDACT_FIELDS);
   emitList(rows, NOTE_COLUMNS);
   emitSummary({ total: rows.length, returned: rows.length });
 }
@@ -41,20 +41,12 @@ const ADD_NOTE_SPEC = z.object({
 
 async function addNote(opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(ADD_NOTE_SPEC, opts);
-
-  const { listNotes: queryNotes, addNote: addNoteRow } = await import("../../db/queries/notes.js");
   const db = await openDb();
-  addNoteRow(db, parsed.content, parsed.category);
-  const saved = queryNotes(db)
-    .filter((m) => m.content === parsed.content && m.category === parsed.category)
-    .sort((a, b) => b.id - a.id)[0];
-  // A silent write with empty output would read as failure; say which row landed.
-  if (!saved) fail("GENERIC", "note was written but could not be read back");
+  const saved = addNoteRow(db, parsed.content, parsed.category);
   emitList([saved], NOTE_COLUMNS);
 }
 
-// Positional `<id>` args aren't commander opts; parsed through the same spec
-// API with an ad hoc raw object so the coercion message stays consistent.
+// Positional `<id>` args aren't commander opts; parsed through the same spec API with an ad hoc object.
 const NOTE_ID_SPEC = z.object({ id: num() });
 const NOTE_ID_LABELS = { id: "note id" };
 
@@ -62,7 +54,6 @@ async function removeNote(id: string, opts: { yes?: boolean }): Promise<void> {
   requireYes(opts, "removing this note");
   const parsed = parseInput(NOTE_ID_SPEC, { id }, { labels: NOTE_ID_LABELS });
 
-  const { deleteNote: deleteNoteRow } = await import("../../db/queries/notes.js");
   const db = await openDb();
   const deleted = deleteNoteRow(db, parsed.id);
   if (!deleted) fail("NOT_FOUND", `note "${id}" not found`);

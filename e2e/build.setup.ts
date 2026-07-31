@@ -2,11 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { distEntry, repoRoot } from "../fixtures/sandbox.js";
 
-/**
- * These suites assert on the published artifact, so `dist/` must match the working
- * tree before any case runs. vitest awaits globalSetup before the first spec, so
- * nothing reads `dist/` while the build replaces it.
- */
+// These suites assert on the published artifact, so dist/ must match the working tree first.
+// vitest awaits globalSetup before the first spec, so nothing reads dist/ while the build replaces it.
 export function setup(): void {
   if (process.env.OLED_E2E_SKIP_BUILD === "1") {
     if (!existsSync(distEntry)) {

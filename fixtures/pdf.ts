@@ -1,7 +1,7 @@
 /**
- * Hand-assembled PDF fixtures, latin1-encoded so xref offsets are byte counts,
- * not character counts. Nothing here imports src/ - a fixture built by the code
- * under test proves nothing - except mupdf, used only as the writer `encryptedPdf` needs.
+ * Hand-assembled, latin1-encoded so xref offsets are byte counts, not
+ * character counts. Nothing here imports src/, except mupdf (only as the
+ * writer `encryptedPdf` needs).
  */
 
 type PageKind = "text" | "blank" | "image";
@@ -41,8 +41,7 @@ function textContent(page: number): string {
   return `${content}ET\n`;
 }
 
-// An inline image (BI/ID/EI) with an ASCIIHex payload: a 2x2 bitmap stretched
-// over the page, which is what a scanned page looks like to the probe.
+// An inline image (BI/ID/EI) with an ASCIIHex payload: a 2x2 bitmap stretched over the page, like a scanned page looks to the probe.
 function imageContent(width: number, height: number): string {
   return (
     `q ${width} 0 0 ${height} 0 0 cm\n` +
@@ -57,8 +56,7 @@ const CONTENT: Record<PageKind, (page: number) => string> = {
   image: () => imageContent(WIDTH, HEIGHT),
 };
 
-// US Letter in points, the size every fixture uses; the render tests read it back
-// out of the PNG they produce.
+// US Letter in points; the render tests read this size back out of the PNG they produce.
 const WIDTH = 612;
 const HEIGHT = 792;
 

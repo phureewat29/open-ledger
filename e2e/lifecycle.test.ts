@@ -3,17 +3,17 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   createSandbox,
-  makeRunCli,
+  makeRunCLI,
   parseNdjson,
   parseOne,
   repoRoot,
-  type CliResult,
-  type CliRunner,
+  type CLIResult,
+  type CLIRunner,
   type Sandbox,
 } from "../fixtures/sandbox.js";
 
 let sandbox: Sandbox;
-let runCli: CliRunner;
+let runCLI: CLIRunner;
 
 // Threaded by the steps below, in the order the steps run.
 let statementPath = "";
@@ -22,24 +22,18 @@ let salaryId = "";
 let groomingId = "";
 let manualDupId = "";
 
-/**
- * Its own sandbox, never shared with the read sweep: this file mutates the
- * ledger from the first step onwards, and the sweep must not see those rows.
- */
+// Its own sandbox, never shared with the read sweep: this file mutates the ledger from step one.
 beforeAll(() => {
   sandbox = createSandbox("oled-e2e-lifecycle-");
-  runCli = makeRunCli(sandbox, "dist");
+  runCLI = makeRunCLI(sandbox, "dist");
 });
 
 afterAll(() => {
   sandbox.cleanup();
 });
 
-/**
- * One ledger, one chain: a mid-chain failure would cascade into unrelated steps.
- * `it.skipIf` reads its condition at collection time and so cannot see this flag;
- * this runtime guard is what the script's `break` did.
- */
+// One ledger, one chain: a mid-chain failure would cascade into unrelated steps.
+// `it.skipIf` reads its condition at collection time, so it can't see this runtime flag.
 let stepFailed = false;
 
 beforeEach((ctx) => ctx.skip(stepFailed, "an earlier lifecycle step failed"));
@@ -49,12 +43,12 @@ afterEach((ctx) => {
 });
 
 /** Every step asserts the machine surface, so `--json` is appended here rather than in 40 argument arrays. */
-function oled(args: string[], stdin?: string): Promise<CliResult> {
-  return runCli([...args, "--json"], { stdin });
+function oled(args: string[], stdin?: string): Promise<CLIResult> {
+  return runCLI([...args, "--json"], { stdin });
 }
 
 /** Exit 0 is the precondition of the next step, so it is asserted with the stderr that explains a failure. */
-async function ok(args: string[], stdin?: string): Promise<CliResult> {
+async function ok(args: string[], stdin?: string): Promise<CLIResult> {
   const result = await oled(args, stdin);
   expect(result.code, `oled ${args.join(" ")} failed: ${result.stderr}`).toBe(0);
   return result;
@@ -63,6 +57,14 @@ async function ok(args: string[], stdin?: string): Promise<CliResult> {
 /** The before/after quantity most steps below compare. */
 async function transactionCount(): Promise<number> {
   return parseOne((await ok(["status"])).stdout).counts.transactions;
+}
+
+/** Void-inclusive row total, for steps where void state is the variable. */
+async function allTransactionCount(): Promise<number> {
+  const rows = parseNdjson((await ok(["transactions", "list", "--include-void"])).stdout);
+  const summary = rows.find((row) => row.type === "summary");
+  if (!summary) throw new Error("transactions list emitted no summary row");
+  return summary.total as number;
 }
 
 function ndjson(items: Record<string, unknown>[]): string {
@@ -86,16 +88,15 @@ interface CommitSide {
   how: string;
 }
 
-/** Hand-crafted, not parsed from the fixture PDF (which only exercises
- *  discovery/prepare); re-piped verbatim by the idempotency step, so this hands
- *  back fresh objects rather than sharing one array. */
+// Hand-crafted, not parsed from the fixture PDF (that only exercises discovery/prepare);
+// returns fresh objects each call since the idempotency step re-pipes them verbatim.
 function lifecycleItems(): Record<string, unknown>[] {
   return [
     {
       date: "2026-06-01",
       description: "Salary Deposit",
-      debit_account: "asset:bank:kasibank",
-      credit_account: "income:salary",
+      debit_account: "thb:asset:bank:kasibank",
+      credit_account: "thb:income:salary",
       amount: 45000.0,
       row_index: 0,
       source_page: 0,
@@ -103,8 +104,8 @@ function lifecycleItems(): Record<string, unknown>[] {
     {
       date: "2026-06-02",
       description: "Pet Paradise Dog Food",
-      debit_account: "expense:pet:food",
-      credit_account: "asset:bank:kasibank",
+      debit_account: "thb:expense:pet:food",
+      credit_account: "thb:asset:bank:kasibank",
       amount: 1290.0,
       row_index: 1,
       source_page: 0,
@@ -114,10 +115,10 @@ function lifecycleItems(): Record<string, unknown>[] {
     {
       date: "2026-06-12",
       description: "Happy Paws Grooming",
-      // Bare-leaf hint on purpose: colon paths auto-create silently; this
-      // row exercises the uncategorized-fallback question.
+      // Bare-leaf hint on purpose: colon paths auto-create silently, so this
+      // exercises the uncategorized-fallback question.
       debit_account: "grooming",
-      credit_account: "asset:bank:kasibank",
+      credit_account: "thb:asset:bank:kasibank",
       amount: 850.0,
       row_index: 2,
       source_page: 0,
@@ -168,8 +169,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
     "ingest list finds exactly the staged locked statement and reports it encrypted",
     async () => {
-      // Staging is setup, not an assertion: copyFileSync throws on failure, and
-      // `ingest list` finding the file is what proves it landed.
+      // Staging is setup, not an assertion; `ingest list` finding the file is what proves it landed.
       statementPath = join(sandbox.dataDir, "corgi-bank", "card-statement-2026-05.pdf");
       mkdirSync(dirname(statementPath), { recursive: true });
       copyFileSync(FIXTURE_STATEMENT, statementPath);
@@ -214,7 +214,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
 
       const groomingDebit = (grooming.sides as CommitSide[]).find((s) => s.side === "debit");
       expect(groomingDebit, `grooming sides: ${JSON.stringify(grooming.sides)}`).toMatchObject({
-        resolved: "expense:uncategorized",
+        resolved: "thb:expense:uncategorized",
         how: "uncategorized_fallback",
       });
 
@@ -303,12 +303,8 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
     30000,
   );
 
-  /**
-   * Auto-merge (src/ingest/dedup.ts) only matches rows carrying both a
-   * merchant_id and a source_file_id, which a manual `transactions add` row has
-   * neither of, so the manual add covers strict create only, and the auto-merge
-   * assertion rides on a second file-sourced duplicate row.
-   */
+  // Auto-merge only matches rows carrying both a merchant_id and a source_file_id; a manual
+  // add has neither, so its auto-merge coverage rides on a second file-sourced duplicate row.
   it(
     "transactions add creates a manual row, and dedupe --auto-merge collapses one file-sourced duplicate",
     async () => {
@@ -318,9 +314,9 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
             "transactions",
             "add",
             "--debit-account",
-            "expense:pet:food",
+            "thb:expense:pet:food",
             "--credit-account",
-            "asset:bank:kasibank",
+            "thb:asset:bank:kasibank",
             "--amount",
             "850",
             "--date",
@@ -337,8 +333,8 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       const dup = {
         date: "2026-06-02",
         description: "Pet Paradise Dog Food (duplicate posting)",
-        debit_account: "expense:pet:food",
-        credit_account: "asset:bank:kasibank",
+        debit_account: "thb:expense:pet:food",
+        credit_account: "thb:asset:bank:kasibank",
         amount: 1290.0,
         row_index: 101,
         source_page: 0,
@@ -368,7 +364,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
           await ok([
             "accounts",
             "adjust",
-            "asset:bank:kasibank",
+            "thb:asset:bank:kasibank",
             "--to",
             "50000",
             "--reason",
@@ -378,11 +374,17 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       );
       expect(adjust.transaction_id).toMatch(/^tx:/);
 
-      const account = parseOne((await ok(["accounts", "show", "asset:bank:kasibank"])).stdout);
+      const account = parseOne((await ok(["accounts", "show", "thb:asset:bank:kasibank"])).stdout);
       expect(account.balance).toBe(50000);
 
+      // Every aggregate is a currency-keyed decimal map; this ledger has no liability
+      // account, so that map has no keys.
       const status = parseOne((await ok(["status"])).stdout);
-      expect(status.net_worth.assets).toBe(50000);
+      expect(status.net_worth).toEqual({
+        assets: { THB: 50000 },
+        liabilities: {},
+        net_worth: { THB: 50000 },
+      });
     },
     30000,
   );
@@ -396,13 +398,13 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
             "accounts",
             "create",
             "--id",
-            "expense:pet:treats",
+            "thb:expense:pet:treats",
             "--name",
             "Treats",
             "--type",
             "expense",
             "--parent",
-            "expense:pet",
+            "thb:expense:pet",
           ])
         ).stdout,
       );
@@ -414,31 +416,31 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
             "accounts",
             "merge",
             "--from",
-            "expense:pet:treats",
+            "thb:expense:pet:treats",
             "--to",
-            "expense:pet:food",
+            "thb:expense:pet:food",
             "--yes",
           ])
         ).stdout,
       );
       expect(typeof merge.moved).toBe("number");
-      expect(merge).toMatchObject({ deleted_self_transactions: 0 });
+      expect(merge).toMatchObject({ deleted_self_transactions: 0, moved_merchant_defaults: 0 });
 
       // mergeAccounts deletes the source account, so delete needs a fresh second one.
       await ok([
         "accounts",
         "create",
         "--id",
-        "expense:pet:toys",
+        "thb:expense:pet:toys",
         "--name",
         "Toys",
         "--type",
         "expense",
         "--parent",
-        "expense:pet",
+        "thb:expense:pet",
       ]);
       expect(
-        parseOne((await ok(["accounts", "delete", "expense:pet:toys", "--yes"])).stdout),
+        parseOne((await ok(["accounts", "delete", "thb:expense:pet:toys", "--yes"])).stdout),
       ).toMatchObject({ deleted: true });
     },
     45000,
@@ -451,28 +453,33 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       const before = await transactionCount();
       expect(
         parseOne((await ok(["transactions", "delete", salaryId, "--yes"])).stdout),
-      ).toMatchObject({ deleted: true });
+      ).toMatchObject({ deleted: true, unvoided: 0 });
       expect(await transactionCount()).toBe(before - 1);
     },
     30000,
   );
 
   it(
-    "files drop removes exactly the rows files show counted, and spares the manual one",
+    "files drop removes exactly the rows files show counted, and the manual row ends up live",
     async () => {
       const detail = parseOne((await ok(["files", "show", fileId])).stdout);
       expect(typeof detail.transaction_count).toBe("number");
       const owned: number = detail.transaction_count;
 
-      const before = await transactionCount();
+      // Void-inclusive totals: which side of the auto-merge got voided is an id-tiebreak detail.
+      const allBefore = await allTransactionCount();
 
       const drop = parseOne((await ok(["files", "drop", fileId, "--yes"])).stdout);
       expect(drop.removed_transactions, "files drop must remove what files show counted").toBe(owned);
-      expect(await transactionCount()).toBe(before - owned);
+      expect(typeof drop.unvoided, "files drop must report un-voided mirrors").toBe("number");
+      expect(await allTransactionCount()).toBe(allBefore - owned);
 
-      // The manual dup-for-automerge row has no source_file_id, so the cascade must spare it.
-      const survivor = await oled(["transactions", "show", manualDupId]);
-      expect(survivor.code, `manual row ${manualDupId} did not survive the drop`).toBe(0);
+      // The manual dup has no source_file_id, so the cascade spares it; whichever way the
+      // auto-merge collapsed, it must be live afterwards, either as the surviving head or un-voided.
+      const survivor = parseOne(
+        (await ok(["transactions", "show", manualDupId])).stdout,
+      );
+      expect(survivor.void_of, `manual row ${manualDupId} must be live after the drop`).toBeNull();
     },
     45000,
   );

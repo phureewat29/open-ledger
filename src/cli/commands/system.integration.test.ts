@@ -8,20 +8,20 @@ import { insertTransaction } from "../../db/queries/transactions.js";
 import { recordQuestion } from "../../db/queries/questions.js";
 import {
   createSandbox,
-  makeRunCli,
+  makeRunCLI,
   parseNdjson,
   parseOne,
-  type CliRunner,
+  type CLIRunner,
   type Sandbox,
 } from "../../../fixtures/sandbox.js";
 
 let sandbox: Sandbox;
 let dbPath: string;
-let runCli: CliRunner;
+let runCLI: CLIRunner;
 
 beforeAll(() => {
   sandbox = createSandbox("oled-system-it-");
-  runCli = makeRunCli(sandbox);
+  runCLI = makeRunCLI(sandbox);
   dbPath = sandbox.dbPath;
 
   // Minimal config.json so `doctor`'s config_exists check is true and `config show` resolves.
@@ -51,7 +51,7 @@ describe("system CLI integration (subprocess)", () => {
         const setupDataDir = isolated.dataDir;
         const setupDbPath = isolated.dbPath;
 
-        const setup = await runCli(
+        const setup = await runCLI(
           [
             "config",
             "--init",
@@ -73,7 +73,7 @@ describe("system CLI integration (subprocess)", () => {
         const setupResult = parseOne(setup.stdout);
         expect(setupResult.created).toMatchObject({ db: setupDbPath, data_dir: setupDataDir });
 
-        const show = await runCli(["config", "show", "--json"], { env: isolated.env, cwd: isolated.root });
+        const show = await runCLI(["config", "show", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(show.code).toBe(0);
         const cfg = parseOne(show.stdout);
         expect(cfg.dataDir).toBe(setupDataDir);
@@ -93,7 +93,7 @@ describe("system CLI integration (subprocess)", () => {
     async () => {
       const isolated = createSandbox("oled-system-country-it-");
       try {
-        const res = await runCli(["config", "--country", "bogus", "--json"], {
+        const res = await runCLI(["config", "--country", "bogus", "--json"], {
           env: isolated.env,
           cwd: isolated.root,
         });
@@ -114,7 +114,7 @@ describe("system CLI integration (subprocess)", () => {
     async () => {
       const isolated = createSandbox("oled-system-virgin-it-");
       try {
-        const before = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
+        const before = await runCLI(["status", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(before.code).toBe(0);
         const blank = parseOne(before.stdout);
         // The wire discriminator agents read the payload by; a rename breaks them.
@@ -127,7 +127,7 @@ describe("system CLI integration (subprocess)", () => {
         expect(existsSync(join(isolated.home, ".oled", "config.json"))).toBe(false);
 
         // Doctor diagnoses the same state without provisioning it either.
-        const virginDoctor = await runCli(["doctor", "--json"], { env: isolated.env, cwd: isolated.root });
+        const virginDoctor = await runCLI(["doctor", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(virginDoctor.code).toBe(3); // EXIT.NOT_READY
         const dbOpen = parseOne(virginDoctor.stdout).checks.find(
           (c: { name: string }) => c.name === "db_open",
@@ -137,21 +137,20 @@ describe("system CLI integration (subprocess)", () => {
         expect(existsSync(isolated.dbPath)).toBe(false);
 
         // Bare --init, no companion flags: the env-resolved paths suffice.
-        const init = await runCli(["config", "--init", "--json"], {
+        const init = await runCLI(["config", "--init", "--json"], {
           env: isolated.env,
           cwd: isolated.root,
         });
         expect(init.code).toBe(0);
 
-        const after = await runCli(["status", "--json"], { env: isolated.env, cwd: isolated.root });
+        const after = await runCLI(["status", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(after.code).toBe(0);
         const report = parseOne(after.stdout);
         expect(report.configured).toBe(true);
         expect(report.db.reachable).toBe(true);
         expect(report.db).not.toHaveProperty("encrypted");
         expect(report.db).not.toHaveProperty("key_fingerprint");
-        // Paths are home-relativized facts, never redaction fodder. Only
-        // config_path sits under HOME in this sandbox; db/data are siblings.
+        // Paths are home-relativized facts, never redaction fodder; only config_path sits under HOME here.
         expect(report.config_path.startsWith("~/")).toBe(true);
         expect(JSON.stringify(report)).not.toContain("[USER");
         expect(JSON.stringify(report)).not.toContain("[PARTNER");
@@ -188,15 +187,14 @@ describe("system CLI integration (subprocess)", () => {
           hint: "run `oled transactions show --help` for its flags and usage",
         },
         {
-          // A noun reached without a verb: commander answers with the noun's
-          // help screen on stderr, which is not a line the contract allows.
+          // A noun without a verb: commander's help screen on stderr is not a line --json allows.
           args: ["files"],
           message: "oled files needs a subcommand",
           hint: "one of: list, show, drop",
         },
       ];
 
-      const runs = await Promise.all(cases.map((c) => runCli([...c.args, "--json"])));
+      const runs = await Promise.all(cases.map((c) => runCLI([...c.args, "--json"])));
       runs.forEach((run, i) => {
         const label = cases[i].args.join(" ");
         expect(run.code, label).toBe(2);
@@ -216,10 +214,10 @@ describe("system CLI integration (subprocess)", () => {
     "parse failures stay readable without --json, and --help/--version keep exit 0",
     async () => {
       const [text, noun, help, version] = await Promise.all([
-        runCli(["ingest", "list", "--nope"]),
-        runCli(["files"]),
-        runCli(["--help"]),
-        runCli(["--version"]),
+        runCLI(["ingest", "list", "--nope"]),
+        runCLI(["files"]),
+        runCLI(["--help"]),
+        runCLI(["--version"]),
       ]);
 
       expect(text.code).toBe(2);
@@ -246,7 +244,7 @@ describe("system CLI integration (subprocess)", () => {
       const isolated = createSandbox("oled-system-ocr-cfg-it-");
       const env = { env: isolated.env, cwd: isolated.root };
       try {
-        const model = await runCli(
+        const model = await runCLI(
           ["config", "--db", isolated.dbPath, "--data-dir", isolated.dataDir, "--ocr-model", "test-ocr-model", "--json"],
           env,
         );
@@ -256,7 +254,7 @@ describe("system CLI integration (subprocess)", () => {
           ocrModel: "test-ocr-model",
         });
 
-        const show = await runCli(["config", "show", "--json"], env);
+        const show = await runCLI(["config", "show", "--json"], env);
         expect(show.code).toBe(0);
         const shown = parseOne(show.stdout);
         expect(shown).toMatchObject({ ocrModel: "test-ocr-model" });
@@ -272,7 +270,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "config show fingerprints an env-supplied OCR api key rather than echoing it (there is no flag for it)",
     async () => {
-      const show = await runCli(["config", "show", "--json"], {
+      const show = await runCLI(["config", "show", "--json"], {
         env: { ...sandbox.env, OLED_OCR_API_KEY: "sk-ocr-plaintext" },
       });
       expect(show.code).toBe(0);
@@ -291,50 +289,49 @@ describe("system CLI integration (subprocess)", () => {
       const raw = new Database(dbPath);
       raw.pragma("foreign_keys = ON");
       try {
-        createAccount(raw, { id: "asset", name: "Assets", type: "asset", parent_id: null });
-        createAccount(raw, { id: "asset:bank", name: "Bank", type: "asset", parent_id: "asset" });
-        createAccount(raw, { id: "income", name: "Income", type: "income", parent_id: null });
-        createAccount(raw, { id: "income:salary", name: "Salary", type: "income", parent_id: "income" });
-        createAccount(raw, { id: "expense", name: "Expenses", type: "expense", parent_id: null });
-        createAccount(raw, { id: "expense:food", name: "Food", type: "expense", parent_id: "expense" });
+        createAccount(raw, { id: "thb:asset", name: "Assets", type: "asset", parent_id: null });
+        createAccount(raw, { id: "thb:asset:bank", name: "Bank", type: "asset", parent_id: "thb:asset" });
+        createAccount(raw, { id: "thb:income", name: "Income", type: "income", parent_id: null });
+        createAccount(raw, { id: "thb:income:salary", name: "Salary", type: "income", parent_id: "thb:income" });
+        createAccount(raw, { id: "thb:expense", name: "Expenses", type: "expense", parent_id: null });
+        createAccount(raw, { id: "thb:expense:food", name: "Food", type: "expense", parent_id: "thb:expense" });
 
         insertTransaction(raw, {
           date: "2026-01-15",
           description: "Salary deposit",
-          debit_account_id: "asset:bank",
-          credit_account_id: "income:salary",
+          debit_account_id: "thb:asset:bank",
+          credit_account_id: "thb:income:salary",
           amount: 100000,
-          currency: "THB",
         });
         insertTransaction(raw, {
           date: "2026-01-20",
           description: "Grocery run",
-          debit_account_id: "expense:food",
-          credit_account_id: "asset:bank",
+          debit_account_id: "thb:expense:food",
+          credit_account_id: "thb:asset:bank",
           amount: 20000,
-          currency: "THB",
         });
       } finally {
         raw.close();
       }
 
-      const status = await runCli(["status", "--json"]);
+      const status = await runCLI(["status", "--json"]);
       expect(status.code).toBe(0);
       const statusObj = parseOne(status.stdout);
-      expect(statusObj.net_worth).toMatchObject({
-        assets: 800,
-        liabilities: 0,
-        net_worth: 800,
+      // Currency-keyed decimal maps, key for key; this ledger has no liability account, so that map is empty.
+      expect(statusObj.net_worth).toEqual({
+        assets: { THB: 800 },
+        liabilities: {},
+        net_worth: { THB: 800 },
       });
 
-      const period = await runCli(["report", "--from", "2026-01-01", "--to", "2026-01-31", "--json"]);
+      const period = await runCLI(["report", "--from", "2026-01-01", "--to", "2026-01-31", "--json"]);
       expect(period.code).toBe(0);
-      expect(parseOne(period.stdout)).toMatchObject({
+      expect(parseOne(period.stdout)).toEqual({
         from: "2026-01-01",
         to: "2026-01-31",
-        income: 1000,
-        expenses: 200,
-        net: 800,
+        income: { THB: 1000 },
+        expenses: { THB: 200 },
+        net: { THB: 800 },
       });
     },
     30000,
@@ -343,7 +340,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "questions list/answer/defer round-trip",
     async () => {
-      // Depends on the `expense:food` account seeded by the report test above.
+      // Depends on the `thb:expense:food` account seeded by the report test above.
       let q1 = "";
       let q2 = "";
       const raw = new Database(dbPath);
@@ -351,15 +348,15 @@ describe("system CLI integration (subprocess)", () => {
       try {
         q1 = recordQuestion(raw, {
           file_id: null,
-          account_id: "expense:food",
+          account_id: "thb:expense:food",
           kind: "uncategorized",
           prompt: "Which category for this recurring charge?",
-          options: ["expense:food", "expense:other"],
+          options: ["thb:expense:food", "thb:expense:other"],
           context: { rule_key: "merchant:acme-foodmart" },
         });
         q2 = recordQuestion(raw, {
           file_id: null,
-          account_id: "expense:food",
+          account_id: "thb:expense:food",
           kind: "duplicate",
           prompt: "Possible duplicate: snooze for later review?",
         });
@@ -367,27 +364,25 @@ describe("system CLI integration (subprocess)", () => {
         raw.close();
       }
 
-      const list = await runCli(["questions", "list", "--json"]);
+      const list = await runCLI(["questions", "list", "--json"]);
       expect(list.code).toBe(0);
       const rows = parseNdjson(list.stdout);
       expect(rows.find((r) => r.id === q1)).toMatchObject({
         kind: "uncategorized",
-        account_id: "expense:food",
-        options: ["expense:food", "expense:other"],
+        account_id: "thb:expense:food",
+        options: ["thb:expense:food", "thb:expense:other"],
         context: { rule_key: "merchant:acme-foodmart" },
       });
       expect(rows.find((r) => r.id === q2)).toMatchObject({ kind: "duplicate", context: null });
 
-      // The cap has to announce itself: without the summary, a batch larger than
-      // the cap reads as complete. `returned` is checked against the rows actually
-      // emitted, so reporting nothing cannot pass; the db is shared, hence the
-      // floor on total.
+      // The cap must announce itself via the summary, else a batch larger than it reads as complete.
+      // `returned` is checked against rows actually emitted; the db is shared, hence the floor on total.
       const summary = rows.find((r) => r.type === "summary")!;
       expect(summary.returned).toBe(rows.length - 1);
       expect(summary.total).toBeGreaterThanOrEqual(2);
       expect(summary).toMatchObject({ has_more: false, limit: 200 });
 
-      const capped = parseNdjson((await runCli(["questions", "list", "--limit", "1", "--json"])).stdout);
+      const capped = parseNdjson((await runCLI(["questions", "list", "--limit", "1", "--json"])).stdout);
       expect(capped.filter((r) => r.type !== "summary")).toHaveLength(1);
       expect(capped.find((r) => r.type === "summary")).toMatchObject({
         returned: 1,
@@ -395,13 +390,13 @@ describe("system CLI integration (subprocess)", () => {
         limit: 1,
       });
 
-      const answer = await runCli(["questions", "answer", q1, "--answer", "expense:food:groceries", "--json"]);
+      const answer = await runCLI(["questions", "answer", q1, "--answer", "thb:expense:food:groceries", "--json"]);
       expect(answer.code).toBe(0);
       expect(parseNdjson(answer.stdout)).toEqual([
-        { id: q1, kind: "uncategorized", answer: "expense:food:groceries", rule_key: "merchant:acme-foodmart" },
+        { id: q1, kind: "uncategorized", answer: "thb:expense:food:groceries", rule_key: "merchant:acme-foodmart" },
       ]);
 
-      const defer = await runCli(["questions", "defer", q2, "--days", "5", "--json"]);
+      const defer = await runCLI(["questions", "defer", q2, "--days", "5", "--json"]);
       expect(defer.code).toBe(0);
       expect(parseNdjson(defer.stdout)).toEqual([{ id: q2, days: 5 }]);
 
@@ -423,7 +418,7 @@ describe("system CLI integration (subprocess)", () => {
   it(
     "notes add/list/rm round-trip",
     async () => {
-      const add = await runCli([
+      const add = await runCLI([
         "notes",
         "add",
         "--content",
@@ -438,11 +433,11 @@ describe("system CLI integration (subprocess)", () => {
       expect(added[0]).toMatchObject({ content: "Prefers window seats on flights", category: "preference" });
       const noteId = added[0].id as number;
 
-      const list = await runCli(["notes", "list", "--json"]);
+      const list = await runCLI(["notes", "list", "--json"]);
       expect(list.code).toBe(0);
       expect(parseNdjson(list.stdout).some((n) => n.id === noteId)).toBe(true);
 
-      const rm = await runCli(["notes", "rm", String(noteId), "--yes", "--json"]);
+      const rm = await runCLI(["notes", "rm", String(noteId), "--yes", "--json"]);
       expect(rm.code).toBe(0);
       expect(parseNdjson(rm.stdout)).toEqual([
         expect.objectContaining({ id: noteId, content: "Prefers window seats on flights" }),
@@ -459,9 +454,58 @@ describe("system CLI integration (subprocess)", () => {
   );
 
   it(
+    "accounts show: a prefix-less id on a seeded ledger is NOT_FOUND (5) with a ledger-enumerating hint",
+    async () => {
+      const isolated = createSandbox("oled-system-account-notfound-it-");
+      try {
+        const raw = new Database(isolated.dbPath);
+        raw.pragma("foreign_keys = ON");
+        migrate(raw);
+        try {
+          createAccount(raw, { id: "thb:expense", name: "Expenses", type: "expense", parent_id: null });
+          createAccount(raw, {
+            id: "thb:expense:food",
+            name: "Food",
+            type: "expense",
+            parent_id: "thb:expense",
+          });
+        } finally {
+          raw.close();
+        }
+
+        const res = await runCLI(["accounts", "show", "expense:food", "--json"], {
+          env: isolated.env,
+          cwd: isolated.root,
+        });
+        expect(res.code).toBe(5); // EXIT.NOT_FOUND
+        const err = parseOne(res.stderr).error;
+        expect(err.code).toBe("E_NOT_FOUND");
+        expect(err.message).toBe('account "expense:food" not found');
+        expect(err.hint).toBe("account ids start with a currency — existing ledgers: thb");
+      } finally {
+        isolated.cleanup();
+      }
+    },
+    30000,
+  );
+
+  it(
+    "merchants upsert: an empty --name is USAGE (2), not a leaked GENERIC",
+    async () => {
+      const res = await runCLI(["merchants", "upsert", "--name", "   ", "--json"]);
+      expect(res.code).toBe(2); // EXIT.USAGE
+      expect(res.stdout.trim()).toBe("");
+      const err = parseOne(res.stderr).error;
+      expect(err.code).toBe("E_USAGE");
+      expect(err.message).toBe("--name required");
+    },
+    30000,
+  );
+
+  it(
     "doctor: healthy env exits 0, corrupted db file exits NOT_READY (3)",
     async () => {
-      const healthy = await runCli(["doctor", "--json"]);
+      const healthy = await runCLI(["doctor", "--json"]);
       expect(healthy.code).toBe(0);
       const report = parseOne(healthy.stdout);
       expect(report.ok).toBe(true);
@@ -469,11 +513,10 @@ describe("system CLI integration (subprocess)", () => {
       expect(byName.db_open.ok).toBe(true);
       expect(byName.schema_tables_present.ok).toBe(true);
 
-      // Corrupt the shared db file in place. Intentionally the LAST test in
-      // this file: everything above depends on this db being readable.
+      // Intentionally the last test in this file: everything above depends on this db being readable.
       writeFileSync(dbPath, Buffer.from("not a sqlite file"));
 
-      const corrupted = await runCli(["doctor", "--json"]);
+      const corrupted = await runCLI(["doctor", "--json"]);
       expect(corrupted.code).toBe(3);
       const corruptedReport = parseOne(corrupted.stdout);
       expect(corruptedReport.ok).toBe(false);

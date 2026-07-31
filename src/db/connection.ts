@@ -1,5 +1,6 @@
 import Database from "libsql";
 import { config } from "../config.js";
+import { DBNotReadyError } from "./errors.js";
 import { migrate } from "./schema.js";
 import { dirname } from "path";
 import { mkdirSync, existsSync, chmodSync } from "fs";
@@ -16,8 +17,7 @@ function openDb(dbPath: string): Database.Database {
     db.pragma("journal_mode = WAL");
   } catch (err) {
     db.close();
-    // Remaps into a NOT_READY-matching message (see NOT_READY_PATTERNS in cli/output.ts).
-    throw new Error(
+    throw new DBNotReadyError(
       `Failed to open database. ${dbPath} is corrupt or is not a database. ` +
       "Move it aside (keep a backup) and re-run to start a fresh one.",
       { cause: err },
@@ -26,8 +26,7 @@ function openDb(dbPath: string): Database.Database {
 
   db.pragma("foreign_keys = ON");
   migrate(db, dbPath);
-  // WAL mode writes committed rows into the -wal/-shm sidecars, so the 0600
-  // promise has to cover them too. Best effort, same as the db file itself.
+  // WAL mode writes committed rows into the -wal/-shm sidecars, so the 0600 promise has to cover them too.
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     try { chmodSync(path, 0o600); } catch {}
   }

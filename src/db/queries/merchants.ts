@@ -21,24 +21,24 @@ interface MerchantAliasConflict {
 }
 
 interface MerchantUpsertResult extends MerchantRow {
-  /** Present when `input.alias` normalizes to a pattern already claimed by a
-   *  different merchant; the alias is left on its current owner. */
+  /** Present when `input.alias` normalizes to a pattern another merchant already holds; the alias stays with its owner. */
   alias_conflict?: MerchantAliasConflict;
 }
 
-/**
- * Strips store ids, terminal codes, city tags, and transaction-type words so
- * "STARBUCKS #1234 BKK CHARGE" and "Starbucks #5678 BANGKOK" both normalize
- * to "starbucks": the form `merchant_aliases.normalized_pattern` indexes.
- */
-const NOISE_TOKENS = new Set([
-  "bkk", "bangkok", "thailand", "th", "tha",
+/** Tokens naming a PLACE are locale data; they belong in `datasets/<cc>.json`'s `noise` key, not here. */
+const DEFAULT_NOISE = [
   "charge", "purchase", "payment", "pmt", "ref", "txn", "trx", "tx",
   "pos", "atm", "online", "web", "mobile", "app",
   "co", "ltd", "company", "inc", "llc", "plc", "intl",
-]);
+] as const;
 
-export function normalizeDescriptor(raw: string): string {
+/**
+ * Strips store ids, terminal codes, and transaction-type words to the form
+ * `merchant_aliases.normalized_pattern` indexes. `noiseTokens` is the caller's
+ * locale layer, stripped on top of DEFAULT_NOISE; the punctuation pass drops
+ * non-ASCII, so only romanized tokens can match.
+ */
+export function normalizeDescriptor(raw: string, noiseTokens: readonly string[]): string {
   if (!raw) return "";
   const lowered = raw.toLowerCase();
   const stripped = lowered
@@ -48,7 +48,8 @@ export function normalizeDescriptor(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!stripped) return "";
-  const tokens = stripped.split(" ").filter(t => t.length > 1 && !NOISE_TOKENS.has(t));
+  const noise = new Set<string>([...DEFAULT_NOISE, ...noiseTokens]);
+  const tokens = stripped.split(" ").filter(t => t.length > 1 && !noise.has(t));
   if (tokens.length === 0) return stripped;
   return tokens.join(" ");
 }
@@ -60,6 +61,7 @@ export function normalizeDescriptor(raw: string): string {
 export function upsertMerchant(
   db: Database.Database,
   input: MerchantUpsertInput,
+  noiseTokens: readonly string[],
 ): MerchantUpsertResult {
   const canonical = input.canonical_name.trim();
   if (!canonical) {
@@ -91,21 +93,20 @@ export function upsertMerchant(
     };
   }
 
-  const aliasConflict = input.alias ? claimAlias(db, merchant.id, input.alias) : undefined;
+  const aliasConflict = input.alias
+    ? claimAlias(db, merchant.id, input.alias, noiseTokens)
+    : undefined;
   return aliasConflict ? { ...merchant, alias_conflict: aliasConflict } : merchant;
 }
 
-/**
- * Claims `rawText`'s normalized pattern for a merchant. A pattern already held
- * by another merchant stays with its owner and is reported as a conflict; one
- * the merchant already holds is a no-op.
- */
+/** A pattern already held by another merchant stays with its owner and is reported as a conflict. */
 export function claimAlias(
   db: Database.Database,
   merchantId: string,
   rawText: string,
+  noiseTokens: readonly string[],
 ): MerchantAliasConflict | undefined {
-  const normalized = normalizeDescriptor(rawText);
+  const normalized = normalizeDescriptor(rawText, noiseTokens);
   if (!normalized) return undefined;
   const holder = db
     .prepare(`SELECT merchant_id FROM merchant_aliases WHERE normalized_pattern = ?`)
@@ -136,15 +137,15 @@ interface RenameMerchantResult {
 }
 
 /**
- * Renames a merchant and keeps the old name as an alias, so raw descriptors
- * that produced the old name still resolve to the same merchant. Display names
- * are a live join, so no transaction rows need touching. Callers own the
- * not-found and name-collision checks; this asserts them as invariants.
+ * Keeps the old name as an alias so raw descriptors that produced it still
+ * resolve to this merchant. Display names are a live join, so no transaction
+ * rows need touching.
  */
 export function renameMerchant(
   db: Database.Database,
   id: string,
   name: string,
+  noiseTokens: readonly string[],
 ): RenameMerchantResult {
   const canonical = name.trim();
   if (!canonical) throw new Error("merchant canonical_name is required");
@@ -156,7 +157,7 @@ export function renameMerchant(
 
   const result = db.transaction(() => {
     db.prepare(`UPDATE merchants SET canonical_name = ? WHERE id = ?`).run(canonical, id);
-    const conflict = claimAlias(db, id, current.canonical_name);
+    const conflict = claimAlias(db, id, current.canonical_name, noiseTokens);
     return conflict
       ? { before: current.canonical_name, after: canonical, alias_conflict: conflict }
       : { before: current.canonical_name, after: canonical };
@@ -172,8 +173,9 @@ interface MerchantWithDefault {
 export function findMerchantByAlias(
   db: Database.Database,
   rawDescriptor: string,
+  noiseTokens: readonly string[],
 ): MerchantWithDefault | null {
-  const normalized = normalizeDescriptor(rawDescriptor);
+  const normalized = normalizeDescriptor(rawDescriptor, noiseTokens);
   if (!normalized) return null;
 
   const row = db.prepare(
@@ -244,6 +246,17 @@ export function setMerchantDefaultAccount(
   db.prepare(`UPDATE merchants SET default_account_id = ? WHERE id = ?`)
     .run(accountId, merchantId);
   return { before: before.default_account_id, after: accountId };
+}
+
+/** The merchant half of `mergeAccounts`: the routing hint follows the survivor instead of being FK-nulled. */
+export function repointMerchantDefaultAccount(
+  db: Database.Database,
+  fromAccountId: string,
+  toAccountId: string,
+): number {
+  return db
+    .prepare(`UPDATE merchants SET default_account_id = ? WHERE default_account_id = ?`)
+    .run(toAccountId, fromAccountId).changes;
 }
 
 export function clearMerchantDefaultAccount(

@@ -20,6 +20,25 @@ export function deriveGroupId(fileHash: string, page: number, rowIndex: number):
   return "tg:" + createHash("sha256").update(`${fileHash}|${page}|${rowIndex}`).digest("hex").slice(0, 16);
 }
 
+/**
+ * Account ids are `<currency>:<type>(:<segment>)*`, lowercase. Mirrors the
+ * `upper(substr(a.id,1,3))` projection (db/queries/accounts.ts) and the
+ * trigger's `substr(id,1,4)` compare — change them together.
+ */
+export function currencyOf(accountId: string): string {
+  return accountId.slice(0, 3).toUpperCase();
+}
+
+/** The type segment of an account id; "" when the id has no second segment. */
+export function typeFromId(accountId: string): string {
+  return accountId.split(":")[1] ?? "";
+}
+
+/** True when the id opens with a lowercase 3-letter currency head; whether that ledger exists is separate. */
+export function isLedgerScopedId(accountId: string): boolean {
+  return /^[a-z]{3}:/.test(accountId);
+}
+
 /** Groups a commit run's raised questions. */
 export function newBatchId(): string {
   return `ib:${randomUUID()}`;

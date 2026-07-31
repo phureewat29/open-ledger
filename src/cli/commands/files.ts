@@ -10,10 +10,7 @@ import {
 } from "../output.js";
 import { openDb } from "../db.js";
 
-/**
- * Erased type query: derives the file row shape from the lazily-imported
- * query, without pulling the db module onto the startup path.
- */
+// Derives the row shape from the lazily-imported query, without pulling the db module onto the startup path.
 type FileRow = ReturnType<typeof import("../../db/queries/files.js").listFiles>[number];
 
 const FILE_COLUMNS: Column<FileRow>[] = [
@@ -74,14 +71,14 @@ async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
   const res = deleteFile(db, id);
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
 
-  // The extracted text describes a row that no longer exists, and nothing can
-  // reach it once the row is gone: same purge `ingest done`/`fail` do.
+  // Same cache purge `ingest done`/`fail` do: nothing can reach the extracted text once the row is gone.
   const { cleanCache } = await import("../../ingest/prepare.js");
   const { removed } = cleanCache(id);
   emitObject({
     file_id: id,
     removed_transactions: res.removedTransactions,
     removed_questions: res.removedQuestions,
+    unvoided: res.unvoided,
     cache_removed: removed,
   });
 }

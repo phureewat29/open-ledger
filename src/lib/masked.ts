@@ -1,16 +1,12 @@
 /**
- * Masked account numbers: the canonical key behind both the stored form
- * (`accounts.account_number_masked`) and the fuzzy matcher's number comparison,
- * so a statement's `••7652-0` and `470686XXXXXX9483` resolve like a human reads
- * them.
+ * Canonical key behind both the stored form (`accounts.account_number_masked`)
+ * and the fuzzy matcher, so `••7652-0` and `470686XXXXXX9483` resolve alike.
  */
 
-// Characters statements use to blank out the hidden middle of an account
-// number (`470686XXXXXX9483`, `••7652`, `**1234`, `…9483`).
+// Characters statements use to blank the hidden middle of an account number.
 const MASK_CHARS = "Xx•*…";
 
-/** Everything after the last mask char in `s` (or `s` unchanged if none), so a
- *  masked run like `XXXXXX` isn't confused with a check-digit separator. */
+/** Everything after the last mask char in `s` (`s` unchanged if none), so a masked run isn't confused with a check-digit separator. */
 export function tailAfterMask(s: string): string {
   let lastAt = -1;
   for (const ch of MASK_CHARS) {
@@ -21,10 +17,9 @@ export function tailAfterMask(s: string): string {
 }
 
 /**
- * Canonical key for an account number, tolerant of a trailing check digit
- * (`xxx-7652-0` and `xxx-7652` both resolve to one account). Masked digits
- * before the mask are stripped first via `tailAfterMask` so they can't
- * corrupt the check-digit heuristic.
+ * Tolerant of a trailing check digit (`xxx-7652-0` and `xxx-7652` both resolve
+ * to one account). Digits before the mask are stripped first via `tailAfterMask`
+ * so they can't corrupt the check-digit heuristic.
  */
 export function accountNumberKey(raw: string | null | undefined): string {
   const tail = tailAfterMask(String(raw ?? ""));
@@ -36,8 +31,7 @@ export function accountNumberKey(raw: string | null | undefined): string {
 
 /**
  * Normalizes for storage so a trailing check digit can't split one account
- * into two (`••7652-0` and `••76520` both store as `••7652`). Preserves the
- * leading mask prefix, defaulting to `••` when there isn't one to preserve.
+ * into two. Preserves the leading mask prefix, defaulting to `••` when there isn't one.
  */
 export function normalizeMaskedAccountNumber(
   masked: string | null | undefined,

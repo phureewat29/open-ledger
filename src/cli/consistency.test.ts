@@ -5,11 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import { buildProgram, COMMANDS } from "./program.js";
 
-/**
- * buildProgram() only builds the commander tree: no argv parsing, no action
- * run, so calling it here is side-effect free.
- */
-
+// buildProgram() only builds the commander tree: no argv parsing, no action run.
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const README = readFileSync(resolve(repoRoot, "README.md"), "utf8");
 const SKILL = readFileSync(resolve(repoRoot, "skills", "SKILL.md"), "utf8");
@@ -92,10 +88,7 @@ function firstSubToken(span: string): string | undefined {
   return undefined;
 }
 
-/**
- * Resolves the command a doc code-span like `oled transactions recategorize
- * --set-account <id> ...` refers to, drilling into a subcommand when named.
- */
+// Resolves the command a doc code-span refers to, drilling into a subcommand when named.
 function resolveTargetCommand(program: Command, span: string): Command | undefined {
   const nounName = commandNounOf(span);
   if (!nounName) return undefined;
@@ -122,8 +115,6 @@ function extractFlagTokens(span: string): string[] {
 }
 
 describe("docs consistency (no subprocesses)", () => {
-  // The program-reading tests below all construct the tree, so an import-time
-  // or construction side effect fails the file.
   it("top-level command names: program tree == README Commands section == SKILL.md spans == help-screen COMMANDS array", () => {
     const program = buildProgram();
     const fromProgram = new Set(topLevelNames(program));
@@ -186,8 +177,7 @@ describe("docs consistency (no subprocesses)", () => {
     expect(SKILL.length).toBeLessThan(20_000);
   });
 
-  // The frontmatter's own shape is pinned harder in src/setup/install.test.ts,
-  // which parses it and checks the exact name and a minimum description length.
+  // The frontmatter's own shape is pinned harder in src/setup/install.test.ts.
   it("SKILL.md carries no references/ pointer", () => {
     expect(SKILL.includes("references/")).toBe(false);
   });

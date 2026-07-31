@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * Lives beside the other fixtures rather than in src/ so it never ships in
- * the published package.
- */
+/** Lives beside the other fixtures, not in src/, so it never ships in the published package. */
 export interface Sandbox {
   root: string;
   home: string;
@@ -18,11 +15,7 @@ export interface Sandbox {
   cleanup(): void;
 }
 
-/**
- * A throwaway `mkdtemp` root (with `home/`/`data/` pre-created) plus an `env`
- * that redirects HOME and every OLED_* path into it, so nothing ever
- * touches the real `~/.oled`.
- */
+/** A throwaway `mkdtemp` root plus an `env` that redirects HOME and every OLED_* path into it, so nothing touches the real `~/.oled`. */
 export function createSandbox(prefix: string): Sandbox {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const home = join(root, "home");
@@ -40,18 +33,14 @@ export function createSandbox(prefix: string): Sandbox {
     OLED_DB_PATH: dbPath,
     OLED_DATA_DIR: dataDir,
     OLED_CACHE_DIR: cacheDir,
-    // Blanked so no test can reach a live OCR endpoint, and so a developer's own
-    // model choice cannot leak in.
+    // Blanked so no test reaches a live OCR endpoint or leaks a developer's own model choice.
     OLED_OCR_BASE_URL: "",
     OLED_OCR_MODEL: "",
     OLED_OCR_API_KEY: "",
     NO_COLOR: "1",
   };
-  /**
-   * Node warns on stderr when NO_COLOR and FORCE_COLOR are both set, corrupting
-   * the one-JSON-object-on-stderr contract subprocess tests assert; drop both
-   * rather than inherit whatever the shell/CI exported.
-   */
+  // Node warns on stderr when NO_COLOR and FORCE_COLOR are both set, corrupting the
+  // one-JSON-object-on-stderr contract subprocess tests assert; drop both rather than inherit them.
   delete env.FORCE_COLOR;
   delete env.CLICOLOR_FORCE;
 
@@ -71,40 +60,31 @@ export const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), ".
 const cliEntry = resolve(repoRoot, "src", "cli", "index.ts");
 export const distEntry = resolve(repoRoot, "dist", "cli", "index.js");
 
-export interface CliResult {
+export interface CLIResult {
   stdout: string;
   stderr: string;
   code: number;
 }
 
-interface RunCliOpts {
+interface RunCLIOpts {
   stdin?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 }
 
-export type CliRunner = (args: string[], opts?: RunCliOpts) => Promise<CliResult>;
+export type CLIRunner = (args: string[], opts?: RunCLIOpts) => Promise<CLIResult>;
 
-/**
- * `"src"` transpiles the TypeScript entry on every spawn; `"dist"` runs the built
- * artifact a published install executes, and needs a prior build; the e2e
- * suite's globalSetup owns that.
- */
-type CliTarget = "src" | "dist";
+/** `"src"` transpiles the TypeScript entry per spawn; `"dist"` runs the built artifact (needs a prior build; the e2e suite's globalSetup owns that). */
+type CLITarget = "src" | "dist";
 
-const CLI_COMMAND: Record<CliTarget, { file: string; argv: string[] }> = {
-  // Absolute entry path, so a caller can override cwd (e.g. an agent shell
-  // elsewhere) without breaking tsx's entrypoint lookup.
+const CLI_COMMAND: Record<CLITarget, { file: string; argv: string[] }> = {
+  // Absolute entry path so a caller can override cwd without breaking tsx's entrypoint lookup.
   src: { file: "npx", argv: ["tsx", cliEntry] },
   dist: { file: process.execPath, argv: [distEntry] },
 };
 
-/**
- * Resolves with the exit code instead of rejecting, because every caller
- * asserts on it. Bound rather than passed per call: the sandbox only exists
- * from `beforeAll` onwards.
- */
-export function makeRunCli(sandbox: Sandbox, target: CliTarget = "src"): CliRunner {
+/** Resolves with the exit code instead of rejecting, since every caller asserts on it. */
+export function makeRunCLI(sandbox: Sandbox, target: CLITarget = "src"): CLIRunner {
   const { file, argv } = CLI_COMMAND[target];
   return (args, opts = {}) =>
     new Promise((resolvePromise) => {

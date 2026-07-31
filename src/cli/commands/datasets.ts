@@ -28,10 +28,16 @@ const DEFAULTS_COLUMNS: Column<DatasetRow>[] = [
   { header: "Currency", value: (r) => String(r.currency ?? "") },
 ];
 
+const NOISE_COLUMNS: Column<DatasetRow>[] = [
+  { header: "Token", value: (r) => String(r.token ?? "") },
+  { header: "Country", value: (r) => r.country },
+];
+
 // Falls back to the generic country column so an unmapped dataset still renders something.
 const COLUMNS_BY_DATASET: Record<string, Column<DatasetRow>[]> = {
   institutions: INSTITUTION_COLUMNS,
   defaults: DEFAULTS_COLUMNS,
+  noise: NOISE_COLUMNS,
 };
 
 const GENERIC_COLUMNS: Column<DatasetRow>[] = [{ header: "Country", value: (r) => r.country }];
@@ -74,7 +80,7 @@ export function registerDatasets(program: Command): void {
       "after",
       [
         "",
-        "Behavior: read-only reference data, institution codes and per-country defaults behind account leaves.",
+        "Behavior: read-only reference data, institution codes, per-country defaults, and the noise words merchant aliases strip.",
         "Typical flow: bare datasets lists them; datasets institutions --country th filters a country's institutions.",
         "Example: oled datasets institutions --country th --kind bank --json",
       ].join("\n"),

@@ -1,4 +1,5 @@
 import type Database from "libsql";
+import { ISO_NOW_SQL } from "../timestamps.js";
 
 interface FileTotals {
   ingested: number;
@@ -87,16 +88,15 @@ interface DeleteFileResult {
   removed: FileRow | null;
   removedTransactions: number;
   removedQuestions: number;
+  /** Mirrors from OTHER files whose `void_of` pointed here: the CASCADE un-voids them (`void_of`'s ON DELETE SET NULL), same as `deleteTransaction`. */
+  unvoided: number;
 }
 
-/**
- * Cascaded transaction/question counts are gathered before the DELETE runs:
- * CASCADE would make them unrecoverable after.
- */
+/** Cascaded transaction/question/un-void counts are gathered before the DELETE runs, or CASCADE makes them unrecoverable. */
 export function deleteFile(db: Database.Database, id: string): DeleteFileResult {
   const removed = findFileById(db, id);
   if (!removed) {
-    return { removed: null, removedTransactions: 0, removedQuestions: 0 };
+    return { removed: null, removedTransactions: 0, removedQuestions: 0, unvoided: 0 };
   }
   const removedTransactions = (db
     .prepare(`SELECT COUNT(*) AS n FROM transactions WHERE source_file_id = ?`)
@@ -104,8 +104,17 @@ export function deleteFile(db: Database.Database, id: string): DeleteFileResult 
   const removedQuestions = (db
     .prepare(`SELECT COUNT(*) AS n FROM questions WHERE file_id = ?`)
     .get(id) as { n: number }).n;
+  // Excludes mirrors that are themselves doomed (also sourced from this
+  // file): those get deleted outright, not un-voided.
+  const unvoided = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM transactions
+        WHERE void_of IN (SELECT id FROM transactions WHERE source_file_id = ?)
+          AND source_file_id IS NOT ?`,
+    )
+    .get(id, id) as { n: number }).n;
   db.prepare(`DELETE FROM files WHERE id = ?`).run(id);
-  return { removed, removedTransactions, removedQuestions };
+  return { removed, removedTransactions, removedQuestions, unvoided };
 }
 
 interface MarkFileIngestedOpts {
@@ -126,7 +135,7 @@ export function markFileIngested(
 ): number {
   return db
     .prepare(
-      `UPDATE files SET status = 'ingested', ingested_at = datetime('now'), source = ? WHERE id = ?`,
+      `UPDATE files SET status = 'ingested', ingested_at = ${ISO_NOW_SQL}, source = ? WHERE id = ?`,
     )
     .run(opts.source ?? null, fileId).changes;
 }

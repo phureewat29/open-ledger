@@ -1,9 +1,11 @@
 import type Database from "libsql";
 import { copyFileSync, readdirSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { DBNotReadyError } from "./errors.js";
 import { MIGRATIONS, type Migration } from "./migrations/index.js";
+import { ISO_NOW_SQL } from "./timestamps.js";
 
-/** Never drops tables or overwrites the file. */
+// A migration may drop tables (0002 rebaselines v1); the file is copied aside first.
 export function migrate(db: Database.Database, dbPath?: string): void {
   applyMigrations(db, MIGRATIONS, dbPath);
 }
@@ -17,7 +19,7 @@ export function applyMigrations(
   const current = currentVersion(db);
 
   if (current > migrations.length) {
-    throw new Error(
+    throw new DBNotReadyError(
       `Database schema version ${current} is newer than this build supports ` +
         `(${migrations.length}). Upgrade OpenLedger to open this database.`,
     );
@@ -27,7 +29,7 @@ export function applyMigrations(
   // Every migration is CREATE TABLE IF NOT EXISTS, so a foreign database would otherwise be half-adopted in silence.
   if (current === 0 && hasUserTables(db)) {
     const at = dbPath ? ` at ${dbPath}` : "";
-    throw new Error(
+    throw new DBNotReadyError(
       `This database${at} is not an OpenLedger database. Your data has not been ` +
         `touched. Back up the file, then remove it to start fresh.`,
     );
@@ -39,7 +41,7 @@ export function applyMigrations(
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      applied_at TEXT NOT NULL DEFAULT (${ISO_NOW_SQL})
     );
   `);
 
@@ -89,8 +91,7 @@ function hasUserTables(db: Database.Database): boolean {
   return !!row;
 }
 
-// Checkpoints the WAL first so the copy is complete; a non-WAL database
-// tolerates the checkpoint failing.
+// Checkpoints the WAL first so the copy is complete; a non-WAL database tolerates the checkpoint failing.
 function backupDatabase(db: Database.Database, dbPath: string): void {
   try {
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
