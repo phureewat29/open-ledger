@@ -56,11 +56,7 @@ export interface ProbedPage extends PageFacts {
   text: string;
 }
 
-/**
- * `preserve-images` is what makes image blocks visible to the walker; without
- * it a scanned page is indistinguishable from a blank one (verified against
- * mupdf 1.27).
- */
+// preserve-images makes image blocks visible to the walker; without it a scan looks blank.
 const STEXT_FLAGS = "preserve-whitespace,preserve-images";
 
 function hasImageBlock(stext: StructuredText): boolean {
@@ -88,10 +84,7 @@ function probeOne(doc: Document, index: number): ProbedPage {
   }
 }
 
-/**
- * Measures and extracts the text layer in the same pass: the text-layer route
- * has nothing left to do afterwards, so no page is ever opened twice.
- */
+/** Measures and extracts the text layer in one pass, so no page opens twice. */
 export async function probePdfPages(bytes: Buffer): Promise<Result<ProbedPage[]>> {
   const mupdf = await getMupdf();
   return tryExecute(() => {

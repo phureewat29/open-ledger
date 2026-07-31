@@ -67,8 +67,7 @@ describe("applyRedaction (masking patterns)", () => {
   });
 
   it("never rewrites a path: the default name is not a term, and terms respect boundaries", () => {
-    // The mocked context's Family section carries "- User"; the default-name
-    // guard must refuse to turn it into a term at all.
+    // The mocked context's Family section carries "- User", which must not become a term.
     expect(redact("/Users/phureewat/.oled/db.sqlite")).toBe("/Users/phureewat/.oled/db.sqlite");
   });
 

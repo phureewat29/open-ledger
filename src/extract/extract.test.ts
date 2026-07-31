@@ -39,7 +39,6 @@ describe("extractFile: text-layer route", () => {
   });
 
   it("prefers the text layer over a configured endpoint, without calling it", async () => {
-    // Reaching the endpoint at all would fail the run as ocr_unreachable.
     const outcome = await extractFile(pdfInput(textPdf()), { ocr: deadOcrSettings() });
     expect(outcome.ok).toBe(true);
     expect(outcome.ok && outcome.value.source).toBe("text-layer");

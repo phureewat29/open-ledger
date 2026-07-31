@@ -1,7 +1,5 @@
 import type { OcrPreset } from "./index.js";
 
-// The prompt is the model card's, kept per-preset so a card revision only touches this file.
-
 const PROMPT = `Extract all text from the image.
 
 Instructions:

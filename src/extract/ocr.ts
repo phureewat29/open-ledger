@@ -4,17 +4,10 @@ import { tryExecute, type Result } from "../lib/result.js";
 import type { PageImage, RenderSpec } from "./pdf.js";
 import { presetForModel, type OcrParams, type PresetName } from "./presets/index.js";
 
-/**
- * Nothing here is tied to a particular model: the endpoint is whatever
- * `ocrBaseUrl` names, and the prompt, sampling, and render spec come from the
- * preset the configured model id selects.
- */
-
 /** A small local model can spend minutes on a dense page; this is a stuck-server bound, not a target. */
 export const OCR_TIMEOUT_MS = 300_000;
 
-// The abort covers connect and body alike, but a stalled server has been seen
-// outliving it, so a second bound races it.
+// A stalled server can outlive the abort, so a second bound races it.
 const TIMEOUT_GRACE_MS = 5_000;
 
 /** A liveness check, not a read: bounded independently of the per-page timeout. */
@@ -37,7 +30,6 @@ export interface OcrSettings {
   render: RenderSpec;
 }
 
-/** The config fields OCR reads, as a parameter so nothing has to stage env vars. */
 export type OcrConfigSource = Pick<OpenLedgerConfig, "ocrBaseUrl" | "ocrModel" | "ocrApiKey">;
 
 /** The endpoint URL alone decides whether OCR is configured; `null` means cleanly unset. */
@@ -63,8 +55,7 @@ export function resolveOcr(source: OcrConfigSource = config): OcrSettings | null
 type OcrFailure = "timeout" | "bad_response" | "unreachable" | "rejected";
 export type ServerFailure = Extract<OcrFailure, "unreachable" | "rejected">;
 
-// Exhaustive by construction: a new OcrFailure has to be classified here before
-// it compiles.
+// Exhaustive by construction: a new OcrFailure must be classified here to compile.
 const PAGE_LEVEL: Record<OcrFailure, boolean> = {
   timeout: true,
   bad_response: true,
@@ -72,11 +63,7 @@ const PAGE_LEVEL: Record<OcrFailure, boolean> = {
   rejected: false,
 };
 
-/**
- * Whether a failure is about this page or about the server. Page-level failures
- * leave a placeholder and let the run finish partial; server-level ones abort:
- * retrying 20 pages against a dead endpoint helps nobody.
- */
+/** Page-level failures leave a placeholder and continue; server-level failures abort the run. */
 export function isServerFailure(reason: OcrFailure): reason is ServerFailure {
   return !PAGE_LEVEL[reason];
 }
@@ -172,10 +159,8 @@ export async function ocrPage(image: PageImage, settings: OcrSettings): Promise<
 }
 
 /**
- * One page per request, sequentially: the endpoint serves one model, so
- * parallel pages queue behind each other and only eat into the per-page
- * timeout. Stops early on a server-level failure; the caller reads the returned
- * outcomes to see which pages made it.
+ * Sequential: the endpoint serves one model, so parallel requests would only
+ * queue. Stops early on a server-level failure.
  */
 export async function ocrPages(
   images: readonly PageImage[],

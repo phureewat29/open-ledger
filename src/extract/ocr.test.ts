@@ -22,7 +22,7 @@ const png = samplePng();
 const page1: PageImage = { page: 1, mime: "image/png", bytes: png };
 const page2: PageImage = { page: 2, mime: "image/png", bytes: png };
 
-/** OCR unset, mirroring the shipped config defaults, so each case names only what it changes. */
+// Mirrors the shipped config defaults (OCR unset).
 function cfg(over: Partial<OcrConfigSource> = {}): OcrConfigSource {
   return { ocrBaseUrl: "", ocrModel: "", ocrApiKey: "", ...over };
 }
@@ -67,8 +67,7 @@ describe("resolveOcr", () => {
     });
   });
 
-  // Family ids are derived from the registry, never spelled out: a model id
-  // outside src/extract/presets/ would name a vendor.
+  // Model ids come from the registry: spelling one out here would name a vendor.
   it("matches a family whatever the version suffix", () => {
     const model = `${HOUSE.model}-preview-v9`;
     expect(resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: model }))).toMatchObject({
@@ -85,7 +84,6 @@ describe("resolveOcr", () => {
       preset: "lighton-ocr",
       prompt: preset.prompt,
       params: preset.params,
-      // Not the house 1800px: the selected preset's own cap reaches the renderer.
       render: { dpi: 200, maxLongestDimPx: 1540 },
     });
   });

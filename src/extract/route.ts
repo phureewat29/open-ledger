@@ -2,12 +2,6 @@ export type TextLayer = "complete" | "partial" | "none";
 export type OcrAvailability = "ready" | "unset";
 export type Reader = "text-layer" | "ocr" | "agent";
 
-/** The whole routing policy.
- *                  ocr ready     ocr unset
- *   complete       text-layer    text-layer
- *   partial        ocr           agent
- *   none           ocr           agent
- */
 const READER: Record<`${TextLayer}/${OcrAvailability}`, Reader> = {
   "complete/ready": "text-layer",
   "complete/unset": "text-layer",
@@ -18,9 +12,8 @@ const READER: Record<`${TextLayer}/${OcrAvailability}`, Reader> = {
 };
 
 /**
- * File kind is deliberately not an axis: an image enters as `"none"` and routes
- * like a scan. Availability means configured, not reachable: a dead endpoint
- * fails the run loudly rather than degrading to images behind the caller's back.
+ * File kind isn't an axis: an image enters as `"none"` and routes like a scan.
+ * `ocr` means configured, not reachable: a dead endpoint aborts loudly.
  */
 export function readerFor(textLayer: TextLayer, ocr: OcrAvailability): Reader {
   return READER[`${textLayer}/${ocr}`];
@@ -34,8 +27,7 @@ export interface PageFacts {
   hasImage: boolean;
 }
 
-// Biased toward waste over loss: a scanned page with a junk text layer under this
-// bar still counts as a scan, so it gets re-read instead of silently contributing nothing.
+// Biased toward waste over loss: a junk text layer under this bar still counts as a scan.
 const PAGE_TEXT_CHARS = 400;
 
 export function classifyPage(page: PageFacts): PageContent {
@@ -43,10 +35,7 @@ export function classifyPage(page: PageFacts): PageContent {
   return page.hasImage ? "scan" : "blank";
 }
 
-/**
- * Blank trailer pages don't spoil "complete"; one scanned page among text pages makes
- * it "partial", re-reading the whole document so every source_page citation matches.
- */
+/** A blank trailer page doesn't spoil "complete"; one scanned page among text pages makes it "partial". */
 export function verdictOf(pages: readonly PageFacts[]): TextLayer {
   const contents = pages.map(classifyPage);
   if (!contents.includes("text")) return "none";

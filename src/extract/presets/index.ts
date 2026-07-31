@@ -2,13 +2,7 @@ import type { RenderSpec } from "../pdf.js";
 import { lightonOcrPreset } from "./lighton-ocr.js";
 import { typhoonOcrPreset } from "./typhoon-ocr.js";
 
-/**
- * A vision model reads a page best at the resolution and with the prompt its
- * own documentation prescribes, so those travel together as one preset instead
- * of one global constant. The configured model id selects the preset, so this
- * folder stays the only place in src/ that names a model; everything downstream
- * sees a preset name and the values it carries.
- */
+/** A preset pairs a model's prescribed prompt, sampling, and render spec; this folder is the only place in src/ that names a model. */
 
 /** Wire names: spread straight into the request body. */
 export interface OcrParams {
@@ -38,13 +32,9 @@ export const PRESETS: Record<PresetName, OcrPreset> = {
 
 export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 
-/** Its prompt is a generic extract-to-markdown instruction, so it suits an unrecognized model too. */
 const HOUSE_PRESET: PresetName = "typhoon-ocr";
 
-/**
- * An unrecognized id, or none at all, gets the house preset, whose own model
- * is then the one to ask for.
- */
+/** An unrecognized (or empty) model id falls back to the house preset, using its own model id. */
 export function presetForModel(modelId: string): { name: PresetName; preset: OcrPreset } {
   const name = PRESET_NAMES.find((key) => PRESETS[key].family.test(modelId)) ?? HOUSE_PRESET;
   return { name, preset: PRESETS[name] };

@@ -64,8 +64,7 @@ type LoadOutcome =
       message: string;
     };
 
-/** The extension declares the type and the magic bytes must agree: a mislabeled
- *  file fails here instead of deep in mupdf or the OCR endpoint. */
+/** Extension and magic bytes must agree; a mismatch fails here, not deep in mupdf or the OCR endpoint. */
 export function loadSource(path: string): LoadOutcome {
   const ext = extname(path).toLowerCase();
   const declared = SOURCES[ext];

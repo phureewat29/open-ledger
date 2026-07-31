@@ -71,9 +71,8 @@ function applyRule(rule: SectionRule, context: string, userName: string, push: (
       if (rule.stripParen) name = name.replace(/\s*\(.*\)/, "").trim();
       if (!name) break;
       if (rule.skipIfUser && name.toLowerCase() === userName.toLowerCase()) break;
-      // The default name must never become a redaction term: it seeds context.md's
-      // Family section (src/context.ts), and turning it into [PARTNER] would rewrite
-      // the literal word inside unrelated text such as file paths.
+      // "user" must never become a redaction term: it seeds context.md's Family
+      // section, and would rewrite the literal word elsewhere (e.g. file paths).
       if (name.toLowerCase() === "user") break;
       push(name, rule.token);
       break;
@@ -119,14 +118,11 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Builds name rules from config.userName + context.md once, returning a reusable
- *  masker that amortizes that cost across many values. */
+/** Builds redaction rules once, returning a reusable masker that amortizes that cost. */
 function createRedactor(): (text: string) => string {
   const redactions = buildRedactions();
-  // ASCII lookarounds, not \b: an employer term may end in punctuation (e.g. "Co."
-  // at the end of a string), and Thai text has no spaces so a Unicode letter
-  // boundary would lose recall there. This still stops "User" from matching inside
-  // "Users" or "Corgi" from matching inside "Corgis".
+  // ASCII lookarounds, not \b: Thai text has no spaces, so a Unicode letter
+  // boundary would lose recall; this still blocks "User" matching inside "Users".
   const patterns = redactions.map(
     ({ real, token }): [RegExp, string] => [
       new RegExp("(?<![A-Za-z0-9_])" + escapeRegExp(real) + "(?![A-Za-z0-9_])", "gu"),
@@ -145,12 +141,8 @@ function createRedactor(): (text: string) => string {
   };
 }
 
-/**
- * Deep-walks `data`, redacting a string value only when its key is in the
- * per-command `fields` allowlist; ids/enums/amounts the agent needs verbatim
- * stay untouched. Returns a fresh structure (input untouched); a no-op when
- * `enabled` is false.
- */
+/** Redacts a string value only when its key is in the per-command `fields`
+ *  allowlist; returns a fresh structure, a no-op when `enabled` is false. */
 export function applyRedaction<T>(data: T, enabled: boolean, fields: readonly string[]): T {
   if (!enabled) return data;
   const redactor = createRedactor();

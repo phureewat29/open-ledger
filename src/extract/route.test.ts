@@ -61,7 +61,6 @@ describe("verdictOf", () => {
   it("calls a document with no text page none, however it got there", () => {
     expect(verdictOf([scan, scan])).toBe("none");
     expect(verdictOf([blank])).toBe("none");
-    // No pages at all is how an image enters the pipeline.
     expect(verdictOf([])).toBe("none");
   });
 });

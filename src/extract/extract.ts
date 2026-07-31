@@ -54,14 +54,13 @@ export interface ExtractInput {
 }
 
 interface ExtractOverrides {
-  /** Ignore the text layer, for garbled or junk layers. */
+  /** Ignore the text layer. */
   rescan?: boolean;
   /** Ignore the endpoint, and read the images yourself. */
   noOcr?: boolean;
 }
 
 interface ExtractOptions {
-  /** From `resolveOcr()`; `null` when unset. */
   ocr: OcrSettings | null;
   overrides?: ExtractOverrides;
 }
@@ -102,7 +101,7 @@ function placeholder(page: number): string {
   return `[page ${page}: OCR failed]`;
 }
 
-/** A failed page is a hole in the document, not a failed run: the caller reports `failedPages` and exits PARTIAL. */
+/** A failed page is a hole in the document; the caller reports `failedPages` and exits PARTIAL. */
 function ocrExtraction(
   outcomes: OcrPageOutcome[],
   settings: OcrSettings,
@@ -139,7 +138,6 @@ export async function extractFile(
   const probed = await probe(input);
   if (!probed.ok) return { ok: false, reason: "pdf_unreadable", message: probed.error };
 
-  // Each override cancels exactly one routing decision.
   const overrides = options.overrides ?? {};
   const ocr = overrides.noOcr ? null : options.ocr;
   const textLayer = overrides.rescan ? "none" : verdictOf(probed.value);
@@ -158,10 +156,9 @@ export async function extractFile(
     };
   }
 
-  // Reader chosen, so the resolution is too: the endpoint's preset when it reads, the neutral spec otherwise.
   const images = await pageImages(input, ocr ? ocr.render : PAGE_RENDER);
   if (!images.ok) return { ok: false, reason: "pdf_unreadable", message: images.error };
-  // The READER table's "unset" column: no endpoint means reader "agent", images pass through as-is.
+  // READER's "unset" column: no endpoint means images pass through untouched.
   if (!ocr) return { ok: true, value: { kind: "images", textLayer, ...images.value } };
 
   return ocrExtraction(await ocrPages(images.value.pages, ocr), ocr, textLayer);
