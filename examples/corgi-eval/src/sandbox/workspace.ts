@@ -38,6 +38,7 @@ function buildEnv(paths: Omit<Workspace, "env">): NodeJS.ProcessEnv {
   const bin = join(paths.npm, "bin");
   return {
     ...process.env,
+    // Prepended: an `oled` on the operator's global PATH must never win over the packed one.
     PATH: `${bin}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
     HOME: paths.home,
     USERPROFILE: paths.home,

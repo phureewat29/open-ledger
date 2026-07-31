@@ -14,7 +14,7 @@ export interface Config {
   keepWorkspace: boolean;
 }
 
-/** main reads `kind`: help prints and exits 0, usage exits 2. */
+/** main reads `reason`: help prints and exits 0, usage exits 2. */
 interface ConfigFailure {
   ok: false;
   reason: "help" | "usage";

@@ -10,14 +10,8 @@ import type { FrictionItem, SubcommandRow } from "./friction.js";
 import type { RunIdentity, RunReport } from "./report.js";
 import type { OperationalType, PhaseExit, RunEvent } from "./events.js";
 
-/**
- * Three views of one run. The console stays short enough to read at a glance;
- * the markdown carries the detail a harness change would be argued from; the
- * JSON carries everything, including the raw event log.
- *
- * The numbered sections come from one registry, so a section can never appear
- * in one view and go missing from the other.
- */
+// Console, markdown, and JSON sections come from one registry, so a section
+// can never appear in one view and go missing from another.
 
 const STATUS_TEXT: Record<CheckStatus, string> = {
   pass: "PASS",

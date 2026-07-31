@@ -6,6 +6,7 @@ export interface Phase {
   prompt: string;
 }
 
+// Pinned to the checked-in AES-256 fixture PDF, not arbitrary demo text.
 const STATEMENT_PASSWORD = "password";
 
 /** Statements a run seeds, from `fixtures/`; each `<name>.pdf` has a `<name>.expected.json` beside it. */

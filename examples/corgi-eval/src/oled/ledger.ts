@@ -3,10 +3,8 @@ import type { Result } from "../core/result.js";
 import type { OpenLedgerRunner } from "./command.js";
 import { parseNdjson } from "./ndjson.js";
 
-/**
- * Reads the ledger back through the same CLI the model uses, so the scorecard
- * judges what oled actually holds rather than what the model claimed.
- */
+// Reads the ledger back through the same CLI the model uses, so the scorecard
+// judges what oled holds, not what the model claimed.
 
 /** The three groups a card statement's own totals are printed as. */
 type MoneyGroup = "charges" | "refunds" | "payments";
@@ -43,11 +41,7 @@ export interface LedgerProbe {
   netWorth: number;
   /** null when the whole ledger fit in one listing, which is the expected case. */
   truncated: ListTruncation | null;
-  /**
-   * Every live row's three directions matched, ledger-wide, not only the
-   * linked ones: money missing from the statement would still corrupt a
-   * total, wherever it was posted from.
-   */
+  /** Ledger-wide, not only linked rows: unlinked money would still corrupt a total. */
   money: LedgerMoney;
 }
 
@@ -56,7 +50,7 @@ const STATUS = z.object({
   counts: z.object({ transactions: z.number() }).nullable(),
   files: z.object({ ingested: z.number(), pending: z.number() }).nullable(),
   questions: z.object({ open: z.number(), deferred: z.number() }).nullable(),
-  net_worth: z.object({ net_worth: z.number() }).nullable(),
+  net_worth: z.object({ net_worth: z.record(z.string(), z.number()) }).nullable(),
 });
 
 const ROW = z.object({
@@ -80,6 +74,7 @@ type Row = z.infer<typeof ROW>;
 type StatusReport = z.infer<typeof STATUS>;
 
 const LIST_LIMIT = 500;
+/** Minus the currency head; full id is `<currency>:expense:uncategorized`. */
 const UNCATEGORIZED = "expense:uncategorized";
 
 async function readJson(
@@ -101,21 +96,28 @@ async function readJson(
 }
 
 function rootOf(accountId: string): string {
+  return accountId.split(":")[1] ?? "";
+}
+
+function ledgerOf(accountId: string): string {
   return accountId.split(":")[0] ?? "";
+}
+
+/** Built from the account's own currency head, so it matches whichever ledger
+ *  the row posted into. */
+function uncategorizedRootFor(accountId: string): string {
+  return `${ledgerOf(accountId)}:${UNCATEGORIZED}`;
 }
 
 function isUncategorized(row: Row): boolean {
   return (
-    row.debit_account_id.startsWith(UNCATEGORIZED) ||
-    row.credit_account_id.startsWith(UNCATEGORIZED)
+    row.debit_account_id.startsWith(uncategorizedRootFor(row.debit_account_id)) ||
+    row.credit_account_id.startsWith(uncategorizedRootFor(row.credit_account_id))
   );
 }
 
-/**
- * Classifies by direction, not sign: a charge grows expense against the card,
- * a refund reverses it, a payment settles the card from an asset. An opening
- * balance runs through equity instead, so it belongs to no group.
- */
+/** Classifies by direction, not sign; an opening balance runs through equity,
+ *  so it belongs to no group. */
 function groupOf(row: Row): MoneyGroup | null {
   const debit = rootOf(row.debit_account_id);
   const credit = rootOf(row.credit_account_id);
@@ -125,19 +127,24 @@ function groupOf(row: Row): MoneyGroup | null {
   return null;
 }
 
-function tallyMoney(rows: Row[]): LedgerMoney {
+/** Totals come back 0 across more than one ledger, same rule as `soleLedgerTotal`.
+ *  Ledger membership is read off the debit account's id. */
+export function tallyMoney(rows: Row[]): LedgerMoney {
   const count: Record<MoneyGroup, number> = { charges: 0, refunds: 0, payments: 0 };
   const minor: Record<MoneyGroup, number> = { charges: 0, refunds: 0, payments: 0 };
+  const ledgers = new Set<string>();
   for (const row of rows) {
     const group = groupOf(row);
     if (group === null) continue;
+    ledgers.add(ledgerOf(row.debit_account_id));
     count[group] += 1;
     minor[group] += Math.round(row.amount * 100);
   }
+  const total = (group: MoneyGroup): number => (ledgers.size > 1 ? 0 : minor[group] / 100);
   return {
-    charges: { count: count.charges, total: minor.charges / 100 },
-    refunds: { count: count.refunds, total: minor.refunds / 100 },
-    payments: { count: count.payments, total: minor.payments / 100 },
+    charges: { count: count.charges, total: total("charges") },
+    refunds: { count: count.refunds, total: total("refunds") },
+    payments: { count: count.payments, total: total("payments") },
   };
 }
 
@@ -161,6 +168,13 @@ function truncationOf(records: Record<string, unknown>[]): ListTruncation | null
     return hasMore ? { limit, total, returned } : null;
   }
   return null;
+}
+
+/** Multiple ledgers means no one number to score, so totals come back 0 rather
+ *  than a sum across units. */
+function soleLedgerTotal(totals: Record<string, number> | undefined): number {
+  const [only, ...rest] = Object.values(totals ?? {});
+  return only !== undefined && rest.length === 0 ? only : 0;
 }
 
 function readStatus(records: Record<string, unknown>[]): Result<StatusReport> {
@@ -206,7 +220,7 @@ export async function probeLedger(runner: OpenLedgerRunner): Promise<Result<Ledg
       uncategorizedRows: rows.filter(isUncategorized).length,
       questionsOpen: questions?.open ?? 0,
       questionsDeferred: questions?.deferred ?? 0,
-      netWorth: netWorth?.net_worth ?? 0,
+      netWorth: soleLedgerTotal(netWorth?.net_worth),
       truncated: truncationOf(listed.value),
       money: tallyMoney(rows),
     },
