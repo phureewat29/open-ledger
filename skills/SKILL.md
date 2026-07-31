@@ -7,7 +7,7 @@ description: A local double-entry personal-finance harness driven through the `o
 
 `oled` is a deterministic CLI over a local, double-entry ledger; you supply the intelligence. The CLI is the manual: `oled --help` lists the commands and the output contract, `oled <noun> --help` gives each command's behavior, flow, and flags, and every error carries a code and a message, often a `hint`. When you do not understand something, ask the CLI: never invent flags, subcommands, or ids.
 
-Pass `--json` on every command; every stdout line is one JSON object, and list reads end with a `{"type":"summary"}` row (page with `--offset` += returned while it says `has_more`). With a shell, run `oled` yourself, one command per call. Human is your terminal: send one command per message, wait for the pasted output; ask for uploads instead of reading files.
+Always pass `--json`. List output ends with a `{"type":"summary"}` row — page with `--offset` while it says `has_more`. Money totals are keyed by currency; never add two currencies together.
 
 ## Setup
 

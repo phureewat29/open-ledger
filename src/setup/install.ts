@@ -38,8 +38,7 @@ export class SkillPackVersionError extends Error {
   }
 }
 
-// install.ts compiles to dist/setup/install.js; ../../package.json from there is
-// the package root (same 2-level depth as src/cli/index.ts uses).
+// Compiles to dist/setup/install.js; ../../package.json is the package root from there (same depth as src/cli/index.ts).
 const require = createRequire(import.meta.url);
 
 export function getVersion(): string {
@@ -51,8 +50,7 @@ export function skillMd(): string {
   return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
 }
 
-// One rule for every case: <skills dir>/openledger. --dir names that skills dir
-// outright; otherwise it is the default under the home dir or the cwd.
+// Result is always <skills dir>/openledger; --dir names the skills dir directly, else home or cwd's default.
 function resolveTarget(opts: InstallOptions): string {
   const base = opts.dir
     ? resolve(opts.dir)

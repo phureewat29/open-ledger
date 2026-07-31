@@ -13,8 +13,8 @@ import { installSkill, getVersion, skillMd, SkillPackVersionError } from "./inst
 import { DEFAULT_SKILLS_DIR } from "./locations.js";
 import {
   createSandbox,
-  makeRunCli,
-  type CliRunner,
+  makeRunCLI,
+  type CLIRunner,
   type Sandbox,
 } from "../../fixtures/sandbox.js";
 
@@ -49,13 +49,14 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
     expect(skill).toContain("--json");
   });
 
-  it("carries the no-shell operating mode (human as terminal)", () => {
-    const skill = skillMd();
-    expect(skill).toContain("one command per message");
-  });
-
   it("keeps banned vocabulary out", () => {
     expect(skillMd()).not.toContain("record ");
+  });
+
+  it("carries the two facts a model cannot infer from output alone", () => {
+    const skill = skillMd();
+    expect(skill).toContain("has_more");
+    expect(skill).toContain("never add two currencies");
   });
 
   it("carries the Setup bootstrap section (install + first-run for a bare environment)", () => {
@@ -66,8 +67,7 @@ describe("skillMd (checked-in skills/SKILL.md)", () => {
   });
 });
 
-// realpath needed: macOS tmpdir is a symlink (/var -> /private/var), which
-// process.cwd() canonicalizes but the raw tmp string does not.
+// macOS tmpdir is a symlink (/var -> /private/var); realpath matches what process.cwd() canonicalizes.
 describe("installSkill: target resolution", () => {
   it("--dir D is the skills dir itself: the pack lands at D/openledger, nothing appended", () => {
     const dir = tmp("oled-install-dir-");
@@ -84,7 +84,6 @@ describe("installSkill: target resolution", () => {
     }
   });
 
-  // A doubled segment would land the pack where no agent scans for it.
   it("--dir <host skills dir> does not append a second skills segment", () => {
     const base = tmp("oled-install-host-dir-");
     const dir = join(base, ".claude", "skills");
@@ -154,11 +153,11 @@ describe("installSkill: version guard", () => {
 });
 
 let sandbox: Sandbox;
-let runCli: CliRunner;
+let runCLI: CLIRunner;
 
 beforeAll(() => {
   sandbox = createSandbox("oled-setup-cli-it-");
-  runCli = makeRunCli(sandbox);
+  runCLI = makeRunCLI(sandbox);
 });
 
 afterAll(() => {
@@ -169,7 +168,7 @@ describe("setup CLI (subprocess)", () => {
   it(
     "--print emits raw SKILL.md with parseable frontmatter",
     async () => {
-      const res = await runCli(["setup", "--print"]);
+      const res = await runCLI(["setup", "--print"]);
       expect(res.code).toBe(0);
       expect(res.stdout.startsWith("---\n")).toBe(true);
       const fm = parseFrontmatter(res.stdout);
@@ -183,7 +182,7 @@ describe("setup CLI (subprocess)", () => {
     async () => {
       const dir = tmp("oled-cli-install-");
       try {
-        const res = await runCli(["setup", "--dir", dir, "--json"]);
+        const res = await runCLI(["setup", "--dir", dir, "--json"]);
         expect(res.code).toBe(0);
         const parsed = JSON.parse(res.stdout.trim());
         expect(parsed.installed[0]).toMatchObject({ path: join(dir, "openledger") });
@@ -200,7 +199,7 @@ describe("setup CLI (subprocess)", () => {
     async () => {
       const dir = tmp("oled-cli-install-conflict-");
       try {
-        const res = await runCli(["setup", "--global", "--dir", dir, "--json"]);
+        const res = await runCLI(["setup", "--global", "--dir", dir, "--json"]);
         expect(res.code).toBe(2); // EXIT.USAGE
         expect(JSON.parse(res.stderr.trim()).error.code).toBe("E_USAGE");
       } finally {
@@ -213,7 +212,7 @@ describe("setup CLI (subprocess)", () => {
   it(
     "--global installs under the shared home skills dir",
     async () => {
-      const res = await runCli(["setup", "--global", "--json"]);
+      const res = await runCLI(["setup", "--global", "--json"]);
       expect(res.code).toBe(0);
       const parsed = JSON.parse(res.stdout.trim());
       const expected = join(sandbox.home, ".agents", "skills", "openledger");
