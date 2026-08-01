@@ -13,7 +13,6 @@ export interface InstalledCli {
 }
 
 interface PackEntry {
-  name: string;
   version: string;
   filename: string;
   files?: unknown[];

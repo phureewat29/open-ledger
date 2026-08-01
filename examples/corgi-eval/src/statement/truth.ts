@@ -18,8 +18,9 @@ const GROUP = z.object({
 const FACTS = z.object({
   /** The PDF this file describes; checked against the file it was loaded for. */
   statement: z.string().min(1),
-  currency: z.string().min(1),
+  /** Where the numbers came from; required so a fact file cannot land without provenance. */
   note: z.string().min(1),
+  currency: z.string().min(1),
   groups: z.object({ charges: GROUP, refunds: GROUP, payments: GROUP }),
   summary: z.object({
     previousBalance: z.number(),
@@ -27,10 +28,6 @@ const FACTS = z.object({
     refundsAndCredits: z.number(),
     paymentsReceived: z.number(),
     totalAmountDue: z.number(),
-    outstandingPoints: z.number().int(),
-    cardNumber: z.string().min(1),
-    statementDate: z.string().min(1),
-    paymentDueDate: z.string().min(1),
   }),
 });
 

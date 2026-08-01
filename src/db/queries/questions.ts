@@ -11,7 +11,6 @@ interface RecordQuestionInput {
   batch_id?: string | null;
   kind?: string | null;
   prompt: string;
-  options?: string[];
   /** Kind-specific structured context (e.g. partner ids for similar_accounts). */
   context?: Record<string, unknown> | null;
 }
@@ -24,7 +23,6 @@ export interface QuestionRow {
   account_id: string | null;
   kind: string | null;
   prompt: string;
-  options_json: string | null;
   context_json: string | null;
   deferred_until: string | null;
   created_at: string;
@@ -42,8 +40,8 @@ interface ClosedQuestion {
 export function recordQuestion(db: Database.Database, input: RecordQuestionInput): string {
   const id = `cn:${randomUUID()}`;
   db.prepare(
-    `INSERT INTO questions (id, batch_id, file_id, transaction_id, account_id, kind, prompt, options_json, context_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO questions (id, batch_id, file_id, transaction_id, account_id, kind, prompt, context_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.batch_id ?? null,
@@ -52,7 +50,6 @@ export function recordQuestion(db: Database.Database, input: RecordQuestionInput
     input.account_id,
     input.kind ?? null,
     input.prompt,
-    input.options ? JSON.stringify(input.options) : null,
     input.context ? JSON.stringify(input.context) : null,
   );
   return id;
@@ -121,7 +118,7 @@ interface ListQuestionsOptions {
 }
 
 const ROW_COLUMNS =
-  "id, batch_id, file_id, transaction_id, account_id, kind, prompt, options_json, context_json, deferred_until, created_at";
+  "id, batch_id, file_id, transaction_id, account_id, kind, prompt, context_json, deferred_until, created_at";
 
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 1000;

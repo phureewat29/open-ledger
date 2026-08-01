@@ -48,7 +48,6 @@ export function sniffSource(bytes: Buffer): { kind: SourceKind; mime: string } |
 
 export interface LoadedSource {
   path: string;
-  fileName: string;
   kind: SourceKind;
   mime: string;
   bytes: Buffer;
@@ -104,7 +103,6 @@ export function loadSource(path: string): LoadOutcome {
     ok: true,
     value: {
       path,
-      fileName: basename(path),
       kind: declared.kind,
       mime: declared.mime,
       bytes,

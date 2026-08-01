@@ -6,7 +6,7 @@ import {
 } from "../db/queries/transactions.js";
 import { clusterDuplicateCandidates } from "./clustering.js";
 
-export interface FindDuplicateTransactionsOptions {
+interface FindDuplicateTransactionsOptions {
   /** Day slack when grouping by date. 0 = same-day only. Default 2. */
   toleranceDays?: number;
   /** Skip transactions below this amount (minor units). */

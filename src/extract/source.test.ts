@@ -56,7 +56,6 @@ describe("loadSource", () => {
     if (!result.ok) return;
     expect(result.value).toMatchObject({
       path,
-      fileName: "statement.pdf",
       kind: "pdf",
       mime: "application/pdf",
     });

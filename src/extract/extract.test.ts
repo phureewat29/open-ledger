@@ -76,9 +76,7 @@ describe("extractFile: agent route", () => {
     if (!outcome.ok || outcome.value.kind !== "images") return;
     expect(outcome.value).toMatchObject({ source: "original", textLayer: "none" });
     expect(outcome.value.dpi).toBeUndefined();
-    expect(outcome.value.pages).toEqual([
-      { page: 1, mime: "image/png", bytes: input.bytes, path: input.path },
-    ]);
+    expect(outcome.value.pages).toEqual([{ page: 1, mime: "image/png", bytes: input.bytes }]);
   });
 });
 

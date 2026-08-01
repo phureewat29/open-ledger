@@ -382,10 +382,9 @@ describe("counts + updateTransactionMeta", () => {
 
   it("edits mutable metadata only", () => {
     insertTransaction(db, tf({ id: "tx:m" }));
-    expect(updateTransactionMeta(db, "tx:m", { description: "Latte", source_page: 3 })).toBe(1);
+    expect(updateTransactionMeta(db, "tx:m", { description: "Latte" })).toBe(1);
     const r = findTransactionById(db, "tx:m")!;
     expect(r.description).toBe("Latte");
-    expect(r.source_page).toBe(3);
     expect(updateTransactionMeta(db, "tx:m", {})).toBe(0);
   });
 });

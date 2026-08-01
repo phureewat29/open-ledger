@@ -13,7 +13,6 @@ interface QuestionListRow {
   prompt: string;
   transaction_id: string | null;
   account_id: string | null;
-  options: unknown;
   context: unknown;
   file_id: string | null;
   created_at: string;
@@ -26,14 +25,13 @@ function toListRow(row: QuestionRow): QuestionListRow {
     prompt: row.prompt,
     transaction_id: row.transaction_id,
     account_id: row.account_id,
-    options: parseJsonOrNull(row.options_json),
     context: parseJsonOrNull(row.context_json),
     file_id: row.file_id,
     created_at: row.created_at,
   };
 }
 
-// `prompt` is the only free-text field; options/context are structured JSON the agent needs verbatim.
+// `prompt` is the only free-text field; context is structured JSON the agent needs verbatim.
 const QUESTION_REDACT_FIELDS = ["prompt"] as const;
 
 const LIST_COLUMNS: Column<QuestionListRow>[] = [
@@ -42,7 +40,6 @@ const LIST_COLUMNS: Column<QuestionListRow>[] = [
   { header: "Prompt", value: (r) => r.prompt },
   { header: "Transaction ID", value: (r) => r.transaction_id ?? "" },
   { header: "Account ID", value: (r) => r.account_id ?? "" },
-  { header: "Options", value: (r) => (r.options != null ? JSON.stringify(r.options) : "") },
   { header: "Context", value: (r) => (r.context != null ? JSON.stringify(r.context) : "") },
   { header: "File ID", value: (r) => r.file_id ?? "" },
   { header: "Created At", value: (r) => r.created_at },
@@ -149,7 +146,7 @@ export function registerQuestions(program: Command): void {
         "",
         "Behavior: the harness opens a question when a row is ambiguous; you list them, then answer or defer.",
         "Typical flow: list --json, resolve each by kind, then answer (--also <id,id> closes siblings) or defer.",
-        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert or update; currency_mismatch -> when both ledgers exist, re-post as linked legs through <currency>:equity:conversion (one per ledger, sharing a group); when the named ledger doesn't exist yet, open it with accounts create or fix the prefix, then re-run ingest commit.",
+        "By kind: similar_accounts -> accounts merge; uncategorized -> transactions recategorize, then merchants set-default; unknown_merchant -> merchants upsert or update; dirty_input -> read the question's reason: fix the bad row (date, description, amount) or the account ids it names, then re-run ingest commit; currency_mismatch -> when both ledgers exist, re-post as linked legs through <currency>:equity:conversion (one per ledger, sharing a group); when the named ledger doesn't exist yet, open it with accounts create or fix the prefix, then re-run ingest commit.",
         "Example: oled questions list --json",
       ].join("\n"),
     );

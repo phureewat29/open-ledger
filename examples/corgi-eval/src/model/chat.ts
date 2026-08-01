@@ -39,7 +39,6 @@ export interface ChatFailure {
 type ChatResult = { ok: true; value: ChatReply } | ChatFailure;
 
 export interface ChatModel {
-  readonly name: string;
   complete(
     messages: ChatCompletionMessageParam[],
     tools: ChatCompletionTool[],
@@ -133,7 +132,6 @@ export function createOpenAiCompatibleModel(config: Config): ChatModel {
   };
 
   return {
-    name: config.model,
     complete(messages, tools) {
       // Rejection handler, not a Result: classify needs the thrown APIError itself.
       return request(messages, tools).then((completion) => toReply(completion, messages), classify);

@@ -12,10 +12,6 @@
     "purchasesAndFees": 88412.96,
     "refundsAndCredits": 3574.5,
     "paymentsReceived": 31195.16,
-    "totalAmountDue": 84838.46,
-    "outstandingPoints": 85933,
-    "cardNumber": "455045XXXXXX7712",
-    "statementDate": "12 May 26",
-    "paymentDueDate": "01 Jun 26"
+    "totalAmountDue": 84838.46
   }
 }

@@ -17,10 +17,10 @@ export const EXIT = {
   PARTIAL: 7,
 } as const;
 
-export type ExitName = keyof typeof EXIT;
+type ExitName = keyof typeof EXIT;
 
 /** Every code but OK, so a table over failures is exhaustive by construction. */
-export type FailedExit = Exclude<ExitName, "OK">;
+type FailedExit = Exclude<ExitName, "OK">;
 
 /** A code keyed by name, for a table that is written by name and read by code. */
 export function byExitCode<T>(table: Record<FailedExit, T>): Map<number, T> {
@@ -43,7 +43,7 @@ export const HOST_APPENDED_FLAGS = ["--json"];
 /** What oled's error copy says the model got wrong. */
 export type ErrorShape = "unknown_flag" | "unknown_command" | "flag_value";
 
-export interface ErrorMatch {
+interface ErrorMatch {
   shape: ErrorShape;
   /** Verbatim, as the model asked for it. */
   asked: string;

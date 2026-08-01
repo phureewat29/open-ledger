@@ -88,7 +88,7 @@ async function pageImages(input: ExtractInput, spec: RenderSpec): Promise<Result
       ok: true,
       value: {
         source: "original",
-        pages: [{ page: 1, mime: input.mime, bytes: input.bytes, path: input.path }],
+        pages: [{ page: 1, mime: input.mime, bytes: input.bytes }],
       },
     };
   }
@@ -158,8 +158,7 @@ export async function extractFile(
 
   const images = await pageImages(input, ocr ? ocr.render : PAGE_RENDER);
   if (!images.ok) return { ok: false, reason: "pdf_unreadable", message: images.error };
-  // READER's "unset" column: no endpoint means images pass through untouched.
+  // The "agent" arm: READER only reaches it with no endpoint configured.
   if (!ocr) return { ok: true, value: { kind: "images", textLayer, ...images.value } };
-
   return ocrExtraction(await ocrPages(images.value.pages, ocr), ocr, textLayer);
 }

@@ -22,7 +22,7 @@ export function groupedRows(money: LedgerMoney): number {
 }
 
 /** `transactions list` hit its limit: every reading taken from the listing is short. */
-export interface ListTruncation {
+interface ListTruncation {
   limit: number;
   total: number;
   returned: number;

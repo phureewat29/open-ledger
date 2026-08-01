@@ -60,7 +60,6 @@ describe("renderPdfPages", () => {
       expect(page.bytes.subarray(1, 4).toString("latin1")).toBe("PNG");
       // A 612x792pt page: the 1800px cap binds before 200dpi does.
       expect(pngSize(page.bytes)).toEqual({ width: 1391, height: 1800 });
-      expect(page.path).toBeUndefined();
     }
   });
 

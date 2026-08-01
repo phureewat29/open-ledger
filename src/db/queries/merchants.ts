@@ -165,16 +165,11 @@ export function renameMerchant(
   return result;
 }
 
-interface MerchantWithDefault {
-  merchant: MerchantRow;
-  default_account_id: string | null;
-}
-
 export function findMerchantByAlias(
   db: Database.Database,
   rawDescriptor: string,
   noiseTokens: readonly string[],
-): MerchantWithDefault | null {
+): MerchantRow | null {
   const normalized = normalizeDescriptor(rawDescriptor, noiseTokens);
   if (!normalized) return null;
 
@@ -185,8 +180,7 @@ export function findMerchantByAlias(
      WHERE ma.normalized_pattern = ?`,
   ).get(normalized) as MerchantRow | undefined;
 
-  if (!row) return null;
-  return { merchant: row, default_account_id: row.default_account_id };
+  return row ?? null;
 }
 
 interface ListMerchantsOptions {

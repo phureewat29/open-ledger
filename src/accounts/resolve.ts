@@ -165,8 +165,6 @@ interface AncestorsReady {
   readonly createdParents: string[];
 }
 
-export type EnsureAccountAncestorsResult = AncestorsReady | AccountRefusal;
-
 /**
  * Unlike `ensurePlaceholderAccount`, returns the refusal instead of
  * swallowing it, and may open a new ledger.
@@ -175,7 +173,7 @@ export function ensureAccountAncestors(
   db: Database.Database,
   id: string,
   type: AccountType,
-): EnsureAccountAncestorsResult {
+): AncestorsReady | AccountRefusal {
   const segments = id.split(":").filter(Boolean);
   if (segments.length < 2 || isLedgerRootId(id)) {
     return { ok: true, parentId: null, createdParents: [] };

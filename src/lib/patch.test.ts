@@ -38,17 +38,6 @@ describe("buildPatch", () => {
     expect(result.params).toEqual(["SCB"]);
   });
 
-  it("maps a key to a different column via `column`, while before reads that column", () => {
-    const spec: Record<string, PatchField> = {
-      masked: { column: "account_number_masked" },
-    };
-    const row = { id: "acct-1", account_number_masked: "••9999" } as unknown as Row;
-    const result = buildPatch(spec, row, { masked: "••1111" });
-    expect(result.sets).toEqual(["account_number_masked = ?"]);
-    expect(result.before.masked).toBe("••9999");
-    expect(result.after.masked).toBe("••1111");
-  });
-
   it("never puts undefined into params, even if a transform returns it", () => {
     const spec: Record<string, PatchField> = {
       due_day: { transform: () => undefined },

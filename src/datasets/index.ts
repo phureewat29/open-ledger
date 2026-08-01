@@ -49,5 +49,3 @@ export function readDataset(
     (r) => (!country || r.country === country) && (!kind || r.kind === kind),
   );
 }
-
-export type { DatasetRow } from "./loader.js";

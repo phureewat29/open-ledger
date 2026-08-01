@@ -83,8 +83,8 @@ async function resolveMerchant(opts: Record<string, unknown>): Promise<void> {
   }
   emitObject({
     found: true,
-    merchant_id: match.merchant.id,
-    canonical_name: match.merchant.canonical_name,
+    merchant_id: match.id,
+    canonical_name: match.canonical_name,
     default_account_id: match.default_account_id,
   });
 }

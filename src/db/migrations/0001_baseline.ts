@@ -110,7 +110,6 @@ export function up(db: Database.Database): void {
       account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
       kind TEXT,
       prompt TEXT NOT NULL,
-      options_json TEXT,
       context_json TEXT,
       deferred_until TEXT,
       created_at TEXT NOT NULL DEFAULT (${ISO_NOW_SQL})

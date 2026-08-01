@@ -1,11 +1,8 @@
 export interface PatchField {
-  /** SQL column; defaults to the patch key when omitted. */
-  column?: string;
   /** Normalize the incoming value before binding; the transformed value is both the bound param and the audit `after` value. */
   transform?: (value: unknown) => unknown;
 }
 
-// before/after audit snapshots are keyed by patch key, not by column.
 interface PatchResult {
   sets: string[];
   params: unknown[];
@@ -30,13 +27,12 @@ export function buildPatch<Row extends object>(
   for (const key of Object.keys(spec)) {
     if (patchRecord[key] === undefined) continue;
     const field = spec[key];
-    const column = field.column ?? key;
     const value = field.transform ? field.transform(patchRecord[key]) : patchRecord[key];
 
-    sets.push(`${column} = ?`);
+    sets.push(`${key} = ?`);
     // libsql cannot bind `undefined`; this keeps that contract airtight even if a transform produces one.
     params.push(value === undefined ? null : value);
-    before[key] = currentRecord[column];
+    before[key] = currentRecord[key];
     after[key] = value;
   }
 

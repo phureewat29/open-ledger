@@ -137,14 +137,14 @@ describe("findMerchantByAlias", () => {
   it("finds the merchant by an exact-match raw descriptor", () => {
     const hit = findMerchantByAlias(db, "STARBUCKS #1234 BANGKOK", TH_NOISE);
     expect(hit).toBeTruthy();
-    expect(hit!.merchant.canonical_name).toBe("Starbucks");
+    expect(hit!.canonical_name).toBe("Starbucks");
     expect(hit!.default_account_id).toBe("thb:expense:food:dining");
   });
 
   it("finds the merchant by a normalized-equivalent descriptor", () => {
     const hit = findMerchantByAlias(db, "Starbucks #9999 BKK CHARGE", TH_NOISE);
     expect(hit).toBeTruthy();
-    expect(hit!.merchant.canonical_name).toBe("Starbucks");
+    expect(hit!.canonical_name).toBe("Starbucks");
   });
 
   it("returns null when no alias matches", () => {
@@ -217,8 +217,8 @@ describe("renameMerchant", () => {
     expect(findMerchantById(db, m.id)!.canonical_name).toBe("Starbucks");
 
     // Both the original alias and the pre-rename name still hit the merchant.
-    expect(findMerchantByAlias(db, "STARBUCKS #456 BKK", TH_NOISE)?.merchant.id).toBe(m.id);
-    expect(findMerchantByAlias(db, "STARBUCKS COFFEE #456", TH_NOISE)?.merchant.id).toBe(m.id);
+    expect(findMerchantByAlias(db, "STARBUCKS #456 BKK", TH_NOISE)?.id).toBe(m.id);
+    expect(findMerchantByAlias(db, "STARBUCKS COFFEE #456", TH_NOISE)?.id).toBe(m.id);
   });
 
   it("reports an alias conflict when another merchant holds the old name's pattern", () => {

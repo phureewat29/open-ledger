@@ -107,12 +107,11 @@ export interface RenderSpec {
   maxLongestDimPx: number;
 }
 
-/** One page as image bytes, 1-based. `path` is set only when the bytes came from a file on disk. */
+/** One page as image bytes, 1-based. */
 export interface PageImage {
   page: number;
   mime: string;
   bytes: Buffer;
-  path?: string;
 }
 
 function renderOne(mupdf: Mupdf, doc: Document, index: number, spec: RenderSpec): PageImage {

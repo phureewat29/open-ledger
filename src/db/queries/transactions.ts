@@ -7,7 +7,7 @@ import { clampLimit, clampOffset } from "../../lib/limit.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
 
 /** `noise_tokens` lives here, not on `TransactionInput`, so only rows claiming an alias carry one. */
-export interface TransactionMerchantInput extends MerchantUpsertInput {
+interface TransactionMerchantInput extends MerchantUpsertInput {
   noise_tokens: readonly string[];
 }
 
@@ -69,7 +69,7 @@ export type ValidateTransactionResult =
 const TRANSACTION_VALID: ValidateTransactionResult = { ok: true };
 
 /** The fields a transaction carries whichever form its amount is in. */
-export interface TransactionFields {
+interface TransactionFields {
   date: string;
   description: string;
   debit_account_id: string;
@@ -509,14 +509,12 @@ export interface UpdateTransactionMetaFields {
   date?: string;
   description?: string;
   merchant_id?: string | null;
-  source_page?: number | null;
 }
 
 const TRANSACTION_META_PATCH: Record<string, PatchField> = {
   date: {},
   description: {},
   merchant_id: {},
-  source_page: {},
 };
 
 /** Amount and account columns aren't accepted here: moving accounts is `bulkRecategorize`'s job, and amount edits go through delete + re-record. */

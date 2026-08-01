@@ -34,7 +34,6 @@ import {
 } from "../../db/queries/transactions.js";
 import {
   commitTransaction,
-  defaultTransactionCommitHooks,
   CURRENCY_MISMATCH_HINT,
   type TransactionCommitContext,
   type RawTransactionInput,
@@ -306,7 +305,7 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
     fileId: null,
     fileHash: null,
   };
-  const outcome = commitTransaction(db, ctx, raw, defaultTransactionCommitHooks(db, ctx));
+  const outcome = commitTransaction(db, ctx, raw);
   if (!outcome.ok) {
     // The conversion-pair hint only fits a mismatch between two ledgers that both exist.
     if (outcome.reason === "currency_mismatch" && !outcome.unopenedLedger) {

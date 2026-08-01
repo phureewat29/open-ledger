@@ -6,8 +6,8 @@ import {
   listDatasetNames,
   datasetHasKinds,
   type DatasetSummary,
-  type DatasetRow,
 } from "../../datasets/index.js";
+import type { DatasetRow } from "../../datasets/loader.js";
 
 const DATASET_COLUMNS: Column<DatasetSummary>[] = [
   { header: "Name", value: (d) => d.name },

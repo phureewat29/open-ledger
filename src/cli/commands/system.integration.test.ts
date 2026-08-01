@@ -351,7 +351,6 @@ describe("system CLI integration (subprocess)", () => {
           account_id: "thb:expense:food",
           kind: "uncategorized",
           prompt: "Which category for this recurring charge?",
-          options: ["thb:expense:food", "thb:expense:other"],
           context: { rule_key: "merchant:acme-foodmart" },
         });
         q2 = recordQuestion(raw, {
@@ -370,7 +369,6 @@ describe("system CLI integration (subprocess)", () => {
       expect(rows.find((r) => r.id === q1)).toMatchObject({
         kind: "uncategorized",
         account_id: "thb:expense:food",
-        options: ["thb:expense:food", "thb:expense:other"],
         context: { rule_key: "merchant:acme-foodmart" },
       });
       expect(rows.find((r) => r.id === q2)).toMatchObject({ kind: "duplicate", context: null });
