@@ -35,6 +35,22 @@ describe("dayDiff", () => {
   });
 });
 
+describe("proximityComponents ordering", () => {
+  it("returns components in first-appearance order, not union-root order", () => {
+    // Row 0 unions with the last row, pushing its root to a high index while
+    // the singletons keep low roots; first appearance must still come first.
+    const twinA = row({ id: "tx:first", date: "2026-05-01" });
+    const singles = ["2026-05-11", "2026-05-21", "2026-06-01", "2026-06-11"].map((date, i) =>
+      row({ id: `tx:s${i}`, date }),
+    );
+    const twinB = row({ id: "tx:last", date: "2026-05-01" });
+
+    const comps = proximityComponents([twinA, ...singles, twinB], 2);
+    expect(comps).toHaveLength(5);
+    expect(comps[0].map((r) => r.id)).toEqual(["tx:first", "tx:last"]);
+  });
+});
+
 describe("bucketDuplicateCandidates", () => {
   it("groups only rows sharing amount, debit, and credit", () => {
     const a = row({ id: "tx:a", amount: 5000 });

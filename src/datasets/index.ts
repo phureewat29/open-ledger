@@ -1,3 +1,4 @@
+import { uniq } from "es-toolkit";
 import { loadDatasetRows, type DatasetDefinition, type DatasetRow } from "./loader.js";
 import { institutionsDataset } from "./institutions.js";
 import { defaultsDataset } from "./defaults.js";
@@ -30,7 +31,7 @@ export interface DatasetSummary {
 export function listDatasets(): DatasetSummary[] {
   return Object.entries(REGISTRY).map(([name, def]) => {
     const rows = loadDatasetRows(name, def);
-    const countries = [...new Set(rows.map((r) => r.country))].sort();
+    const countries = uniq(rows.map((r) => r.country)).sort();
     return { name, countries, rows: rows.length };
   });
 }

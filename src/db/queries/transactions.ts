@@ -617,7 +617,8 @@ export function listDuplicateCandidateTransactions(
          LEFT JOIN accounts ca ON ca.id = t.credit_account_id
         WHERE t.void_of IS NULL
           AND t.amount >= ?
-          AND ${NOT_ADJUSTMENT}`,
+          AND ${NOT_ADJUSTMENT}
+        ORDER BY t.date, t.id`,
     )
     .all(opts.minAmount ?? 0) as DuplicateTransactionRow[];
 }

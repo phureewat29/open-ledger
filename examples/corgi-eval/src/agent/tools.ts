@@ -1,3 +1,4 @@
+import { difference } from "es-toolkit";
 import * as z from "zod";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { tryExecute, type Result } from "../core/result.js";
@@ -213,8 +214,7 @@ function tokenize(input: string): Result<string[]> {
 /** Tolerates a leading `oled` and guarantees --json, so NDJSON is never optional. */
 function normalizeArgv(tokens: string[]): string[] {
   const argv = tokens[0] === "oled" ? tokens.slice(1) : tokens;
-  const missing = HOST_APPENDED_FLAGS.filter((flag) => !argv.includes(flag));
-  return [...argv, ...missing];
+  return [...argv, ...difference(HOST_APPENDED_FLAGS, argv)];
 }
 
 /** The noun oled dispatches on, before any flag or its value can be mistaken for one. */

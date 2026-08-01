@@ -1,17 +1,12 @@
+import { groupBy, range } from "es-toolkit";
 import type { DuplicateTransactionRow } from "../db/queries/transactions.js";
 
 /** Groups by same amount and account pair; a bucket of size 1 can't duplicate anything. */
 export function bucketDuplicateCandidates(
   rows: DuplicateTransactionRow[],
 ): DuplicateTransactionRow[][] {
-  const buckets = new Map<string, DuplicateTransactionRow[]>();
-  for (const r of rows) {
-    const key = `${r.amount}|${r.debit_account_id}|${r.credit_account_id}`;
-    const arr = buckets.get(key) ?? [];
-    arr.push(r);
-    buckets.set(key, arr);
-  }
-  return [...buckets.values()];
+  const buckets = groupBy(rows, (r) => `${r.amount}|${r.debit_account_id}|${r.credit_account_id}`);
+  return Object.values(buckets);
 }
 
 /** Two rows join a component when within `toleranceDays` and not already
@@ -21,7 +16,7 @@ export function proximityComponents(
   toleranceDays: number,
 ): DuplicateTransactionRow[][] {
   const n = bucket.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
+  const parent = range(n);
   const find = (x: number): number => {
     while (parent[x] !== x) {
       parent[x] = parent[parent[x]];
@@ -45,13 +40,15 @@ export function proximityComponents(
     }
   }
 
+  // Not groupBy: a Record hoists the numeric root keys into ascending order,
+  // while cluster order on the wire must follow first appearance.
   const comps = new Map<number, DuplicateTransactionRow[]>();
-  for (let i = 0; i < n; i++) {
+  bucket.forEach((row, i) => {
     const root = find(i);
-    const arr = comps.get(root) ?? [];
-    arr.push(bucket[i]);
-    comps.set(root, arr);
-  }
+    const rows = comps.get(root) ?? [];
+    rows.push(row);
+    comps.set(root, rows);
+  });
   return [...comps.values()];
 }
 

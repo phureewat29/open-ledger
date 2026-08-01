@@ -1,3 +1,4 @@
+import { escapeRegExp } from "es-toolkit";
 import { config } from "../config.js";
 import { readContext } from "../context.js";
 
@@ -112,10 +113,6 @@ function buildRedactions(): RedactionEntry[] {
 
   entries.sort((a, b) => b.real.length - a.real.length);
   return entries;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Builds redaction rules once, returning a reusable masker that amortizes that cost. */

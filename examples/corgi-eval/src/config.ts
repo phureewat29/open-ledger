@@ -1,3 +1,4 @@
+import { omitBy } from "es-toolkit";
 import * as z from "zod";
 import { BUDGET_ENV, MODALITIES, MODALITIES_ENV, type Modality } from "./model/capabilities.js";
 
@@ -90,11 +91,7 @@ function parseFlags(argv: string[]): { ok: true; value: Flags } | ConfigFailure 
 
 /** Drops blank env values so a `KEY=` line in .env falls back to the default. */
 function presentEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined && value.trim() !== "") out[key] = value;
-  }
-  return out;
+  return omitBy(env, (value) => !value?.trim()) as Record<string, string>;
 }
 
 export function loadConfig(argv: string[], env: NodeJS.ProcessEnv): ConfigResult {

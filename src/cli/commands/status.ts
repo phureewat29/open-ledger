@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
+import { uniq } from "es-toolkit";
 import { config, getConfigPath, getDataDir } from "../../config.js";
 import { existsSync } from "fs";
 import { homedir } from "os";
@@ -261,13 +262,11 @@ function financialRows(
   worth: NonNullable<StatusReport["net_worth"]>,
   dim: (s: string) => string,
 ): [string, string][] {
-  const currencies = [
-    ...new Set([
-      ...Object.keys(worth.net_worth),
-      ...Object.keys(worth.assets),
-      ...Object.keys(worth.liabilities),
-    ]),
-  ].sort();
+  const currencies = uniq([
+    ...Object.keys(worth.net_worth),
+    ...Object.keys(worth.assets),
+    ...Object.keys(worth.liabilities),
+  ]).sort();
 
   const rows: [string, string][] = [];
   for (const currency of currencies) {

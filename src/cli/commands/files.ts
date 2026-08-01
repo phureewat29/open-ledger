@@ -9,9 +9,16 @@ import {
   runAction,
 } from "../output.js";
 import { openDb } from "../db.js";
-
-// Derives the row shape from the lazily-imported query, without pulling the db module onto the startup path.
-type FileRow = ReturnType<typeof import("../../db/queries/files.js").listFiles>[number];
+import {
+  FILE_STATUSES,
+  deleteFile,
+  findFileById,
+  listFiles as queryFiles,
+  type FileRow,
+  type FileStatus,
+} from "../../db/queries/files.js";
+import { countTransactionsBySourceFile } from "../../db/queries/transactions.js";
+import { countQuestions } from "../../db/queries/questions.js";
 
 const FILE_COLUMNS: Column<FileRow>[] = [
   { header: "Status", value: (r) => r.status },
@@ -20,10 +27,6 @@ const FILE_COLUMNS: Column<FileRow>[] = [
   { header: "Ingested At", value: (r) => r.ingested_at ?? "-" },
   { header: "Path", value: (r) => r.path },
 ];
-
-/** files.status enum; `new` belongs to `ingest list`, not here: filtering by it here would silently match nothing. */
-const FILE_STATUSES = ["pending", "ingested", "failed"] as const;
-type FileStatus = (typeof FILE_STATUSES)[number];
 
 interface ListFilesOpts {
   status?: string;
@@ -37,7 +40,6 @@ async function listFiles(opts: ListFilesOpts): Promise<void> {
   }
 
   const db = await openDb();
-  const { listFiles: queryFiles } = await import("../../db/queries/files.js");
   const rows = queryFiles(db);
   const shown = status ? rows.filter((r) => r.status === status) : rows;
   emitList(shown, FILE_COLUMNS);
@@ -46,12 +48,9 @@ async function listFiles(opts: ListFilesOpts): Promise<void> {
 
 async function showFile(id: string): Promise<void> {
   const db = await openDb();
-  const { findFileById } = await import("../../db/queries/files.js");
   const row = findFileById(db, id);
   if (!row) fail("NOT_FOUND", `no file: ${id}`);
 
-  const { countTransactionsBySourceFile } = await import("../../db/queries/transactions.js");
-  const { countQuestions } = await import("../../db/queries/questions.js");
   emitObject({
     type: "file_detail",
     ...row,
@@ -67,7 +66,6 @@ interface DropFileOpts {
 async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
   requireYes(opts, `dropping file ${id}`);
   const db = await openDb();
-  const { deleteFile } = await import("../../db/queries/files.js");
   const res = deleteFile(db, id);
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
 

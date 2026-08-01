@@ -36,6 +36,11 @@ describe("applyRedaction (masking patterns)", () => {
     expect(redact("Payment to Corgi")).toBe("Payment to [PARTNER]");
   });
 
+  it("matches terms literally, never as regex patterns", () => {
+    // "Zentry Thailand Co." ends in a regex special; unescaped, the dot would also match "CoX".
+    expect(redact("Zentry Thailand CoX invoice")).toBe("Zentry Thailand CoX invoice");
+  });
+
   it("redacts employer", () => {
     expect(redact("Salary from Zentry Thailand Co.")).toBe(
       "Salary from [EMPLOYER]",

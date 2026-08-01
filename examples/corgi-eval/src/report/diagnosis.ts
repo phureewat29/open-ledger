@@ -1,3 +1,4 @@
+import { groupBy, orderBy, uniq } from "es-toolkit";
 import { errorShapeOf, plainMessage, type ErrorShape } from "../oled/contract.js";
 import type { PhaseExit, PhaseId, RunEvent, ToolObservation } from "./events.js";
 import type { PhaseTally } from "./recorder.js";
@@ -109,43 +110,46 @@ function blockerSentences(content: string): string[] {
     const trimmed = sentence.trim();
     if (!trimmed) continue;
     if (!BLOCKER_PATTERNS.some((pattern) => pattern.test(trimmed))) continue;
-    const kept = trimmed.slice(0, MAX_SENTENCE);
-    if (!found.includes(kept)) found.push(kept);
+    found.push(trimmed.slice(0, MAX_SENTENCE));
   }
-  return found;
+  return uniq(found);
+}
+
+interface Ask {
+  kind: MissingKind;
+  asked: string;
+  phase: PhaseId;
+  command: string;
 }
 
 function buildMissing(events: RunEvent[]): MissingCapability[] {
-  const found = new Map<string, MissingCapability>();
+  const asks: Ask[] = [];
   for (const event of events) {
     if (event.type !== "tool_call") continue;
     const asked = askedFor(event);
-    if (!asked) continue;
-
-    const key = `${asked.kind} ${asked.asked}`;
-    const existing = found.get(key);
-    if (!existing) {
-      found.set(key, { ...asked, count: 1, phases: [event.phase], command: event.command });
-      continue;
-    }
-    existing.count += 1;
-    if (!existing.phases.includes(event.phase)) existing.phases.push(event.phase);
+    if (asked) asks.push({ ...asked, phase: event.phase, command: event.command });
   }
-  return [...found.values()].sort((a, b) => b.count - a.count || a.asked.localeCompare(b.asked));
+
+  const groups = groupBy(asks, (ask) => `${ask.kind} ${ask.asked}`);
+  const rows = Object.values(groups).map((group) => {
+    const { kind, asked, command } = group[0]!;
+    return { kind, asked, count: group.length, phases: uniq(group.map((ask) => ask.phase)), command };
+  });
+  return orderBy(rows, ["count", "asked"], ["desc", "asc"]);
 }
 
 function buildBlockers(events: RunEvent[]): SelfReportedBlocker[] {
-  const blockers: SelfReportedBlocker[] = [];
-  const replies = new Map<PhaseId, number>();
-  for (const event of events) {
-    if (event.type !== "llm_call") continue;
-    const reply = (replies.get(event.phase) ?? 0) + 1;
-    replies.set(event.phase, reply);
-    for (const sentence of blockerSentences(event.content)) {
-      blockers.push({ phase: event.phase, reply, sentence });
-    }
-  }
-  return blockers;
+  const llmCalls = events.filter((event) => event.type === "llm_call");
+  const byPhase = groupBy(llmCalls, (event) => event.phase);
+  return Object.values(byPhase).flatMap((calls) =>
+    calls.flatMap((event, index) =>
+      blockerSentences(event.content).map((sentence) => ({
+        phase: event.phase,
+        reply: index + 1,
+        sentence,
+      })),
+    ),
+  );
 }
 
 function buildProgress(phases: PhaseTally[], snapshots: PhaseSnapshot[]): PhaseProgress[] {

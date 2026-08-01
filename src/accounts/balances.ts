@@ -54,9 +54,13 @@ export function subtractTotals(a: CurrencyTotals, b: CurrencyTotals): CurrencyTo
 }
 
 /** Normal-balance rule: asset/expense are debit-normal, others credit-normal. */
+function isDebitNormal(type: AccountType): boolean {
+  return ["asset", "expense"].includes(type);
+}
+
+/** Signed balance in minor units, from the account type's normal side. */
 function balanceMinor(type: AccountType, sumDebit: number, sumCredit: number): number {
-  const debitNormal = type === "asset" || type === "expense";
-  return debitNormal ? sumDebit - sumCredit : sumCredit - sumDebit;
+  return isDebitNormal(type) ? sumDebit - sumCredit : sumCredit - sumDebit;
 }
 
 /** `balance` is the decimal of `balance_minor` under the account's own currency exponent. */
@@ -213,7 +217,7 @@ export function adjustAccountBalance(
   if (deltaMinor === 0) return { transactionId: null, delta: 0 };
 
   const amount = Math.abs(deltaMinor);
-  const debitNormal = account.type === "asset" || account.type === "expense";
+  const debitNormal = isDebitNormal(account.type);
   const accountIsDebit = (debitNormal && deltaMinor > 0) || (!debitNormal && deltaMinor < 0);
 
   const date =

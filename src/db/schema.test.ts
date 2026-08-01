@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import Database from "libsql";
-import { mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { migrate, applyMigrations } from "./schema.js";
+import { migrate, applyMigrations, listMissingTables } from "./schema.js";
 import { DBNotReadyError } from "./errors.js";
 import * as baseline from "./migrations/0001_baseline.js";
 import type { Migration } from "./migrations/index.js";
@@ -63,6 +63,15 @@ function withTempDir(run: (dir: string) => void): void {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+describe("listMissingTables", () => {
+  it("names exactly the asked-for tables the database lacks", () => {
+    const db = freshDb();
+    migrate(db);
+    expect(listMissingTables(db, ["accounts", "transactions"])).toEqual([]);
+    expect(listMissingTables(db, ["accounts", "nope", "also_nope"])).toEqual(["nope", "also_nope"]);
+  });
+});
 
 describe("migrate", () => {
   it("creates the expected tables", () => {
@@ -490,6 +499,24 @@ describe("version-1 databases are rebaselined, not adopted", () => {
     `);
     return db;
   }
+
+  it("prunes to the five newest backups, the fresh one included", () => {
+    withTempDir((dir) => {
+      const dbPath = join(dir, "db.sqlite");
+      const stale = Array.from({ length: 7 }, (_, i) => `db.sqlite.20200101-00000${i}.bak`);
+      for (const name of stale) writeFileSync(join(dir, name), "old");
+      const db = oldShapeDb(dbPath);
+
+      migrate(db, dbPath);
+      db.close();
+
+      const kept = backups(dir).sort();
+      expect(kept).toHaveLength(5);
+      // The three oldest fakes are gone; the newest four survive with today's real copy.
+      expect(kept.slice(0, 4)).toEqual(stale.slice(3));
+      expect(kept[4]).not.toBe(stale[6]);
+    });
+  });
 
   it("carries an old-shape database to version 2 and drops what only it had", () => {
     withTempDir((dir) => {

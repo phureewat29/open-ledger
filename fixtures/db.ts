@@ -1,6 +1,7 @@
 import Database from "libsql";
 import { migrate } from "../src/db/schema.js";
 import { createAccount, ensureLedgerRoot, isLedgerRootId } from "../src/accounts/accounts.js";
+import { humanizeSegment } from "../src/accounts/resolve.js";
 import type { AccountType, CreateAccountInput } from "../src/db/queries/accounts.js";
 import { currencyOf, typeFromId } from "../src/lib/ids.js";
 
@@ -33,15 +34,11 @@ export function seedAccount(db: Database.Database, account: SeedAccountInput): s
   const result = createAccount(db, {
     ...account,
     type,
-    name: account.name ?? titleCase(segments[segments.length - 1]),
+    name: account.name ?? humanizeSegment(segments[segments.length - 1]),
     parent_id: account.parent_id ?? segments.slice(0, -1).join(":"),
   });
   if (!result.ok) throw new Error(`seedAccount("${account.id}"): ${result.message}`);
   return account.id;
-}
-
-function titleCase(segment: string): string {
-  return segment.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**

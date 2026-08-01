@@ -1,3 +1,4 @@
+import { countBy, groupBy, orderBy } from "es-toolkit";
 import { byExitCode, errorShapeOf, HOST_APPENDED_FLAGS } from "../oled/contract.js";
 import type { PhaseId, RunEvent, ToolObservation } from "./events.js";
 
@@ -151,7 +152,7 @@ const HINT_FLAG = /--[a-z][a-z0-9-]*/g;
 const HINT_STDIN = /(?<![-\w])stdin\b|\bpipe[ds]?\b/i;
 const HELP_FLAGS = ["--help", "-h"];
 
-export interface Attempt {
+interface Attempt {
   phase: PhaseId;
   turn: number;
   observation: ToolObservation;
@@ -300,11 +301,9 @@ function recoveryOf(o: ToolObservation, next: Followups): RecoveryOutcome | null
 }
 
 function countTypes(items: FrictionItem[]): TypeCount[] {
-  const counts = new Map<FrictionType, number>();
-  for (const item of items) counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
-  return [...counts.entries()]
-    .map(([type, count]) => ({ type, count }))
-    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+  const counts = countBy(items, (item) => item.type);
+  const rows = Object.entries(counts).map(([type, count]) => ({ type: type as FrictionType, count }));
+  return orderBy(rows, ["count", "type"], ["desc", "asc"]);
 }
 
 function rate(part: number, whole: number): number | null {
@@ -335,31 +334,37 @@ function failuresOf(items: FrictionItem[]): Failure[] {
   return failures;
 }
 
+/** One RecoveryRow, folded from every failure of a single friction type. */
+function recoveryRowOf(type: FrictionType, failures: Failure[]): RecoveryRow {
+  const row: RecoveryRow = {
+    type,
+    encountered: failures.length,
+    recovered: 0,
+    repeated: 0,
+    changed: 0,
+    abandoned: 0,
+    sameTurn: 0,
+  };
+  for (const failure of failures) {
+    const counted = RECOVERY_FIELD[failure.outcome];
+    row[counted] += 1;
+  }
+  return row;
+}
+
 function buildRecovery(items: FrictionItem[]): Recovery {
   const failures = failuresOf(items);
-  const rows = new Map<FrictionType, RecoveryRow>();
-  for (const failure of failures) {
-    const row =
-      rows.get(failure.type) ??
-      {
-        type: failure.type,
-        encountered: 0,
-        recovered: 0,
-        repeated: 0,
-        changed: 0,
-        abandoned: 0,
-        sameTurn: 0,
-      };
-    row.encountered += 1;
-    const counted = RECOVERY_FIELD[failure.outcome];
-    row[counted] = row[counted] + 1;
-    rows.set(failure.type, row);
-  }
+  const groups = groupBy(failures, (failure) => failure.type);
+  const rows = orderBy(
+    Object.entries(groups).map(([type, group]) => recoveryRowOf(type as FrictionType, group)),
+    ["encountered"],
+    ["desc"],
+  );
   const recovered = failures.filter((failure) => failure.outcome === "recovered").length;
   const sameTurn = failures.filter((failure) => failure.outcome === "same_turn").length;
   const judged = failures.length - sameTurn;
   return {
-    rows: [...rows.values()].sort((a, b) => b.encountered - a.encountered),
+    rows,
     encountered: failures.length,
     judged,
     sameTurn,
@@ -368,46 +373,32 @@ function buildRecovery(items: FrictionItem[]): Recovery {
   };
 }
 
-function buildSubcommands(calls: Attempt[], items: FrictionItem[]): SubcommandRow[] {
-  const rows = new Map<string, SubcommandRow>();
-  const rowFor = (subcommand: string): SubcommandRow => {
-    const existing = rows.get(subcommand);
-    if (existing) return existing;
-    const created: SubcommandRow = {
-      subcommand,
-      calls: 0,
-      help: 0,
-      failures: 0,
-      types: [],
-      hinted: 0,
-      recovered: 0,
-      sameTurn: 0,
-      recoveryRate: null,
-    };
-    rows.set(subcommand, created);
-    return created;
+/** One SubcommandRow, folded from every call and every friction item at that subcommand. */
+function subcommandRowOf(subcommand: string, calls: Attempt[], items: FrictionItem[]): SubcommandRow {
+  const failed = calls.filter((call) => !call.observation.ok);
+  const failures = failed.length;
+  const recovered = items.filter((item) => item.recovery === "recovered").length;
+  const sameTurn = items.filter((item) => item.recovery === "same_turn").length;
+  return {
+    subcommand,
+    calls: calls.length,
+    help: calls.filter((call) => isHelpCall(call.observation.args)).length,
+    failures,
+    types: countTypes(items),
+    hinted: failed.filter((call) => call.observation.hint).length,
+    recovered,
+    sameTurn,
+    recoveryRate: rate(recovered, failures - sameTurn),
   };
+}
 
-  for (const call of calls) {
-    const row = rowFor(call.observation.subcommand);
-    row.calls += 1;
-    if (isHelpCall(call.observation.args)) row.help += 1;
-    if (call.observation.ok) continue;
-    row.failures += 1;
-    if (call.observation.hint) row.hinted += 1;
-  }
-  for (const item of items) {
-    const row = rowFor(item.subcommand);
-    if (item.recovery === "recovered") row.recovered += 1;
-    if (item.recovery === "same_turn") row.sameTurn += 1;
-  }
-  for (const row of rows.values()) {
-    row.types = countTypes(items.filter((item) => item.subcommand === row.subcommand));
-    row.recoveryRate = rate(row.recovered, row.failures - row.sameTurn);
-  }
-  return [...rows.values()].sort(
-    (a, b) => b.failures - a.failures || b.calls - a.calls || a.subcommand.localeCompare(b.subcommand),
+function buildSubcommands(calls: Attempt[], items: FrictionItem[]): SubcommandRow[] {
+  const callsBySubcommand = groupBy(calls, (call) => call.observation.subcommand);
+  const itemsBySubcommand = groupBy(items, (item) => item.subcommand);
+  const rows = Object.entries(callsBySubcommand).map(([subcommand, subcommandCalls]) =>
+    subcommandRowOf(subcommand, subcommandCalls, itemsBySubcommand[subcommand] ?? []),
   );
+  return orderBy(rows, ["failures", "calls", "subcommand"], ["desc", "desc", "asc"]);
 }
 
 function buildHintEfficacy(calls: Attempt[]): HintEfficacy {
@@ -488,13 +479,11 @@ export function analyzeFriction(calls: Attempt[]): FrictionAnalysis {
  * and help calls (the contract working as intended, not flailing).
  */
 export function repeatedCommands(calls: Attempt[]): number {
-  const seen = new Map<string, number>();
-  for (const call of calls) {
-    if (call.observation.rows !== null) continue;
-    if (isHelpCall(call.observation.args)) continue;
-    seen.set(call.observation.command, (seen.get(call.observation.command) ?? 0) + 1);
-  }
-  return [...seen.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  const counts = countBy(
+    calls.filter((call) => call.observation.rows === null && !isHelpCall(call.observation.args)),
+    (call) => call.observation.command,
+  );
+  return Object.values(counts).reduce((sum, count) => sum + Math.max(0, count - 1), 0);
 }
 
 export function helpCalls(calls: Attempt[]): number {

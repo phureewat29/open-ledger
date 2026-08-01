@@ -1,3 +1,4 @@
+import { round } from "es-toolkit";
 import type Database from "libsql";
 import { listAccounts, type AccountRow } from "../db/queries/accounts.js";
 import { accountNumberKey, tailAfterMask } from "../lib/masked.js";
@@ -42,7 +43,7 @@ export function findAccountsByFuzzyName(
       if (rowKey && rowKey === qKey) score = Math.max(score, 0.9);
     }
     if (score >= threshold) {
-      out.push({ account: row, similarity: Math.round(score * 1000) / 1000 });
+      out.push({ account: row, similarity: round(score, 3) });
     }
   }
   out.sort((a, b) => b.similarity - a.similarity);

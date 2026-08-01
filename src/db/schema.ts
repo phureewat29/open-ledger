@@ -1,3 +1,4 @@
+import { difference, dropRight } from "es-toolkit";
 import type Database from "libsql";
 import { copyFileSync, readdirSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -75,8 +76,7 @@ export function listMissingTables(db: Database.Database, tables: string[]): stri
   const rows = db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
     .all(...tables) as { name: string }[];
-  const present = new Set(rows.map((r) => r.name));
-  return tables.filter((t) => !present.has(t));
+  return difference(tables, rows.map((r) => r.name));
 }
 
 /** True if the database holds any table other than the migration ledger itself. */
@@ -119,7 +119,7 @@ function pruneBackups(dbPath: string): void {
   const backups = readdirSync(dir)
     .filter((name) => name.startsWith(prefix) && name.endsWith(".bak"))
     .sort();
-  for (const name of backups.slice(0, Math.max(0, backups.length - 5))) {
+  for (const name of dropRight(backups, 5)) {
     try {
       unlinkSync(join(dir, name));
     } catch {

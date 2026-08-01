@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { omit } from "es-toolkit";
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { visibleLength, ANSI_RE } from "./format.js";
@@ -90,9 +91,7 @@ export function currentMode(): OutputMode {
 // `.all()` rows carry no `_metadata`, so nested arrays don't need it.
 function stripMetadata<T>(value: T): T {
   if (value === null || typeof value !== "object" || !("_metadata" in value)) return value;
-  const rest = { ...(value as Record<string, unknown>) };
-  delete rest._metadata;
-  return rest as T;
+  return omit(value as Record<string, unknown>, ["_metadata"]) as T;
 }
 
 function writeLine(stream: NodeJS.WriteStream, obj: unknown): void {

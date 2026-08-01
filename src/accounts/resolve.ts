@@ -190,7 +190,7 @@ export function ensureAccountAncestors(
   };
 }
 
-function humanizeSegment(segment: string): string {
+export function humanizeSegment(segment: string): string {
   const spaced = segment.replace(/[-_]+/g, " ").trim();
   if (!spaced) return "Placeholder";
   return spaced.replace(/\b\w/g, (c) => c.toUpperCase());

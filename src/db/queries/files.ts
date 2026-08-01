@@ -7,16 +7,24 @@ interface FileTotals {
   failed: number;
 }
 
-interface FileRow {
+/** The files.status enum at rest; `new` is an `ingest list` display state, never stored. */
+export const FILE_STATUSES = ["pending", "ingested", "failed"] as const;
+export type FileStatus = (typeof FILE_STATUSES)[number];
+
+export interface FileRow {
   id: string;
   path: string;
   file_hash: string;
   mime: string;
-  status: "pending" | "ingested" | "failed";
+  status: FileStatus;
   ingested_at: string | null;
   source: string | null;
   error: string | null;
   created_at: string;
+}
+
+function isFileStatus(status: string): status is FileStatus {
+  return (FILE_STATUSES as readonly string[]).includes(status);
 }
 
 /** Missing status buckets are filled with 0 so callers get a stable shape without null checks. */
@@ -27,9 +35,7 @@ export function countFiles(db: Database.Database): FileTotals {
 
   const totals: FileTotals = { ingested: 0, pending: 0, failed: 0 };
   for (const row of rows) {
-    if (row.status === "ingested" || row.status === "pending" || row.status === "failed") {
-      totals[row.status] = row.n;
-    }
+    if (isFileStatus(row.status)) totals[row.status] = row.n;
   }
   return totals;
 }
