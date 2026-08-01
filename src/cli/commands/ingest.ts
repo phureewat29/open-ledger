@@ -110,7 +110,7 @@ const PREPARE_FAILURES: Record<PrepareFailure, { code: ExitCode; hint: string }>
   pdf_unreadable: { code: "INVALID", hint: "the PDF may be corrupt; re-download or re-export it" },
   password_required: { code: "INPUT_REQUIRED", hint: PASSWORD_HINT },
   wrong_password: { code: "INPUT_REQUIRED", hint: PASSWORD_HINT },
-  ocr_unreachable: { code: "NOT_READY", hint: "start the OCR server, or re-run with --no-ocr" },
+  ocr_unreachable: { code: "NOT_READY", hint: "start the OCR endpoint, or re-run with --no-ocr" },
   ocr_rejected: {
     code: "NOT_READY",
     hint: "check the model against `oled doctor --json`, or re-run with --no-ocr",
@@ -221,16 +221,16 @@ export function registerIngest(program: Command): void {
     .option("--password <password>", "password for a locked PDF")
     .option("--force", "re-register the file, dropping the prior ingest's rows and artifacts")
     .option("--rescan", "ignore the text layer and read the page images instead")
-    .option("--no-ocr", "ignore the OCR server and return the page images to you")
+    .option("--no-ocr", "ignore the OCR endpoint and return the page images to you")
     .addHelpText(
       "after",
       [
         "",
-        'Behavior: reads the file once and returns text whenever it can. A PDF carrying its own text layer is extracted directly. Otherwise the pages become images, a scan is rasterized, a photo is taken as it lies, and the OCR server reads them when one is configured (`oled config --ocr-url <url>`); with none configured they come back to you. The reader is named in source: "text-layer" or "ocr" when kind is "text", "raster" or "original" when kind is "images".',
+        'Behavior: reads the file once and returns text whenever it can. A PDF carrying its own text layer is extracted directly. Otherwise the pages become images, a scan is rasterized, a photo is taken as it lies, and the OCR endpoint reads them when one is configured (`oled config --ocr-url <url>`); with none configured they come back to you. The reader is named in source: "text-layer" or "ocr" when kind is "text", "raster" or "original" when kind is "images".',
         'Output kind "text": one `document` path to read. Inside it, pages are separated by `--- page N ---` markers; cite the row\'s page as source_page on commit. Page numbers count from 1 everywhere: the markers, the pages[] entries, and source_page.',
         'Output kind "images": one path per page under pages[], in order; read them yourself.',
-        "Escape hatches: --rescan ignores a garbled text layer and reads the pages instead; --no-ocr ignores the OCR server and returns the page images. Both together always return images.",
-        "Exits: 2 the file type is not supported, 3 the OCR server is misconfigured or unreachable, 4 the PDF needs a password (re-run with --password), 5 nothing at that path or id, 6 the file is too large or corrupt, 7 the OCR server failed on some pages: each carries a `[page N: OCR failed]` line in the document and is listed in failed_pages; re-run with --no-ocr to read those pages yourself.",
+        "Escape hatches: --rescan ignores a garbled text layer and reads the pages instead; --no-ocr ignores the OCR endpoint and returns the page images. Both together always return images.",
+        "Exits: 2 the file type is not supported, 3 the OCR endpoint is misconfigured or unreachable, 4 the PDF needs a password (re-run with --password), 5 nothing at that path or id, 6 the file is too large or corrupt, 7 the OCR endpoint failed on some pages: each carries a `[page N: OCR failed]` line in the document and is listed in failed_pages; re-run with --no-ocr to read those pages yourself.",
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
     )

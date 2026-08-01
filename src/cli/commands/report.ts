@@ -55,14 +55,14 @@ async function showReport(opts: ShowReportOpts): Promise<void> {
 export function registerReport(program: Command): void {
   program
     .command("report")
-    .description("Income, expenses, and net")
+    .description("Income, expenses, and networth")
     .option("--from <date>", "start date")
     .option("--to <date>", "end date")
     .addHelpText(
       "after",
       [
         "",
-        "Behavior: sums income, expenses, and net over a date range. For net worth use oled status.",
+        "Behavior: sums income, expenses, and networth over a date range. For net worth use oled status.",
         "Typical flow: both dates are required and ISO (YYYY-MM-DD).",
         "Example: oled report --from 2025-01-01 --to 2025-03-31 --json",
       ].join("\n"),

@@ -31,7 +31,7 @@ export const COMMANDS = [
   { name: "accounts", desc: "Manage the chart of accounts" },
   { name: "merchants", desc: "Manage merchants and their default accounts" },
   { name: "questions", desc: "List, answer, and defer open questions" },
-  { name: "report", desc: "Income, expenses, and net" },
+  { name: "report", desc: "Income, expenses, and networth" },
   { name: "notes", desc: "Manage freeform notes" },
   { name: "datasets", desc: "Reference datasets" },
   { name: "open", desc: "Open the data folder in file explorer" },
