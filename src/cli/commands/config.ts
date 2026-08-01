@@ -171,15 +171,26 @@ export function registerConfig(program: Command): void {
     .command("config")
     .enablePositionalOptions()
     .description("Configuration")
-    .option("--data-dir <dir>", "data directory")
+    .option("--data-dir <dir>", "drop statement files here; oled open opens it")
     .option("--db <path>", "database path")
     .option("--init", "initialize the harness (config, database, data dir); any other setting flag initializes too")
-    .option("--locale <locale>", "locale")
-    .option("--currency <code>", "default currency code")
-    .option("--country <code>", "country whose reference data applies; also seeds locale/currency (default: th)")
-    .option("--user-name <name>", "user display name")
-    .option("--ocr-url <url>", "OCR endpoint base URL, e.g. http://127.0.0.1:1234/v1 (enables OCR on its own)")
-    .option("--ocr-model <id>", "OCR model id served at --ocr-url; picks the built-in prompt and render profile")
+    .option("--locale <locale>", "locale used to format money, e.g. th-TH")
+    .option("--currency <code>", "display currency; also seeds that ledger's structural accounts")
+    .option("--country <code>", "country whose reference data applies; also seeds locale/currency (default: TH)")
+    .option("--user-name <name>", "your name; config shows it and redaction masks it")
+    .option("--ocr-url <url>", "OCR endpoint base URL, e.g. http://127.0.0.1:1234/v1; OCR is off until this is set")
+    .option("--ocr-model <id>", "model id sent to the OCR endpoint (default typhoon-ocr1.5); does nothing until --ocr-url is set")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Reading: env > file > default.",
+        "With any setting flag (or --init): flag > env > file > default; country, locale,",
+        "and currency fall back to the country dataset's values.",
+        "The resolved values are written to config.json, including any OLED_* path or",
+        "OCR setting exported in your shell. The API key is never written.",
+      ].join("\n"),
+    )
     .action(runAction(configureHarness));
 
   configCmd

@@ -86,9 +86,9 @@ function schemaTablesCheck(db: Database.Database | null): Check {
 export async function ocrEndpointCheck(): Promise<Check> {
   const name = "ocr_endpoint";
   const settings = resolveOcr();
-  if (!settings) return { name, ok: true, detail: "not configured" };
+  if (!settings) return { name, ok: true, detail: "off (set --ocr-url to enable)" };
 
-  const { baseUrl, model, preset } = settings;
+  const { baseUrl, model } = settings;
   const served = await probeOcrEndpoint(settings);
   if (!served.ok) return { name, ok: false, detail: `${baseUrl}: ${served.error}` };
   if (!served.value.includes(model)) {
@@ -98,7 +98,7 @@ export async function ocrEndpointCheck(): Promise<Check> {
       detail: `${baseUrl} does not serve ${model} (serving: ${served.value.join(", ") || "nothing"})`,
     };
   }
-  return { name, ok: true, detail: `${preset}/${model} at ${baseUrl}` };
+  return { name, ok: true, detail: `${model} at ${baseUrl}` };
 }
 
 async function runChecks(): Promise<Check[]> {

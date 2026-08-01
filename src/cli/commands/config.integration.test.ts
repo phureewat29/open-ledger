@@ -15,6 +15,14 @@ afterAll(() => {
   sandbox.cleanup();
 });
 
+describe("config show defaults (subprocess)", () => {
+  it("prints the typhoon OCR model as the visible default", async () => {
+    const { stdout, code } = await runCLI(["config", "show", "--json"]);
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim()).ocrModel).toBe("typhoon-ocr1.5");
+  }, 30000);
+});
+
 describe("config --currency (subprocess)", () => {
   it("refuses a code that could never name a ledger, before anything is persisted", async () => {
     const { stderr, code } = await runCLI(["config", "--init", "--currency", "us", "--json"]);

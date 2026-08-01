@@ -23,7 +23,7 @@ export interface OcrSettings {
   /** `""` when the endpoint needs no auth (the local case). */
   apiKey: string;
   timeoutMs: number;
-  /** Which preset the model id selected; reported by `oled doctor`. */
+  /** Which preset the model id selected; stays internal, used only to pick the prompt/params/render spec. */
   preset: PresetName;
   prompt: string;
   params: OcrParams;

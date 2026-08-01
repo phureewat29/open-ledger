@@ -37,8 +37,9 @@ const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: 
   dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },
   userName: { default: "User" },
   ocrBaseUrl: { envVar: "OLED_OCR_BASE_URL", default: "" },
-  // Blank means the preset registry's own default model; src/extract/presets/ owns the id.
-  ocrModel: { envVar: "OLED_OCR_MODEL", default: "" },
+  // Duplicates typhoonOcrPreset.model (src/extract/presets/typhoon-ocr.ts), which
+  // .env.example, README, and the --ocr-model help repeat; change all five together.
+  ocrModel: { envVar: "OLED_OCR_MODEL", default: "typhoon-ocr1.5" },
   ocrApiKey: { envVar: "OLED_OCR_API_KEY", default: "" },
 };
 

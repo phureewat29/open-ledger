@@ -39,7 +39,7 @@ describe("ocrEndpointCheck", () => {
     expect(await ocrEndpointCheck()).toEqual({
       name: "ocr_endpoint",
       ok: true,
-      detail: "not configured",
+      detail: "off (set --ocr-url to enable)",
     });
   });
 
@@ -65,7 +65,7 @@ describe.skipIf(!liveOcr)("ocrEndpointCheck (live OCR endpoint)", () => {
   );
 
   it(
-    "passes naming the preset, model and url once the model is served",
+    "passes naming the model and url once the model is served",
     async () => {
       const served = await probeOcrEndpoint(requireLiveOcr());
       expect(served.ok).toBe(true);
