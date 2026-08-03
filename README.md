@@ -50,7 +50,7 @@ ChatGPT, Claude, Gemini
 2. Paste into your AI chat:
 
    ```
-   Fetch https://raw.githubusercontent.com/phureewat29/openledger/main/skills/SKILL.md
+   Fetch https://cdn.jsdelivr.net/npm/@aquartier/openledger/skills/SKILL.md
    and follow it. oled is installed; help me set up my ledger.
    ```
 
