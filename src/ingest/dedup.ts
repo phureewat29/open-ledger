@@ -7,7 +7,9 @@ import {
 import { clusterDuplicateCandidates } from "./clustering.js";
 
 interface FindDuplicateTransactionsOptions {
-  /** Day slack when grouping by date. 0 = same-day only. Default 2. */
+  /** Day slack when grouping by date. 0 = same-day only. Default 2: the same
+   *  transaction can reach the ledger from two sources dated a day or two
+   *  apart (one by posting, one by value), which same-day-only would miss. */
   toleranceDays?: number;
   /** Skip transactions below this amount (minor units). */
   minAmount?: number;

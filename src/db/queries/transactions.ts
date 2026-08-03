@@ -365,12 +365,16 @@ interface BulkRecategorizeSet {
   accountId: string;
 }
 
+/** Spot-check sample, not the full id list; the CLI help quotes this cap. */
+export const RECATEGORIZE_SAMPLE_LIMIT = 10;
+
 interface BulkRecategorizeResult {
   affected: number;
   /** Rows skipped because moving them would make debit == credit. */
   skipped_self_transaction: number;
   /** Rows skipped because the target sits on another ledger. */
   skipped_currency_mismatch: number;
+  /** First RECATEGORIZE_SAMPLE_LIMIT updated ids; `affected` is the true count. */
   sample_transaction_ids: string[];
 }
 
@@ -426,7 +430,7 @@ export function bulkRecategorize(
     }
     if (toUpdate.length === 0) return;
 
-    sample = toUpdate.slice(0, 10);
+    sample = toUpdate.slice(0, RECATEGORIZE_SAMPLE_LIMIT);
     const placeholders = toUpdate.map(() => "?").join(",");
     affected = db
       .prepare(

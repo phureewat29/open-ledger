@@ -79,6 +79,8 @@ export function namesUnopenedLedger(db: Database.Database, accountId: string): b
   return !ledgerExists(db, currencyOf(accountId));
 }
 
+// Stricter than MATCH_THRESHOLD (accounts/matching.ts): hints are unprompted,
+// so precision wins over recall. Tune the two together.
 const FUZZY_THRESHOLD = 0.7;
 
 /**

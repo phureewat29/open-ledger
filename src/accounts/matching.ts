@@ -20,12 +20,17 @@ function queryNumberKey(text: string): string {
   return accountNumberKey(longest);
 }
 
+/** Loose, favoring recall: `accounts match` callers review the list before
+ *  acting. The unprompted `similar_account` hint passes the stricter
+ *  FUZZY_THRESHOLD (accounts/resolve.ts) instead — tune the two together. */
+const MATCH_THRESHOLD = 0.5;
+
 /** Substring hits get a 0.85 floor; a query carrying an account number matches
  *  the row's masked number. Callers confirm before acting. */
 export function findAccountsByFuzzyName(
   db: Database.Database,
   query: string,
-  threshold = 0.5,
+  threshold = MATCH_THRESHOLD,
 ): FuzzyAccountMatch[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -40,6 +45,8 @@ export function findAccountsByFuzzyName(
       const rowKey = row.account_number_masked
         ? accountNumberKey(row.account_number_masked)
         : queryNumberKey(name);
+      // Above the 0.85 substring floor, below exact-name 1.0: masked keys can
+      // collide across banks, so a number hit never outranks an exact name.
       if (rowKey && rowKey === qKey) score = Math.max(score, 0.9);
     }
     if (score >= threshold) {

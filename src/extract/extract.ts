@@ -16,7 +16,10 @@ import {
 import { readerFor, verdictOf, type TextLayer } from "./route.js";
 import type { SourceKind } from "./source.js";
 
-/** The neutral spec for the agent route, which hands rasters to an unknown vision model. */
+/** Spec for the agent route, which hands rasters to an unknown vision model.
+ *  200 dpi keeps statement glyphs legible; 1800 px on the longest side stays
+ *  under common vision-model input limits. Not a neutral derivation — it is
+ *  the same spec the built-in OCR preset renders at. */
 export const PAGE_RENDER: RenderSpec = { dpi: 200, maxLongestDimPx: 1800 };
 
 export interface TextPage {

@@ -175,6 +175,6 @@ export function registerQuestions(program: Command): void {
   questions
     .command("defer <id>")
     .description("Defer a question")
-    .option("--days <n>", "number of days to defer")
+    .option("--days <n>", "number of days to defer (default to one week)")
     .action(runAction(deferQuestion));
 }
