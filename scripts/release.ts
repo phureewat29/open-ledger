@@ -25,7 +25,7 @@ console.log(`release: ${current} -> ${next}`);
 run("npm run build"); // Fail fast: a broken build must abort before the version changes.
 run(`npm version ${next} --no-git-tag-version`);
 run("git add package.json package-lock.json");
-run(`git commit -m "chore(release): ${next}"`);
+run(`git commit -m "release: ${next}"`);
 run("npm link"); // Expose the freshly built CLI on the global bin path.
 
 console.log(`release: published ${next}`);
