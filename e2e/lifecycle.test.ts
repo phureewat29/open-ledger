@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   createSandbox,
   makeRunCLI,
   parseNdjson,
   parseOne,
-  repoRoot,
   type CLIResult,
   type CLIRunner,
   type Sandbox,
 } from "../fixtures/sandbox.js";
+import { encryptedPdf, type PageKind } from "../fixtures/pdf.js";
 
 let sandbox: Sandbox;
 let runCLI: CLIRunner;
@@ -71,14 +71,8 @@ function ndjson(items: Record<string, unknown>[]): string {
   return items.map((item) => JSON.stringify(item)).join("\n");
 }
 
-/** AES-256 password-protected, 6 pages with a real text layer; shared with the corgi-claude demo. */
-const FIXTURE_STATEMENT = join(
-  repoRoot,
-  "examples",
-  "corgi-claude",
-  "fixtures",
-  "card-statement-2026-05.pdf",
-);
+// The staged statement: AES-256 password-protected, a real text layer on every page.
+const FIXTURE_PAGES = 6;
 const FIXTURE_PASSWORD = "password";
 
 interface CommitSide {
@@ -172,7 +166,10 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       // Staging is setup, not an assertion; `ingest list` finding the file is what proves it landed.
       statementPath = join(sandbox.dataDir, "corgi-bank", "card-statement-2026-05.pdf");
       mkdirSync(dirname(statementPath), { recursive: true });
-      copyFileSync(FIXTURE_STATEMENT, statementPath);
+      writeFileSync(
+        statementPath,
+        await encryptedPdf(FIXTURE_PASSWORD, Array<PageKind>(FIXTURE_PAGES).fill("text")),
+      );
 
       const rows = parseNdjson((await ok(["ingest", "list"])).stdout).filter((r) => r.type === "file");
       expect(rows).toHaveLength(1);
@@ -186,8 +183,8 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
     async () => {
       const res = await ok(["ingest", "prepare", statementPath, "--password", FIXTURE_PASSWORD]);
       const result = parseOne(res.stdout);
-      // page_count is pinned to this 6-page fixture, not to prepare's paging.
-      expect(result).toMatchObject({ page_count: 6, kind: "text" });
+      // page_count is pinned to the generated fixture, not to prepare's paging.
+      expect(result).toMatchObject({ page_count: FIXTURE_PAGES, kind: "text" });
       expect(result.file_id).toMatch(/^sf:/);
       expect(result.document).toBe(join(sandbox.cacheDir, result.file_id, "document.txt"));
       expect(existsSync(result.document)).toBe(true);

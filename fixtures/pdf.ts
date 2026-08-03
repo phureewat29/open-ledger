@@ -4,7 +4,7 @@
  * writer `encryptedPdf` needs).
  */
 
-type PageKind = "text" | "blank" | "image";
+export type PageKind = "text" | "blank" | "image";
 
 function buildPdf(objects: string[]): Buffer {
   const header = "%PDF-1.4\n";
@@ -99,9 +99,12 @@ export function corruptPdf(): Buffer {
   return Buffer.from("%PDF-1.4\nnot really a pdf\n", "latin1");
 }
 
-export async function encryptedPdf(password: string): Promise<Buffer> {
+export async function encryptedPdf(
+  password: string,
+  kinds: PageKind[] = ["text"],
+): Promise<Buffer> {
   const mupdf = await import("mupdf");
-  const doc = mupdf.Document.openDocument(textPdf(), "application/pdf");
+  const doc = mupdf.Document.openDocument(pdfOf(kinds), "application/pdf");
   try {
     // Encryption is a PDF-writer feature, so the fixture has to be a PDFDocument.
     if (!(doc instanceof mupdf.PDFDocument)) throw new Error("fixture is not a PDF document");
