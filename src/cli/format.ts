@@ -37,7 +37,7 @@ export function printKeyValues(
 export function banner(): string {
   return (
     chalk.bold("OpenLedger") +
-    chalk.dim("  ·  The Harness Layer for Personal Finance")
+    chalk.dim("  ·  A reliable, deterministic ledger for your AI")
   );
 }
 

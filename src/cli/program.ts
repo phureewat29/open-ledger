@@ -82,7 +82,7 @@ export function buildProgram(): Command {
 
   program
     .name("oled")
-    .description("The Harness Layer for Personal Finance")
+    .description("A reliable, deterministic ledger for your AI")
     .version(version)
     .addHelpCommand(false)
     // Bare `oled` runs the same action as `status`, which redacts by default.
