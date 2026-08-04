@@ -8,7 +8,7 @@
 <h1 align="center">OpenLedger</h1>
 
 <p align="center">
-  <strong>A reliable, deterministic ledger for your AI</strong>
+  <strong>A deterministic ledger for your AI</strong>
 </p>
 
 <p align="center">
