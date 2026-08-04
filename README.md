@@ -20,10 +20,6 @@
   <a href="https://www.npmjs.com/package/@aquartier/openledger"><img src="https://img.shields.io/npm/dt/@aquartier/openledger.svg" alt="npm total downloads" /></a>
 </p>
 
-<p align="center">
-  <a href="https://openledger.phureewat.com"><strong>openledger.phureewat.com</strong></a>
-</p>
-
 <br />
 
 You've tried many personal finance apps from the App Store. None of them fits what you need, because each is someone else's idea of your money and lifestyle. So you asked AI to build the one that would, and it failed you too. It hallucinated the numbers, mangled your data, and never quite understood what you wanted.
