@@ -8,16 +8,20 @@
 <h1 align="center">OpenLedger</h1>
 
 <p align="center">
-  <strong>The Harness Layer for Personal Finance</strong>
+  <strong>A reliable, deterministic ledger for your AI</strong>
 </p>
 
 <p align="center">
-    A harness that turns scattered financial statements into a private, deterministic ledger for your AI.
+    OpenLedger is the harness that keeps your AI from hallucinating your money. It turns scattered bank and credit-card statements into a source of truth your AI can build any financial app on.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@aquartier/openledger"><img src="https://img.shields.io/npm/v/@aquartier/openledger.svg" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/@aquartier/openledger"><img src="https://img.shields.io/npm/dt/@aquartier/openledger.svg" alt="npm total downloads" /></a>
+</p>
+
+<p align="center">
+  <a href="https://openledger.phureewat.com"><strong>openledger.phureewat.com</strong></a>
 </p>
 
 <br />
@@ -28,9 +32,9 @@ AI fails when it has nowhere reliable to keep the numbers. OpenLedger gives it t
 
 OpenLedger is a secure bookkeeping harness for your AI. The source is what you already receive: monthly statements from your banks and credit cards. Your AI reads each statement and records what it finds as double-entry bookkeeping, so every posting balances, or it doesn't post.
 
-Everything stays on your machine, and what the harness returns to your AI has PII redacted by default before it reaches your AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth.
+Everything stays on your machine, and what the harness returns to your AI has PII redacted by default before it reaches your AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth. It is your own private Plaid: scattered statements go in, a reliable ledger comes out, a data feed you own end to end.
 
-The harness carries the bookkeeping, so the model doesn't have to be huge: the smallest model benchmarked, at 9B, runs a full statement through cleanly.
+The harness carries the bookkeeping, so the model doesn't have to be huge: the smallest model benchmarked, at 26B, runs a full statement through cleanly.
 
 By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is now yours to reimagine.
 
@@ -70,7 +74,7 @@ Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared dir
 
 ### Use cases
 
-1. Start with the statements you have waiting: *"Ingest my new statements."* It discovers new files, prepares and reads each one, commits the transactions it finds, and raises a question for anything it can't resolve on its own.
+1. Start with the statements you have waiting: *"Ingest my credit cards and bank statements."* It discovers new files, prepares and reads each one, commits the transactions it finds, and raises a question for anything it can't resolve on its own.
 2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through the questions the ingestion raised, such as an unrecognized merchant or an ambiguous account match.
 3. With the ledger current, ask for the payoff: *"What's my net worth, and where did most of my spending go last month?"* Your AI reads the answer straight from the ledger.
 
@@ -106,7 +110,7 @@ oled questions      # List, answer, and defer open questions
 
 oled report         # Income, expenses, and networth
 oled notes          # Manage freeform notes
-oled datasets       # Reference datasets
+oled datasets       # Reference datasets: institutions for the US, Japan, Thailand, China
 
 oled open           # Open the data folder in file explorer
 ```
