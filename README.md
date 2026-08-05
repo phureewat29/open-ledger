@@ -38,16 +38,43 @@ By using this harness, your AI can build the app you never found: a budget track
 
 The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md).
 
-### AI Apps
-ChatGPT, Claude, Gemini
+### Coding Agents (recommended)
+Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw, Grok Build
 
-1. Install [Node.js](https://nodejs.org) (LTS), then paste into your terminal:
+1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
 
    ```bash
    npm install -g @aquartier/openledger
    ```
 
-2. Paste into your AI chat:
+2. Run OCR locally (optional). Download [typhoon-ocr1.5-2b](https://huggingface.co/typhoon-ai/typhoon-ocr1.5-2b) in [LM Studio](https://lmstudio.ai) and start its local server, then hand this to your agent:
+
+   ```
+   Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5-2b), then run oled doctor to confirm.
+   ```
+
+   Name the model as the server spells it. Only scans and photos need OCR; PDFs with a text layer are read directly.
+
+3. Add the skill:
+
+   ```bash
+   npx skills add phureewat29/openledger
+   ```
+
+   Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read. Pass `--dir <path>` to name your agent's own skills directory instead, such as `--dir .claude/skills` for Claude Code.
+
+### AI Apps
+ChatGPT Work, Claude Cowork
+
+1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
+
+   ```bash
+   npm install -g @aquartier/openledger
+   ```
+
+2. Run OCR locally (optional). Set it up as above, then hand your app the same prompt.
+
+3. Paste into your AI chat:
 
    ```
    Fetch https://cdn.jsdelivr.net/npm/@aquartier/openledger/skills/SKILL.md
@@ -57,16 +84,6 @@ ChatGPT, Claude, Gemini
    If your chat app cannot fetch URLs, paste the skill itself: `oled setup --print | pbcopy` copies it; drop it into the first message or the app's custom instructions.
 
 Your AI walks you through the rest.
-
-### Coding Agents
-Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw
-
-```bash
-npm install -g @aquartier/openledger
-npx skills add phureewat29/openledger
-```
-
-Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read. Pass `--dir <path>` to name your agent's own skills directory instead, such as `--dir .claude/skills` for Claude Code.
 
 ### Use cases
 
@@ -141,8 +158,8 @@ OpenLedger stores everything in `~/.oled/`. `oled config --init` creates it, alo
 | `OLED_DB_PATH` | Database file path | `~/.oled/db.sqlite` |
 | `OLED_DATA_DIR` | Statement drop folder | `~/.oled/data` |
 | `OLED_CACHE_DIR` | Extracted text and page image cache | `~/.oled/cache` |
-| `OLED_OCR_BASE_URL` | OCR endpoint base URL; OCR is off until this is set | unset (OCR off) |
-| `OLED_OCR_MODEL` | OCR model id | `typhoon-ocr1.5` |
+| `OLED_OCR_BASE_URL` | Base URL of an OpenAI-compatible OCR endpoint, version segment included; OCR is off until this is set | unset (OCR off) |
+| `OLED_OCR_MODEL` | Model id, spelled as the endpoint serves it. An id carrying `typhoon` selects the tuned prompt and page rendering | `typhoon-ocr1.5` |
 | `OLED_OCR_API_KEY` | OCR endpoint API key | unset |
 
 See [`.env.example`](./.env.example) for defaults and full descriptions.
