@@ -38,7 +38,7 @@ By using this harness, your AI can build the app you never found: a budget track
 
 The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md).
 
-### Coding Agents (recommended)
+### Coding Agents (Recommended)
 Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw, Grok Build
 
 1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:

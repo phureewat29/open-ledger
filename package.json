@@ -1,6 +1,6 @@
 {
   "name": "@aquartier/openledger",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "description": "OpenLedger — A deterministic ledger for your AI",
   "keywords": [
     "finance",
@@ -11,7 +11,7 @@
     "cli",
     "ai"
   ],
-  "homepage": "https://openledger.phureewat.com",
+  "homepage": "https://openledger.sh",
   "bugs": {
     "url": "https://github.com/phureewat29/openledger/issues"
   },
