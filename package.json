@@ -19,7 +19,7 @@
     "type": "git",
     "url": "git+https://github.com/phureewat29/openledger.git"
   },
-  "license": "Apache-2.0",
+  "license": "MIT",
   "author": "Phureewat A",
   "type": "module",
   "bin": {
