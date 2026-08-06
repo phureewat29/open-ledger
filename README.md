@@ -34,12 +34,9 @@ The harness carries the bookkeeping, so the model doesn't have to be huge: the s
 
 By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is now yours to reimagine.
 
-## Use OpenLedger with your AI
+## Use OpenLedger with your Coding Agents
 
 The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md).
-
-### Coding Agents (Recommended)
-Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw, Grok Build
 
 1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
 
@@ -50,7 +47,7 @@ Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw, Grok Build
 2. Run OCR locally (optional). Download [typhoon-ocr1.5-2b](https://huggingface.co/typhoon-ai/typhoon-ocr1.5-2b) in [LM Studio](https://lmstudio.ai) and start its local server, then hand this to your agent:
 
    ```
-   Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5-2b), then run oled doctor to confirm.
+   Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5-2b), then run `oled doctor` to confirm.
    ```
 
    Name the model as the server spells it. Only scans and photos need OCR; PDFs with a text layer are read directly.
@@ -62,28 +59,6 @@ Claude Code, Codex, Cursor, OpenCode, PI, OpenClaw, Grok Build
    ```
 
    Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read. Pass `--dir <path>` to name your agent's own skills directory instead, such as `--dir .claude/skills` for Claude Code.
-
-### AI Apps
-ChatGPT Work, Claude Cowork
-
-1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
-
-   ```bash
-   npm install -g @aquartier/openledger
-   ```
-
-2. Run OCR locally (optional). Set it up as above, then hand your app the same prompt.
-
-3. Paste into your AI chat:
-
-   ```
-   Fetch https://cdn.jsdelivr.net/npm/@aquartier/openledger/skills/SKILL.md
-   and follow it. oled is installed; help me set up my ledger.
-   ```
-
-   If your chat app cannot fetch URLs, paste the skill itself: `oled setup --print | pbcopy` copies it; drop it into the first message or the app's custom instructions.
-
-Your AI walks you through the rest.
 
 ### Use cases
 

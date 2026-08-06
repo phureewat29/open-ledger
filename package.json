@@ -1,6 +1,6 @@
 {
   "name": "@aquartier/openledger",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "description": "OpenLedger — A deterministic ledger for your AI",
   "keywords": [
     "finance",
