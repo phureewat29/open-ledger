@@ -1,7 +1,5 @@
 import { Command, Help, type CommanderError } from "commander";
 import { createRequire } from "module";
-// Side-effect import: loads .env and resolves the config singleton first.
-import "../config.js";
 import { helpScreen } from "./format.js";
 import { fail, jsonRequested, runAction } from "./output.js";
 
@@ -23,6 +21,7 @@ import { registerOpen } from "./commands/open.js";
 const GLOBAL_OPTIONS = [
   { name: "--json", desc: "Emit NDJSON (machine-readable) instead of human output" },
   { name: "--no-color", desc: "Disable ANSI color output" },
+  { name: "--conf <path>", desc: "Config file to use (default ~/.oled/config.json)" },
 ];
 
 // Navigation hints the overview screen adds; they would only be noise inside the command's own help.
@@ -70,9 +69,6 @@ export function buildProgram(): Command {
 
   const program = new Command();
 
-  // Needed so a command with both a bare action and subcommands (config) dispatches the subcommand.
-  program.enablePositionalOptions();
-
   program
     .name("oled")
     .description("A reliable, deterministic ledger for your AI")
@@ -97,11 +93,12 @@ export function buildProgram(): Command {
   registerDatasets(program);
   registerOpen(program);
 
-  // --json/--no-color repeated on every command so they work before or after the subcommand name.
+  // Global flags repeated on every command so they work before or after the subcommand name.
   function configureEveryLevel(cmd: Command): void {
     cmd
       .option("--json", "Emit NDJSON (machine-readable) instead of human output")
       .option("--no-color", "Disable ANSI color output")
+      .option("--conf <path>", "Config file to use (default ~/.oled/config.json)")
       .exitOverride(parseFailureHandler(cmd))
       // Under --json, the CLIError contract is the only thing allowed on stderr.
       .configureOutput({

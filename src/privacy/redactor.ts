@@ -1,6 +1,11 @@
 import { escapeRegExp } from "es-toolkit";
-import { config } from "../config.js";
 import { readContext } from "../context.js";
+
+/** Where redaction terms come from: the configured user plus their context.md. */
+export interface RedactionSource {
+  userName: string;
+  contextPath: string;
+}
 
 interface RedactionEntry {
   real: string;
@@ -81,7 +86,7 @@ function applyRule(rule: SectionRule, context: string, userName: string, push: (
   }
 }
 
-function buildRedactions(): RedactionEntry[] {
+function buildRedactions(source: RedactionSource): RedactionEntry[] {
   const entries: RedactionEntry[] = [];
   const seen = new Set<string>();
 
@@ -94,7 +99,7 @@ function buildRedactions(): RedactionEntry[] {
     entries.push({ real: trimmed, token });
   };
 
-  const userName = config.userName;
+  const userName = source.userName;
   if (userName && userName !== "User") {
     push(userName, "[USER]");
     const parts = userName.split(/\s+/);
@@ -104,7 +109,7 @@ function buildRedactions(): RedactionEntry[] {
     }
   }
 
-  const context = readContext();
+  const context = readContext(source.contextPath);
   if (context) {
     for (const rule of SECTION_RULES) {
       applyRule(rule, context, userName, push);
@@ -116,8 +121,8 @@ function buildRedactions(): RedactionEntry[] {
 }
 
 /** Returns a closure, not a `redact(text)`: the context read and pattern compile happen once, then amortize over every field of a payload. */
-function createRedactor(): (text: string) => string {
-  const redactions = buildRedactions();
+function createRedactor(source: RedactionSource): (text: string) => string {
+  const redactions = buildRedactions(source);
   // ASCII lookarounds, not \b: Thai text has no spaces, so a Unicode letter
   // boundary would lose recall; this still blocks "User" matching inside "Users".
   const patterns = redactions.map(
@@ -140,9 +145,14 @@ function createRedactor(): (text: string) => string {
 
 /** Redacts a string value only when its key is in the per-command `fields`
  *  allowlist; returns a fresh structure, a no-op when `enabled` is false. */
-export function applyRedaction<T>(data: T, enabled: boolean, fields: readonly string[]): T {
+export function applyRedaction<T>(
+  data: T,
+  enabled: boolean,
+  fields: readonly string[],
+  source: RedactionSource,
+): T {
   if (!enabled) return data;
-  const redactor = createRedactor();
+  const redactor = createRedactor(source);
   const allow = new Set(fields);
 
   const walk = (value: unknown, key: string | undefined): unknown => {

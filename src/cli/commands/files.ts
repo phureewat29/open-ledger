@@ -9,6 +9,7 @@ import {
   runAction,
 } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import {
   FILE_STATUSES,
   deleteFile,
@@ -33,22 +34,24 @@ interface ListFilesOpts {
   status?: string;
 }
 
-async function listFiles(opts: ListFilesOpts): Promise<void> {
+async function listFiles(opts: ListFilesOpts, command: Command): Promise<void> {
   // Checked up front: an unrecognized status would otherwise silently return zero rows.
   const { status } = opts;
   if (status !== undefined && !FILE_STATUSES.includes(status as FileStatus)) {
     fail("USAGE", `--status must be one of ${FILE_STATUSES.join("|")}, got "${status}"`);
   }
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const rows = queryFiles(db);
   const shown = status ? rows.filter((r) => r.status === status) : rows;
   emitList(shown, FILE_COLUMNS);
   emitSummary({ total: rows.length, returned: shown.length });
 }
 
-async function showFile(id: string): Promise<void> {
-  const db = await openDb();
+async function showFile(id: string, _opts: Record<string, unknown>, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const row = findFileById(db, id);
   if (!row) fail("NOT_FOUND", `no file: ${id}`);
 
@@ -64,14 +67,15 @@ interface DropFileOpts {
   yes?: boolean;
 }
 
-async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
+async function dropFile(id: string, opts: DropFileOpts, command: Command): Promise<void> {
   requireYes(opts, `dropping file ${id}`);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const res = deleteFile(db, id);
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
 
   // Same cache purge `ingest done`/`fail` do: nothing can reach the extracted text once the row is gone.
-  const { removed } = cleanCache(id);
+  const { removed } = cleanCache(config.cacheDir, id);
   emitObject({
     file_id: id,
     removed_transactions: res.removedTransactions,

@@ -11,6 +11,7 @@ import {
   type Column,
 } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import {
   listMerchants as queryMerchants,
   claimAlias,
@@ -29,7 +30,6 @@ import {
 } from "../../db/queries/merchants.js";
 import { requireAccount } from "../accounts.js";
 import { noiseTokens } from "../../datasets/noise.js";
-import { config } from "../../config.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import * as z from "zod";
 import { parseInput, str, bool, int } from "../../lib/validate.js";
@@ -54,13 +54,15 @@ const LIST_MERCHANTS_SPEC = z.object({
   offset: int().optional(),
 });
 
-async function listMerchants(opts: ListMerchantsOpts): Promise<void> {
+async function listMerchants(opts: ListMerchantsOpts, command: Command): Promise<void> {
   const parsed = parseInput(LIST_MERCHANTS_SPEC, opts as Record<string, unknown>);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const rows = applyRedaction(
     queryMerchants(db, { limit: parsed.limit, offset: parsed.offset }),
     redactionEnabled(opts),
     MERCHANT_REDACT_FIELDS,
+    { userName: config.userName, contextPath: config.contextPath },
   );
   emitList(rows, MERCHANT_COLUMNS);
   emitCappedSummary(
@@ -73,9 +75,10 @@ async function listMerchants(opts: ListMerchantsOpts): Promise<void> {
 
 const RESOLVE_MERCHANT_SPEC = z.object({ descriptor: str() });
 
-async function resolveMerchant(opts: Record<string, unknown>): Promise<void> {
+async function resolveMerchant(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(RESOLVE_MERCHANT_SPEC, opts);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const match = findMerchantByAlias(db, parsed.descriptor, noiseTokens(config.country));
   if (!match) {
     emitObject({ found: false });
@@ -95,11 +98,12 @@ const UPSERT_MERCHANT_SPEC = z.object({
   default_account: str().optional(),
 });
 
-async function upsertMerchant(opts: Record<string, unknown>): Promise<void> {
+async function upsertMerchant(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(UPSERT_MERCHANT_SPEC, opts);
   // An all-whitespace name is the flag not being passed, and reads that way.
   if (!parsed.name.trim()) fail("USAGE", "--name required");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   if (parsed.default_account) requireAccount(db, parsed.default_account);
   const input: MerchantUpsertInput = { canonical_name: parsed.name };
   if (parsed.alias) input.alias = parsed.alias;
@@ -123,12 +127,13 @@ const UPDATE_MERCHANT_SPEC = z.object({
   default_account: str().optional(),
 });
 
-async function updateMerchant(opts: Record<string, unknown>): Promise<void> {
+async function updateMerchant(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(UPDATE_MERCHANT_SPEC, opts, {
     atLeastOne: "at least one of --name, --alias, --default-account is required",
   });
   if (parsed.name !== undefined && !parsed.name.trim()) fail("USAGE", "--name required");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const current = findMerchantById(db, parsed.merchant);
   if (!current) fail("NOT_FOUND", `merchant "${parsed.merchant}" not found`);
 
@@ -170,13 +175,14 @@ const SET_DEFAULT_SPEC = z.object({
   clear: bool().optional(),
 });
 
-async function setMerchantDefault(opts: Record<string, unknown>): Promise<void> {
+async function setMerchantDefault(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(SET_DEFAULT_SPEC, opts);
   if (!!parsed.account === !!parsed.clear) {
     fail("USAGE", "exactly one of --account or --clear is required");
   }
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   if (!findMerchantById(db, parsed.merchant)) {
     fail("NOT_FOUND", `merchant "${parsed.merchant}" not found`);
   }
@@ -204,10 +210,11 @@ interface MergeMerchantsOpts {
   yes?: boolean;
 }
 
-async function mergeMerchants(opts: MergeMerchantsOpts): Promise<void> {
+async function mergeMerchants(opts: MergeMerchantsOpts, command: Command): Promise<void> {
   const parsed = parseInput(MERGE_MERCHANTS_SPEC, opts as Record<string, unknown>);
   requireYes(opts, "merging merchants");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   let result;
   try {
     result = mergeMerchantRows(db, parsed.from, parsed.to);

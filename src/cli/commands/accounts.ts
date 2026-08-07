@@ -18,6 +18,7 @@ import {
   type Column,
 } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import {
   createAccount as createAccountRow,
   mergeAccounts as mergeAccountRows,
@@ -159,13 +160,15 @@ interface ListAccountsOpts {
   redact?: boolean;
 }
 
-async function listAccounts(opts: ListAccountsOpts): Promise<void> {
-  const db = await openDb();
+async function listAccounts(opts: ListAccountsOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const type = parseAccountTypeFilter(opts.type);
   const rows = applyRedaction(
     getAccountBalances(db, type ? { type } : {}).map(presentAccount),
     redactionEnabled(opts),
     ACCOUNT_REDACT_FIELDS,
+    { userName: config.userName, contextPath: config.contextPath },
   );
   emitList(rows, ACCOUNT_COLUMNS);
   emitSummary({ total: rows.length, returned: rows.length });
@@ -176,13 +179,15 @@ interface TreeAccountsOpts {
   redact?: boolean;
 }
 
-async function treeAccounts(opts: TreeAccountsOpts): Promise<void> {
-  const db = await openDb();
+async function treeAccounts(opts: TreeAccountsOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const type = parseAccountTypeFilter(opts.type);
   const roots = applyRedaction(
     getBalanceTree(db, type ? { type } : {}).map(presentTreeNode),
     redactionEnabled(opts),
     ACCOUNT_REDACT_FIELDS,
+    { userName: config.userName, contextPath: config.contextPath },
   );
   const mode = currentMode();
   if (mode.json) {
@@ -198,8 +203,13 @@ async function treeAccounts(opts: TreeAccountsOpts): Promise<void> {
   renderTreePlain(roots);
 }
 
-async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise<void> {
-  const db = await openDb();
+async function showAccount(
+  id: string,
+  opts: { redact?: boolean },
+  command: Command,
+): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const account = requireAccount(db, id);
   const balances = getAccountBalances(db, { idOrParent: id });
   const self = balances.find((b) => b.id === id);
@@ -218,6 +228,7 @@ async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise
       },
       redactionEnabled(opts),
       ACCOUNT_REDACT_FIELDS,
+      { userName: config.userName, contextPath: config.contextPath },
     ),
   );
 }
@@ -313,9 +324,10 @@ function maskedResultField(result: CreatedAccount): Record<string, unknown> {
     : {};
 }
 
-async function createSingleAccount(opts: Record<string, unknown>): Promise<void> {
+async function createSingleAccount(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(CREATE_ACCOUNT_SPEC, opts, { aliases: CREATE_ACCOUNT_ALIASES });
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const outcome = createOneAccount(db, parsed);
   if (!outcome.ok) failReason(outcome);
   emitObject({
@@ -331,11 +343,12 @@ const NON_ACCOUNT_FLAG_KEYS = new Set(["input", "json", "color"]);
 
 // One result row per item plus a summary row, exit PARTIAL(7) on any failure;
 // `account_exists` counts as an idempotent success (`duplicate: true`).
-async function createAccountsBatch(inputPath: string | undefined): Promise<void> {
+async function createAccountsBatch(inputPath: string | undefined, command: Command): Promise<void> {
   const items = await readStdinBatch(inputPath);
   if (items.length === 0) fail("USAGE", "no account data provided");
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const results: Record<string, unknown>[] = [];
   let created = 0;
   let duplicates = 0;
@@ -391,15 +404,15 @@ async function createAccountsBatch(inputPath: string | undefined): Promise<void>
   if (failed > 0) process.exitCode = EXIT.PARTIAL;
 }
 
-async function createAccount(opts: Record<string, unknown>): Promise<void> {
+async function createAccount(opts: Record<string, unknown>, command: Command): Promise<void> {
   if (opts.input !== undefined) {
     if (Object.keys(opts).some((k) => opts[k] !== undefined && !NON_ACCOUNT_FLAG_KEYS.has(k))) {
       fail("USAGE", "--input and per-account flags are mutually exclusive");
     }
-    await createAccountsBatch(opts.input as string);
+    await createAccountsBatch(opts.input as string, command);
     return;
   }
-  await createSingleAccount(opts);
+  await createSingleAccount(opts, command);
 }
 
 const MERGE_ACCOUNTS_SPEC = z.object({
@@ -413,10 +426,11 @@ interface MergeAccountsOpts {
   yes?: boolean;
 }
 
-async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
+async function mergeAccounts(opts: MergeAccountsOpts, command: Command): Promise<void> {
   const parsed = parseInput(MERGE_ACCOUNTS_SPEC, opts as Record<string, unknown>);
   requireYes(opts, "merging accounts");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   let result;
   try {
     result = mergeAccountRows(db, parsed.from, parsed.to);
@@ -433,8 +447,9 @@ async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
   });
 }
 
-async function deleteAccount(id: string, opts: { yes?: boolean }): Promise<void> {
-  const db = await openDb();
+async function deleteAccount(id: string, opts: { yes?: boolean }, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   requireAccount(db, id);
   requireYes(opts, "deleting this account");
   try {
@@ -451,10 +466,15 @@ const ADJUST_ACCOUNT_SPEC = z.object({
   date: str().optional(),
 });
 
-async function adjustAccount(id: string, opts: Record<string, unknown>): Promise<void> {
+async function adjustAccount(
+  id: string,
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const parsed = parseInput(ADJUST_ACCOUNT_SPEC, opts);
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   let result;
   try {
     result = adjustAccountBalance(db, {
@@ -473,9 +493,10 @@ const MATCH_ACCOUNTS_SPEC = z.object({
   query: str(),
 });
 
-async function matchAccounts(opts: Record<string, unknown>): Promise<void> {
+async function matchAccounts(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(MATCH_ACCOUNTS_SPEC, opts);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const matches = findAccountsByFuzzyName(db, parsed.query);
   emitList(matches, MATCH_COLUMNS);
   emitSummary({ returned: matches.length });
@@ -508,7 +529,11 @@ function buildAccountPatch(
   return patch;
 }
 
-async function updateAccount(id: string, opts: Record<string, unknown>): Promise<void> {
+async function updateAccount(
+  id: string,
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const parsed = parseInput(UPDATE_ACCOUNT_SPEC, opts, {
     aliases: UPDATE_ACCOUNT_ALIASES,
     atLeastOne:
@@ -517,7 +542,8 @@ async function updateAccount(id: string, opts: Record<string, unknown>): Promise
   const { name, ...rest } = parsed;
   const patch = buildAccountPatch(rest);
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const result: Record<string, unknown> = { id };
 
   if (name !== undefined) {

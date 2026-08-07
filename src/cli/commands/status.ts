@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { uniq } from "es-toolkit";
 import { getNetWorth } from "../../accounts/balances.js";
-import { config, getConfigPath, getDataDir } from "../../config.js";
+import type { ResolvedConfig } from "../../config.js";
 import { countAccounts } from "../../db/queries/accounts.js";
 import { countFiles } from "../../db/queries/files.js";
 import { countMerchants } from "../../db/queries/merchants.js";
@@ -17,6 +17,7 @@ import { formatAmount, toDecimalTotals } from "../currency.js";
 import { banner, visibleLength, ANSI_RE, formatInt } from "../format.js";
 import { currentMode, emit, redactionEnabled, runAction } from "../output.js";
 import { tryExecute } from "../../lib/result.js";
+import { lenientConfig } from "./config.js";
 import { openDb } from "../db.js";
 
 // Error prose passes through unchanged, so this is safe on any field.
@@ -60,18 +61,18 @@ export interface StatusReport {
 /** `status` never creates the ledger, so a missing db file is reported, not opened. */
 const NO_LEDGER = "no ledger yet";
 
-async function buildReport(): Promise<StatusReport> {
+async function buildReport(cfg: ResolvedConfig): Promise<StatusReport> {
   const report: StatusReport = {
     type: "status",
     // `configured` means a converge has run (`oled config --init`); a db file alone doesn't imply that.
-    configured: existsSync(getConfigPath()),
-    config_path: homeRelative(getConfigPath()),
-    data_dir: homeRelative(getDataDir()),
-    locale: config.displayLocale,
-    currency: config.displayCurrency,
-    user_name: config.userName,
+    configured: cfg.exists,
+    config_path: homeRelative(cfg.confPath),
+    data_dir: homeRelative(cfg.dataDir),
+    locale: cfg.displayLocale,
+    currency: cfg.displayCurrency,
+    user_name: cfg.userName,
     db: {
-      path: homeRelative(config.dbPath),
+      path: homeRelative(cfg.dbPath),
       reachable: false,
       error: null,
     },
@@ -82,13 +83,13 @@ async function buildReport(): Promise<StatusReport> {
   };
 
   // openDb() would migrate a missing file into existence, so check existsSync first.
-  if (!existsSync(config.dbPath)) {
+  if (!existsSync(cfg.dbPath)) {
     report.db.error = NO_LEDGER;
     return report;
   }
 
   // Opening the db is the only reachability check; a failing count query must not read as not-ready.
-  const opened = await tryExecute(() => openDb());
+  const opened = await tryExecute(() => openDb(cfg.dbPath));
   if (!opened.ok) {
     report.db.error = homeRelative(opened.error);
     return report;
@@ -120,12 +121,16 @@ async function buildReport(): Promise<StatusReport> {
 const STATUS_REDACT_FIELDS = ["error", "user_name"] as const;
 
 // Redaction defaults on, so bare `oled` (no --no-redact flag) masks the same fields `status` does.
-export async function showStatus(opts: { redact?: boolean } = {}): Promise<void> {
-  let report = await buildReport();
+export async function showStatus(opts: { redact?: boolean }, command: Command): Promise<void> {
+  const { config: cfg } = lenientConfig(command);
+  let report = await buildReport(cfg);
   // Decided before redaction: paths and error prose are display strings, not facts to branch on.
-  const ledgerMissing = !report.db.reachable && !existsSync(config.dbPath);
+  const ledgerMissing = !report.db.reachable && !existsSync(cfg.dbPath);
   if (redactionEnabled(opts)) {
-    report = applyRedaction(report, true, STATUS_REDACT_FIELDS);
+    report = applyRedaction(report, true, STATUS_REDACT_FIELDS, {
+      userName: cfg.userName,
+      contextPath: cfg.contextPath,
+    });
   }
   const mode = currentMode();
   if (mode.json) {
@@ -251,7 +256,7 @@ export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false
     section("Pipeline", rows);
   }
 
-  const financial = r.net_worth ? financialRows(r.net_worth, dim) : [];
+  const financial = r.net_worth ? financialRows(r.net_worth, dim, r.locale) : [];
   if (financial.length) section("Financial", financial);
 }
 
@@ -259,6 +264,7 @@ export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false
 function financialRows(
   worth: NonNullable<StatusReport["net_worth"]>,
   dim: (s: string) => string,
+  locale: string,
 ): [string, string][] {
   const currencies = uniq([
     ...Object.keys(worth.net_worth),
@@ -269,7 +275,7 @@ function financialRows(
   const rows: [string, string][] = [];
   for (const currency of currencies) {
     const amount = (totals: Record<string, number>): string =>
-      formatAmount(totals[currency] ?? 0, currency);
+      formatAmount(totals[currency] ?? 0, currency, locale);
     rows.push(
       [`${currency} net worth`, amount(worth.net_worth)],
       [`${currency} assets`, dim(amount(worth.assets))],

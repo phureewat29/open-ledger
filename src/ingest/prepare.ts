@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type Database from "libsql";
-import { getCacheDir, getDataDir } from "../config.js";
+import type { OpenLedgerConfig } from "../config.js";
 import {
   findFileByHash,
   findFileById,
@@ -11,7 +11,7 @@ import {
   type PendingFileInput,
 } from "../db/queries/files.js";
 import { extractFile, type Extraction, type TextPage } from "../extract/extract.js";
-import { resolveOcr } from "../extract/ocr.js";
+import { resolveOcr, type OCRConfigSource } from "../extract/ocr.js";
 import { isEncryptedPdf, unlockPdf, type UnlockFailureReason } from "../extract/pdf.js";
 import type { TextLayer } from "../extract/route.js";
 import { SOURCES, loadSource, type LoadedSource } from "../extract/source.js";
@@ -71,11 +71,11 @@ function unreadableEntry(file: WalkedFile, note: string): IngestEntry {
 /** A file this harness can't read becomes an `unreadable` row, rather than sinking the listing. */
 export async function discoverFiles(
   db: Database.Database,
+  dataDir: string,
   opts: { regex?: RegExp } = {},
 ): Promise<IngestEntry[]> {
-  const root = getDataDir();
   const walked: WalkedFile[] = [];
-  walk(root, root, walked);
+  walk(dataDir, dataDir, walked);
 
   const entries: IngestEntry[] = [];
   for (const file of walked) {
@@ -127,10 +127,14 @@ export function registerPendingFile(
 }
 
 /** Resolution order: absolute, data-dir-relative, cwd-relative, then `sf:` file id; null if none match. */
-export function resolveEntryPath(db: Database.Database, entryOrId: string): string | null {
+export function resolveEntryPath(
+  db: Database.Database,
+  dataDir: string,
+  entryOrId: string,
+): string | null {
   if (isAbsolute(entryOrId) && existsSync(entryOrId)) return entryOrId;
 
-  const viaDataDir = resolve(getDataDir(), entryOrId);
+  const viaDataDir = resolve(dataDir, entryOrId);
   if (existsSync(viaDataDir)) return viaDataDir;
 
   const viaCwd = resolve(entryOrId);
@@ -209,12 +213,13 @@ type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
 
 function replaceFileRow(
   db: Database.Database,
+  cacheDir: string,
   priorId: string,
   source: LoadedSource,
   fileId: string,
 ): void {
   replaceFile(db, priorId, pendingRow(source, fileId));
-  cleanCache(priorId);
+  cleanCache(cacheDir, priorId);
 }
 
 type UnlockedBytes =
@@ -341,13 +346,17 @@ const WRITE_ARTIFACTS: {
   images: writePages,
 };
 
+/** The slice of config preparing a file needs: where statements live, where extractions land, how to reach OCR. */
+export type PrepareConfig = Pick<OpenLedgerConfig, "dataDir" | "cacheDir"> & OCRConfigSource;
+
 /** A failed --force keeps the prior file row and its transactions; only success replaces it. */
 export async function prepareFile(
   db: Database.Database,
+  cfg: PrepareConfig,
   entryOrId: string,
   opts: PrepareOptions = {},
 ): Promise<PrepareOutcome> {
-  const absPath = resolveEntryPath(db, entryOrId);
+  const absPath = resolveEntryPath(db, cfg.dataDir, entryOrId);
   if (absPath === null) {
     return { ok: false, reason: "not_found", message: `no ingest entry or file at "${entryOrId}"` };
   }
@@ -365,32 +374,30 @@ export async function prepareFile(
 
   const extracted = await extractFile(
     { kind: source.kind, mime: source.mime, bytes: readable.bytes, path: source.path },
-    { ocr: resolveOcr(), overrides: { rescan: opts.rescan, noOcr: opts.noOcr } },
+    { ocr: resolveOcr(cfg), overrides: { rescan: opts.rescan, noOcr: opts.noOcr } },
   );
   if (!extracted.ok) return { ok: false, reason: extracted.reason, message: extracted.message };
 
   const target: WriteTarget = {
     fileId,
-    dir: resolve(getCacheDir(), fileId),
+    dir: resolve(cfg.cacheDir, fileId),
     sourcePath: source.path,
   };
   const written = WRITE_ARTIFACTS[extracted.value.kind](extracted.value as never, target);
-  if (prior) replaceFileRow(db, prior.id, source, fileId);
+  if (prior) replaceFileRow(db, cfg.cacheDir, prior.id, source, fileId);
   return written;
 }
 
-export function cleanCache(fileId?: string): { removed: string[] } {
-  const base = getCacheDir();
-
+export function cleanCache(cacheDir: string, fileId?: string): { removed: string[] } {
   if (fileId) {
-    const dir = resolve(base, fileId);
+    const dir = resolve(cacheDir, fileId);
     if (!existsSync(dir)) return { removed: [] };
     rmSync(dir, { recursive: true, force: true });
     return { removed: [dir] };
   }
 
-  if (!existsSync(base)) return { removed: [] };
-  const removed = readdirSync(base).map((name) => resolve(base, name));
-  rmSync(base, { recursive: true, force: true });
+  if (!existsSync(cacheDir)) return { removed: [] };
+  const removed = readdirSync(cacheDir).map((name) => resolve(cacheDir, name));
+  rmSync(cacheDir, { recursive: true, force: true });
   return { removed };
 }

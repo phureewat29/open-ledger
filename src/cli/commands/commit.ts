@@ -1,3 +1,4 @@
+import type { Command } from "commander";
 import type Database from "libsql";
 import {
   commitLinkedTransactions,
@@ -9,6 +10,7 @@ import {
 } from "../../ingest/commit.js";
 import { EXIT, asRecord, currentMode, emit, emitObject, emitSummary, fail, readStdinBatch } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import { newBatchId } from "../../lib/ids.js";
 import { errorMessage } from "../../lib/result.js";
 import { findFileById } from "../../db/queries/files.js";
@@ -187,6 +189,7 @@ interface BatchContext {
   /** The `--file` id every row inherits unless it names its own. */
   file?: string;
   fileHashes: Map<string, string | null>;
+  country: string;
 }
 
 // file_hash is what makes transaction ids deterministic, and dedup relies on that.
@@ -216,7 +219,7 @@ function commitRow(
     record,
     index,
     fileId,
-    ctx: { batchId: batch.batchId, fileId, fileHash },
+    ctx: { batchId: batch.batchId, fileId, fileHash, country: batch.country },
   };
 
   const linked = record.linked;
@@ -226,11 +229,12 @@ function commitRow(
   return commitStandaloneRow(db, counters, row);
 }
 
-export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
+export async function commitIngest(opts: CommitIngestOpts, command: Command): Promise<void> {
   const items = await readStdinBatch(opts.input);
   if (items.length === 0) fail("USAGE", "no transaction data provided");
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
   // An unknown --file id must fail before insert, else a null file hash breaks id determinism.
   if (opts.file && !findFileById(db, opts.file)) {
@@ -244,7 +248,12 @@ export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
   const counters: Counters = { posted: 0, duplicates: 0, failed: 0, raisedTotal: 0 };
   const results: Record<string, unknown>[] = [];
 
-  const batch: BatchContext = { batchId, file: opts.file, fileHashes: new Map() };
+  const batch: BatchContext = {
+    batchId,
+    file: opts.file,
+    fileHashes: new Map(),
+    country: config.country,
+  };
 
   for (let index = 0; index < items.length; index++) {
     try {

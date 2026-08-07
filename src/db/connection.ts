@@ -1,14 +1,11 @@
 import Database from "libsql";
-import { config } from "../config.js";
 import { DBNotReadyError } from "./errors.js";
 import { migrate } from "./schema.js";
 import { dirname } from "path";
 import { mkdirSync, existsSync } from "fs";
 import { chmod600 } from "../perms.js";
 
-let singleDb: Database.Database | null = null;
-
-function openDb(dbPath: string): Database.Database {
+export function openDb(dbPath: string): Database.Database {
   const dir = dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
@@ -32,11 +29,4 @@ function openDb(dbPath: string): Database.Database {
     chmod600(path);
   }
   return db;
-}
-
-export function getDb(): Database.Database {
-  if (!singleDb) {
-    singleDb = openDb(config.dbPath);
-  }
-  return singleDb;
 }

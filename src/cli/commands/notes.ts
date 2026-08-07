@@ -8,6 +8,7 @@ import {
 import { applyRedaction } from "../../privacy/redactor.js";
 import { emitList, emitSummary, fail, redactionEnabled, requireYes, runAction, type Column } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import * as z from "zod";
 import { parseInput, str, num } from "../../lib/validate.js";
 
@@ -27,9 +28,13 @@ interface ListNotesOpts {
   redact?: boolean;
 }
 
-async function listNotes(opts: ListNotesOpts): Promise<void> {
-  const db = await openDb();
-  const rows = applyRedaction(queryNotes(db), redactionEnabled(opts), NOTE_REDACT_FIELDS);
+async function listNotes(opts: ListNotesOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
+  const rows = applyRedaction(queryNotes(db), redactionEnabled(opts), NOTE_REDACT_FIELDS, {
+    userName: config.userName,
+    contextPath: config.contextPath,
+  });
   emitList(rows, NOTE_COLUMNS);
   emitSummary({ total: rows.length, returned: rows.length });
 }
@@ -39,9 +44,10 @@ const ADD_NOTE_SPEC = z.object({
   category: z.enum(VALID_CATEGORIES).default("fact"),
 });
 
-async function addNote(opts: Record<string, unknown>): Promise<void> {
+async function addNote(opts: Record<string, unknown>, command: Command): Promise<void> {
   const parsed = parseInput(ADD_NOTE_SPEC, opts);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const saved = addNoteRow(db, parsed.content, parsed.category);
   emitList([saved], NOTE_COLUMNS);
 }
@@ -50,11 +56,12 @@ async function addNote(opts: Record<string, unknown>): Promise<void> {
 const NOTE_ID_SPEC = z.object({ id: num() });
 const NOTE_ID_LABELS = { id: "note id" };
 
-async function removeNote(id: string, opts: { yes?: boolean }): Promise<void> {
+async function removeNote(id: string, opts: { yes?: boolean }, command: Command): Promise<void> {
   requireYes(opts, "removing this note");
   const parsed = parseInput(NOTE_ID_SPEC, { id }, { labels: NOTE_ID_LABELS });
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const deleted = deleteNoteRow(db, parsed.id);
   if (!deleted) fail("NOT_FOUND", `note "${id}" not found`);
   emitList([deleted], NOTE_COLUMNS);

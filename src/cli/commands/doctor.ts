@@ -5,14 +5,15 @@ import { randomUUID } from "crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
-import { config, configFileProblem, getConfigPath, getDataDir } from "../../config.js";
+import type { LoadedConfig, ResolvedConfig } from "../../config.js";
 import { listMissingTables } from "../../db/schema.js";
+import { lenientConfig } from "./config.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
 import { SKILL_DIRS, SKILL_PACK_DIR } from "../../setup/locations.js";
 import { EXIT, currentMode, emit, emitList, runAction, type Column } from "../output.js";
 import { errorMessage } from "../../lib/result.js";
-import { probeOcrEndpoint, resolveOcr } from "../../extract/ocr.js";
+import { probeOcrEndpoint, resolveOcr, type OCRConfigSource } from "../../extract/ocr.js";
 
 interface Check {
   name: string;
@@ -26,38 +27,37 @@ const REQUIRED_TABLES = ["accounts", "transactions", "questions"];
 // Diagnosing must not provision: doctor reports what's missing and points at `config --init`.
 const INIT_HINT = "run `oled config --init` to create it";
 
-function configCheck(): Check {
-  const ok = existsSync(getConfigPath());
+function configCheck(cfg: ResolvedConfig): Check {
+  const ok = cfg.exists;
   return ok ? { name: "config_exists", ok } : { name: "config_exists", ok, detail: INIT_HINT };
 }
 
-// buildConfig() degrades to defaults so a bad file can't take down the CLI itself; this is where
+// loadConfig degrades to defaults so a bad file can't take down the CLI itself; this is where
 // that silence ends.
-function configReadableCheck(): Check {
+function configReadableCheck(loaded: LoadedConfig): Check {
   const name = "config_readable";
-  const problem = configFileProblem();
-  if (!problem) return { name, ok: true };
+  if (!loaded.problem) return { name, ok: true };
   return {
     name,
     ok: false,
-    detail: `${getConfigPath()} is unusable, so defaults are in use: ${problem}`,
+    detail: `${loaded.config.confPath} is unusable, so defaults are in use: ${loaded.problem}`,
   };
 }
 
-async function dbOpenCheck(): Promise<{ check: Check; db: Database.Database | null }> {
-  if (!existsSync(config.dbPath)) {
+async function dbOpenCheck(cfg: ResolvedConfig): Promise<{ check: Check; db: Database.Database | null }> {
+  if (!existsSync(cfg.dbPath)) {
     return { check: { name: "db_open", ok: false, detail: `no ledger yet: ${INIT_HINT}` }, db: null };
   }
   try {
-    const db = await openDb();
+    const db = await openDb(cfg.dbPath);
     return { check: { name: "db_open", ok: true }, db };
   } catch (err) {
     return { check: { name: "db_open", ok: false, detail: errorMessage(err) }, db: null };
   }
 }
 
-function dataDirWritableCheck(): Check {
-  const dir = getDataDir();
+function dataDirWritableCheck(cfg: ResolvedConfig): Check {
+  const dir = cfg.dataDir;
   if (!existsSync(dir)) {
     return { name: "data_dir_writable", ok: false, detail: `missing: ${INIT_HINT}` };
   }
@@ -96,10 +96,10 @@ function schemaTablesCheck(db: Database.Database | null): Check {
   }
 }
 
-export async function ocrEndpointCheck(): Promise<Check> {
+export async function ocrEndpointCheck(source: OCRConfigSource): Promise<Check> {
   const name = "ocr_endpoint";
-  const settings = resolveOcr();
-  if (!settings) return { name, ok: true, detail: "off (set --ocr-url to enable)" };
+  const settings = resolveOcr(source);
+  if (!settings) return { name, ok: true, detail: "off (set --ocr-base-url to enable)" };
 
   const { baseUrl, model } = settings;
   const served = await probeOcrEndpoint(settings);
@@ -114,20 +114,21 @@ export async function ocrEndpointCheck(): Promise<Check> {
   return { name, ok: true, detail: `${model} at ${baseUrl}` };
 }
 
-async function runChecks(): Promise<Check[]> {
+async function runChecks(loaded: LoadedConfig): Promise<Check[]> {
   const checks: Check[] = [];
+  const cfg = loaded.config;
 
-  checks.push(configCheck());
-  checks.push(configReadableCheck());
+  checks.push(configCheck(cfg));
+  checks.push(configReadableCheck(loaded));
 
-  const { check: dbCheck, db } = await dbOpenCheck();
+  const { check: dbCheck, db } = await dbOpenCheck(cfg);
   checks.push(dbCheck);
 
-  checks.push(dataDirWritableCheck());
+  checks.push(dataDirWritableCheck(cfg));
   checks.push(await mupdfCheck());
   checks.push(schemaTablesCheck(db));
   checks.push(skillPackCheck());
-  checks.push(await ocrEndpointCheck());
+  checks.push(await ocrEndpointCheck(cfg));
 
   return checks;
 }
@@ -172,8 +173,8 @@ const CHECK_COLUMNS: Column<Check>[] = [
   { header: "Detail", value: (r) => r.detail ?? "" },
 ];
 
-async function diagnoseEnvironment(): Promise<void> {
-  const checks = await runChecks();
+async function diagnoseEnvironment(_opts: Record<string, unknown>, command: Command): Promise<void> {
+  const checks = await runChecks(lenientConfig(command));
   const ok = checks.filter((c) => HARD_CHECKS.has(c.name)).every((c) => c.ok);
 
   const mode = currentMode();

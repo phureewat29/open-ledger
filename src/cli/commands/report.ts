@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { getPeriodTotals, subtractTotals } from "../../accounts/balances.js";
 import { printKeyValues } from "../format.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import { currentMode, emit, fail, runAction } from "../output.js";
 import { toDecimalTotals } from "../currency.js";
 import { ISO_DATE_RE } from "../../lib/date.js";
@@ -11,7 +12,7 @@ interface ShowReportOpts {
   to?: string;
 }
 
-async function showReport(opts: ShowReportOpts): Promise<void> {
+async function showReport(opts: ShowReportOpts, command: Command): Promise<void> {
   if (!opts.from || !opts.to) fail("USAGE", "--from and --to are required");
   if (!ISO_DATE_RE.test(opts.from)) {
     fail("USAGE", `--from must be an ISO date (YYYY-MM-DD), got "${opts.from}"`);
@@ -20,7 +21,8 @@ async function showReport(opts: ShowReportOpts): Promise<void> {
     fail("USAGE", `--to must be an ISO date (YYYY-MM-DD), got "${opts.to}"`);
   }
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const totals = getPeriodTotals(db, opts.from, opts.to);
   // Net is taken in minor units per currency before anything becomes decimal; a THB
   // income and a USD expense share no common net.

@@ -11,6 +11,7 @@ import { applyRedaction } from "../../privacy/redactor.js";
 import { emitCappedSummary, emitList, fail, redactionEnabled, runAction, type Column } from "../output.js";
 import { clampOffset } from "../../lib/limit.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import * as z from "zod";
 import { parseInput, str, int } from "../../lib/validate.js";
 import { parseJsonOrNull } from "../../lib/json.js";
@@ -83,15 +84,19 @@ const LIST_QUESTIONS_SPEC = z.object({
   offset: int().optional(),
 });
 
-async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
+async function listQuestions(opts: ListQuestionsOpts, command: Command): Promise<void> {
   const parsed = parseInput(LIST_QUESTIONS_SPEC, opts as Record<string, unknown>);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   // One filter object for both queries, so `total` counts what the list filtered.
   const filter = { batch_id: parsed.batch, includeDeferred: !!opts.includeDeferred };
   const rows = queryQuestions(db, { ...filter, limit: parsed.limit, offset: parsed.offset });
   let listRows = rows.map(toListRow);
   if (redactionEnabled(opts)) {
-    listRows = applyRedaction(listRows, true, QUESTION_REDACT_FIELDS);
+    listRows = applyRedaction(listRows, true, QUESTION_REDACT_FIELDS, {
+      userName: config.userName,
+      contextPath: config.contextPath,
+    });
   }
   emitList(listRows, LIST_COLUMNS);
   const total = countQuestions(db, filter);
@@ -108,14 +113,19 @@ const ANSWER_SPEC = z.object({
   also: str().optional(),
 });
 
-async function answerQuestion(id: string, opts: Record<string, unknown>): Promise<void> {
+async function answerQuestion(
+  id: string,
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const parsed = parseInput(ANSWER_SPEC, opts);
   const also: string[] = parsed.also
     ? parsed.also.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
   const ids = [id, ...also];
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
   const results: AnsweredRow[] = [];
   for (const qid of ids) {
@@ -130,9 +140,14 @@ const DEFER_SPEC = z.object({
   days: int().default(7),
 });
 
-async function deferQuestion(id: string, opts: Record<string, unknown>): Promise<void> {
+async function deferQuestion(
+  id: string,
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const parsed = parseInput(DEFER_SPEC, opts);
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const ok = deferQuestionRow(db, id, parsed.days);
   if (!ok) fail("NOT_FOUND", `question "${id}" not found`);
   emitList([{ id, days: parsed.days }], DEFER_COLUMNS);

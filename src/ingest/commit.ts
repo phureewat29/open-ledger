@@ -40,7 +40,6 @@ import {
   type TransactionSide,
 } from "./questions.js";
 import { noiseTokens } from "../datasets/noise.js";
-import { config } from "../config.js";
 
 export const CURRENCY_MISMATCH_HINT =
   "add a linked conversion pair through <currency>:equity:conversion (one leg per currency, sharing a group)";
@@ -48,6 +47,8 @@ export const CURRENCY_MISMATCH_HINT =
 export interface TransactionCommitContext extends QuestionContext {
   // Enables idempotent transaction id derivation.
   readonly fileHash?: string | null;
+  /** Picks the merchant noise-token dataset; resolved here because db/queries may not read `src/datasets/`. */
+  readonly country: string;
 }
 
 export interface RawTransactionInput {
@@ -327,9 +328,8 @@ function resolveRow(
     date: input.date,
     description: input.description,
     merchant_id: merchant.merchantId,
-    // Resolved here because db/queries may not read `src/datasets/`.
     merchant: input.merchant
-      ? { ...input.merchant, noise_tokens: noiseTokens(config.country) }
+      ? { ...input.merchant, noise_tokens: noiseTokens(ctx.country) }
       : null,
     raw_descriptor: input.raw_descriptor ?? null,
     source_file_id: input.source_file_id ?? ctx.fileId ?? null,

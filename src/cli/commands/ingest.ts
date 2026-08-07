@@ -12,6 +12,7 @@ import {
   runAction,
 } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
 import { commitIngest } from "./commit.js";
 import { markFileFailed, markFileIngested } from "../../db/queries/files.js";
 // source.ts avoids mupdf/libsql, so this import is safe on the startup path.
@@ -40,8 +41,9 @@ interface ListIngestOpts {
   regex?: string;
 }
 
-async function listIngest(opts: ListIngestOpts): Promise<void> {
-  const db = await openDb();
+async function listIngest(opts: ListIngestOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
   let regex: RegExp | undefined;
   if (opts.regex) {
@@ -52,7 +54,7 @@ async function listIngest(opts: ListIngestOpts): Promise<void> {
     }
   }
 
-  const entries = await discoverFiles(db, { regex });
+  const entries = await discoverFiles(db, config.dataDir, { regex });
   const counts: Record<IngestEntry["status"], number> = {
     new: 0,
     pending: 0,
@@ -140,10 +142,15 @@ const PREPARE_PAYLOAD: {
   images: (result) => ({ ...(result.dpi ? { dpi: result.dpi } : {}), pages: result.pages }),
 };
 
-async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise<void> {
-  const db = await openDb();
+async function prepareIngest(
+  pathOrId: string,
+  opts: PrepareIngestOpts,
+  command: Command,
+): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
-  const result = await prepareFile(db, pathOrId, {
+  const result = await prepareFile(db, config, pathOrId, {
     password: opts.password,
     force: !!opts.force,
     rescan: !!opts.rescan,
@@ -171,12 +178,17 @@ interface CompleteIngestOpts {
   agent?: string;
 }
 
-async function completeIngest(id: string, opts: CompleteIngestOpts): Promise<void> {
-  const db = await openDb();
+async function completeIngest(
+  id: string,
+  opts: CompleteIngestOpts,
+  command: Command,
+): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const changes = markFileIngested(db, id, { source: opts.agent ?? "external" });
   if (changes === 0) fail("NOT_FOUND", `no ingest entry: ${id}`);
 
-  const { removed } = cleanCache(id);
+  const { removed } = cleanCache(config.cacheDir, id);
   emitObject({ file_id: id, status: "ingested", cache_removed: removed });
 }
 
@@ -185,14 +197,15 @@ interface FailIngestOpts {
   error?: string;
 }
 
-async function failIngest(id: string, opts: FailIngestOpts): Promise<void> {
+async function failIngest(id: string, opts: FailIngestOpts, command: Command): Promise<void> {
   if (!opts.error) fail("USAGE", "`ingest fail` requires --error <text>");
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const changes = markFileFailed(db, id, { source: opts.agent ?? "external", error: opts.error });
   if (changes === 0) fail("NOT_FOUND", `no ingest entry: ${id}`);
 
-  const { removed } = cleanCache(id);
+  const { removed } = cleanCache(config.cacheDir, id);
   emitObject({ file_id: id, status: "failed", cache_removed: removed });
 }
 
@@ -228,7 +241,7 @@ export function registerIngest(program: Command): void {
       "after",
       [
         "",
-        'Behavior: reads the file once and returns text whenever it can. A PDF carrying its own text layer is extracted directly. Otherwise the pages become images, a scan is rasterized, a photo is taken as it lies, and the OCR endpoint reads them when one is configured (`oled config --ocr-url <url>`); with none configured they come back to you. The reader is named in source: "text-layer" or "ocr" when kind is "text", "raster" or "original" when kind is "images".',
+        'Behavior: reads the file once and returns text whenever it can. A PDF carrying its own text layer is extracted directly. Otherwise the pages become images, a scan is rasterized, a photo is taken as it lies, and the OCR endpoint reads them when one is configured (`oled config --ocr-base-url <url>`); with none configured they come back to you. The reader is named in source: "text-layer" or "ocr" when kind is "text", "raster" or "original" when kind is "images".',
         'Output kind "text": one `document` path to read. Inside it, pages are separated by `--- page N ---` markers; cite the row\'s page as source_page on commit. Page numbers count from 1 everywhere: the markers, the pages[] entries, and source_page.',
         'Output kind "images": one path per page under pages[], in order; read them yourself.',
         "Escape hatches: --rescan ignores a garbled text layer and reads the pages instead; --no-ocr ignores the OCR endpoint and returns the page images. Both together always return images.",

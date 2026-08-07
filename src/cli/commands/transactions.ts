@@ -15,6 +15,8 @@ import {
   type Column,
 } from "../output.js";
 import { openDb } from "../db.js";
+import { requireConfig } from "./config.js";
+import type { ResolvedConfig } from "../../config.js";
 import {
   insertTransaction,
   deleteTransaction as deleteTransactionRow,
@@ -44,10 +46,9 @@ import { fromMinorUnits, toMinorUnits } from "../../lib/money.js";
 import { clampOffset } from "../../lib/limit.js";
 import { formatFixed } from "../currency.js";
 import { currencyOf, newBatchId } from "../../lib/ids.js";
-import { applyRedaction } from "../../privacy/redactor.js";
+import { applyRedaction, type RedactionSource } from "../../privacy/redactor.js";
 import { todayIso } from "../../lib/date.js";
 import { noiseTokens } from "../../datasets/noise.js";
-import { config } from "../../config.js";
 import * as z from "zod";
 import { parseInput, str, num } from "../../lib/validate.js";
 
@@ -103,8 +104,9 @@ function amountFilterCurrency(account?: string, currency?: string): string {
   fail("USAGE", "--amount needs a unit: pass --account <id> or --currency <code>");
 }
 
-async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
-  const db = await openDb();
+async function listTransactions(opts: ListTransactionsOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const parsed = parseInput(LIST_TRANSACTIONS_SPEC, opts as Record<string, unknown>);
   const listOpts: Omit<ListTransactionsOptions, "group"> = { includeVoid: !!opts.includeVoid };
   if (parsed.account) listOpts.account = parsed.account;
@@ -128,7 +130,10 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
   if (opts.group) {
     // Offset pages rows before clustering, so a group can straddle a page, same as the limit.
     const clusters = queryTransactions(db, { ...listOpts, group: true });
-    emitClusters(clusters, redactionEnabled(opts));
+    emitClusters(clusters, redactionEnabled(opts), {
+      userName: config.userName,
+      contextPath: config.contextPath,
+    });
     const returned = clusters.reduce((n, c) => n + c.transactions.length, 0);
     emitCappedSummary(total, returned, limit, offset);
     return;
@@ -138,18 +143,19 @@ async function listTransactions(opts: ListTransactionsOpts): Promise<void> {
     queryTransactions(db, listOpts).map(presentTransaction),
     redactionEnabled(opts),
     TRANSACTION_REDACT_FIELDS,
+    { userName: config.userName, contextPath: config.contextPath },
   );
   emitList(rows, LIST_COLUMNS);
   emitCappedSummary(total, rows.length, limit, offset);
 }
 
-function emitClusters(clusters: TransactionCluster[], redact: boolean): void {
+function emitClusters(clusters: TransactionCluster[], redact: boolean, source: RedactionSource): void {
   const raw = clusters.map((c) => ({
     group_id: c.group_id,
     transactions: c.transactions.map(presentTransaction),
   }));
   // One redactor build (and one context.md read) for the whole view, not one per cluster.
-  const view = applyRedaction(raw, redact, TRANSACTION_REDACT_FIELDS);
+  const view = applyRedaction(raw, redact, TRANSACTION_REDACT_FIELDS, source);
   const mode = currentMode();
   if (mode.json) {
     for (const c of view) emit(c);
@@ -165,14 +171,24 @@ function emitClusters(clusters: TransactionCluster[], redact: boolean): void {
   }
 }
 
-async function showTransaction(id: string, opts: { redact?: boolean }): Promise<void> {
-  const db = await openDb();
+async function showTransaction(
+  id: string,
+  opts: { redact?: boolean },
+  command: Command,
+): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const detail = findTransactionById(db, id);
   if (!detail) fail("NOT_FOUND", `transaction "${id}" not found`);
 
   const view: Record<string, unknown> = presentTransaction(detail);
   if (detail.group) view.group = detail.group.map(presentTransaction);
-  emitObject(applyRedaction(view, redactionEnabled(opts), TRANSACTION_REDACT_FIELDS));
+  emitObject(
+    applyRedaction(view, redactionEnabled(opts), TRANSACTION_REDACT_FIELDS, {
+      userName: config.userName,
+      contextPath: config.contextPath,
+    }),
+  );
 }
 
 type DuplicateRow = Omit<DuplicateTransactionRow, "amount"> & {
@@ -196,8 +212,12 @@ const DUPLICATE_COLUMNS: Column<DuplicateRow>[] = [
   { header: "Merchant ID", value: (r) => r.merchant_id ?? "" },
 ];
 
-async function dedupeTransactions(opts: { autoMerge?: boolean; redact?: boolean }): Promise<void> {
-  const db = await openDb();
+async function dedupeTransactions(
+  opts: { autoMerge?: boolean; redact?: boolean },
+  command: Command,
+): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
   let autoMerged: number | undefined;
   if (opts.autoMerge) {
@@ -211,6 +231,7 @@ async function dedupeTransactions(opts: { autoMerge?: boolean; redact?: boolean 
     ),
     redactionEnabled(opts),
     TRANSACTION_REDACT_FIELDS,
+    { userName: config.userName, contextPath: config.contextPath },
   );
 
   emitList(rows, DUPLICATE_COLUMNS);
@@ -231,10 +252,11 @@ interface MergeTransactionsOpts {
   yes?: boolean;
 }
 
-async function mergeTransactions(opts: MergeTransactionsOpts): Promise<void> {
+async function mergeTransactions(opts: MergeTransactionsOpts, command: Command): Promise<void> {
   const parsed = parseInput(MERGE_TRANSACTIONS_SPEC, opts as Record<string, unknown>);
   requireYes(opts, "merging transactions");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
 
   let result;
   try {
@@ -298,12 +320,13 @@ function buildRawTransaction(opts: AddTransactionOpts): RawTransactionInput {
   return raw;
 }
 
-function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
+function addViaResolve(db: Database.Database, config: ResolvedConfig, raw: RawTransactionInput): void {
   const batchId = newBatchId();
   const ctx: TransactionCommitContext = {
     batchId,
     fileId: null,
     fileHash: null,
+    country: config.country,
   };
   const outcome = commitTransaction(db, ctx, raw);
   if (!outcome.ok) {
@@ -321,7 +344,7 @@ function addViaResolve(db: Database.Database, raw: RawTransactionInput): void {
   });
 }
 
-function addStrict(db: Database.Database, raw: RawTransactionInput): void {
+function addStrict(db: Database.Database, config: ResolvedConfig, raw: RawTransactionInput): void {
   const accountHint =
     "create it with `oled accounts create`, or find a close match with `oled accounts match --query <name>`, or re-run with --resolve";
   const debit = requireAccount(db, raw.debit_account_id, accountHint);
@@ -360,12 +383,13 @@ function addStrict(db: Database.Database, raw: RawTransactionInput): void {
   emitObject({ transaction_id: result.id, duplicate: result.duplicate });
 }
 
-async function addTransaction(opts: AddTransactionOpts): Promise<void> {
-  const db = await openDb();
+async function addTransaction(opts: AddTransactionOpts, command: Command): Promise<void> {
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const raw = buildRawTransaction(opts);
 
-  if (opts.resolve) return addViaResolve(db, raw);
-  return addStrict(db, raw);
+  if (opts.resolve) return addViaResolve(db, config, raw);
+  return addStrict(db, config, raw);
 }
 
 const UPDATE_TRANSACTION_SPEC = z.object({
@@ -376,20 +400,30 @@ const UPDATE_TRANSACTION_SPEC = z.object({
 
 const UPDATE_TRANSACTION_ALIASES = { merchant_id: ["merchant"] };
 
-async function updateTransaction(id: string, opts: Record<string, unknown>): Promise<void> {
+async function updateTransaction(
+  id: string,
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const fields: UpdateTransactionMetaFields = parseInput(UPDATE_TRANSACTION_SPEC, opts, {
     aliases: UPDATE_TRANSACTION_ALIASES,
     atLeastOne: "at least one of --date, --description, --merchant is required",
   });
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const changes = updateTransactionMeta(db, id, fields);
   if (changes === 0) fail("NOT_FOUND", `transaction "${id}" not found`);
   emitObject({ transaction_id: id, updated: true });
 }
 
-async function deleteTransaction(id: string, opts: { yes?: boolean }): Promise<void> {
+async function deleteTransaction(
+  id: string,
+  opts: { yes?: boolean },
+  command: Command,
+): Promise<void> {
   requireYes(opts, "deleting this transaction");
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const { deleted, unvoided } = deleteTransactionRow(db, id);
   if (!deleted) fail("NOT_FOUND", `transaction "${id}" not found`);
   // Deleting a survivor puts its mirrors back into balance derivation.
@@ -406,13 +440,17 @@ const RECATEGORIZE_LABELS = {
   filter_account: "--filter-account (recategorize moves that account's transactions)",
 };
 
-async function recategorizeTransactions(opts: Record<string, unknown>): Promise<void> {
+async function recategorizeTransactions(
+  opts: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
   const parsed = parseInput(RECATEGORIZE_SPEC, opts, { labels: RECATEGORIZE_LABELS });
   // An empty id reads the same as the flag not being passed.
   if (!parsed.filter_account.trim()) fail("USAGE", `${RECATEGORIZE_LABELS.filter_account} required`);
   if (!parsed.set_account.trim()) fail("USAGE", "--set-account required");
 
-  const db = await openDb();
+  const config = requireConfig(command);
+  const db = await openDb(config.dbPath);
   const filter: BulkRecategorizeFilter = { accountId: parsed.filter_account };
 
   let result;

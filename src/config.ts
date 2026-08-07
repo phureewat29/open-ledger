@@ -1,13 +1,8 @@
-import "dotenv/config";
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-} from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createHash } from "crypto";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
 import { homedir } from "os";
+import { typhoonModelCard } from "./extract/cards/typhoon-ocr1.5.js";
 import { chmod600 } from "./perms.js";
 
 export interface OpenLedgerConfig {
@@ -16,128 +11,134 @@ export interface OpenLedgerConfig {
   displayCurrency: string;
   dbPath: string;
   dataDir: string;
+  cacheDir: string;
   userName: string;
   ocrBaseUrl: string;
   ocrModel: string;
   ocrApiKey: string;
 }
 
-const OLED_DIR = process.env.OLED_DIR
-  ? resolve(process.env.OLED_DIR)
-  : resolve(homedir(), ".oled");
+/** What one invocation resolved: the config values plus where they came from. */
+export interface ResolvedConfig extends OpenLedgerConfig {
+  /** Absolute path of the file this invocation resolves to (`--conf` or the default). */
+  confPath: string;
+  /** Freeform agent context lives beside the conf file, so each profile carries its own. */
+  contextPath: string;
+  /** Whether the conf file was present at load; data commands refuse to run without it. */
+  exists: boolean;
+}
+
+export interface LoadedConfig {
+  config: ResolvedConfig;
+  /** File values only, no defaults folded in — lets converge tell an explicitly-persisted value from a defaulted one. */
+  fileValues: Partial<OpenLedgerConfig>;
+  /** Why the file is unusable, or null when it is fine or simply absent. */
+  problem: string | null;
+}
+
+function defaultOledDir(): string {
+  return resolve(homedir(), ".oled");
+}
+
+function defaultConfPath(): string {
+  return resolve(defaultOledDir(), "config.json");
+}
 
 /** Also the persisted-key list: unknown keys on disk are tolerated on read, dropped on next write (`saveConfig` writes only these fields). */
-const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: string }> = {
+const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { default: () => string }> = {
   /** Picks `datasets/<cc>.json`; deliberately not derived from `displayLocale`, which only formats numbers and dates. */
-  country: { default: "TH" },
-  displayLocale: { default: "th-TH" },
+  country: { default: () => "TH" },
+  displayLocale: { default: () => "th-TH" },
   /** Resolved value only; no module may hardcode a currency. `config --init` overrides it. */
-  displayCurrency: { default: "THB" },
-  dbPath: { envVar: "OLED_DB_PATH", default: resolve(OLED_DIR, "db.sqlite") },
-  dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },
-  userName: { default: "User" },
-  ocrBaseUrl: { envVar: "OLED_OCR_BASE_URL", default: "" },
-  // Duplicates typhoonOcrPreset.model (src/extract/presets/typhoon-ocr.ts), which
-  // .env.example, README, and the --ocr-model help repeat; change all five together.
-  ocrModel: { envVar: "OLED_OCR_MODEL", default: "typhoon-ocr1.5" },
-  ocrApiKey: { envVar: "OLED_OCR_API_KEY", default: "" },
+  displayCurrency: { default: () => "THB" },
+  dbPath: { default: () => resolve(defaultOledDir(), "db.sqlite") },
+  dataDir: { default: () => resolve(defaultOledDir(), "data") },
+  cacheDir: { default: () => resolve(defaultOledDir(), "cache") },
+  userName: { default: () => "User" },
+  ocrBaseUrl: { default: () => "" },
+  ocrModel: { default: () => typhoonModelCard.model },
+  ocrApiKey: { default: () => "" },
 };
 
 const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as readonly (keyof OpenLedgerConfig)[];
 
-/** Fields never echoed in plaintext; `config show` renders each as `{ set, fingerprint }` via `keyFingerprint()` instead. */
+/** Fields never echoed in plaintext; `oled config` renders each as `{ set, fingerprint }` via `keyFingerprint()` instead. */
 export const CONFIG_SECRETS = ["ocrApiKey"] as const;
 
-export function getOledDir(): string {
-  return OLED_DIR;
-}
-
-export function getConfigPath(): string {
-  return resolve(OLED_DIR, "config.json");
-}
-
-export function getDataDir(): string {
-  return config.dataDir;
-}
-
-/** Scratch space for extracted text and page images; env-overridable for tests. */
-export function getCacheDir(): string {
-  return process.env.OLED_CACHE_DIR || resolve(OLED_DIR, "cache");
-}
-
-/** Non-reversible fingerprint (`sha256:` + first 8 hex) so `config show` can prove a secret is set without printing it. */
+/** Non-reversible fingerprint (`sha256:` + first 8 hex) so `oled config` can prove a secret is set without printing it. */
 export function keyFingerprint(key: string): string {
   return `sha256:${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 }
 
-/** `null` and arrays parse fine but would break every `file[key]` read in buildConfig. */
-function isConfigObject(value: unknown): value is Partial<OpenLedgerConfig> {
+/** `null` and arrays parse fine but would break every `file[key]` read below. */
+function isConfigObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** What makes the file unusable, or null when it is fine or simply absent. */
-export function configFileProblem(): string | null {
-  const configPath = getConfigPath();
-  if (!existsSync(configPath)) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-  return isConfigObject(parsed) ? null : "it does not hold a JSON object";
-}
-
-function loadFileConfig(): Partial<OpenLedgerConfig> {
-  const configPath = getConfigPath();
-  if (!existsSync(configPath)) return {};
-  // Runs at module load, so a throw here would take down every command including the repair
-  // ones. A bad file degrades to defaults; `oled doctor` is where it surfaces.
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(configPath, "utf-8"));
-    return isConfigObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
+/** Known keys with string values only: drops `undefined` (so a patch can never
+ *  delete a persisted key by accident) and hand-edited non-strings alike. */
 function pickConfigFields(obj: Record<string, unknown>): Partial<OpenLedgerConfig> {
   const out: Partial<OpenLedgerConfig> = {};
   for (const key of CONFIG_KEYS) {
-    if (obj[key] !== undefined) (out as Record<string, unknown>)[key] = obj[key];
+    if (typeof obj[key] === "string") out[key] = obj[key] as string;
   }
   return out;
 }
 
-function buildConfig(): OpenLedgerConfig {
-  const file = loadFileConfig();
+function readFileValues(confPath: string): {
+  fileValues: Partial<OpenLedgerConfig>;
+  problem: string | null;
+  exists: boolean;
+} {
+  if (!existsSync(confPath)) return { fileValues: {}, problem: null, exists: false };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(confPath, "utf-8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { fileValues: {}, problem: message, exists: true };
+  }
+  if (!isConfigObject(parsed)) {
+    return { fileValues: {}, problem: "it does not hold a JSON object", exists: true };
+  }
+  return { fileValues: pickConfigFields(parsed), problem: null, exists: true };
+}
+
+/** Precedence: file > default. `||`, not `??`, so an empty-string value means unset. */
+function withDefaults(fileValues: Partial<OpenLedgerConfig>): OpenLedgerConfig {
   const out = {} as OpenLedgerConfig;
-  // Precedence env > file > default. `||` (not `??`) so an empty-string value falls through too.
   for (const key of CONFIG_KEYS) {
-    const { envVar, default: fallback } = CONFIG_FIELDS[key];
-    out[key] = (envVar && process.env[envVar]) || file[key] || fallback;
+    out[key] = fileValues[key] || CONFIG_FIELDS[key].default();
   }
   return out;
 }
 
-export const config = buildConfig();
-
-/** File values only, no env or defaults folded in — lets converge tell an explicitly-persisted value from a defaulted one. */
-export function loadPersistedConfig(): Partial<OpenLedgerConfig> {
-  return pickConfigFields(loadFileConfig() as Record<string, unknown>);
+/** Reads the conf file (default: `~/.oled/config.json`). A broken file degrades
+ *  to defaults with `problem` set; the caller decides whether that is fatal. */
+export function loadConfig(confPath?: string): LoadedConfig {
+  const resolved = resolve(confPath ?? defaultConfPath());
+  const { fileValues, problem, exists } = readFileValues(resolved);
+  const config: ResolvedConfig = {
+    ...withDefaults(fileValues),
+    confPath: resolved,
+    contextPath: resolve(dirname(resolved), "context.md"),
+    exists,
+  };
+  return { config, fileValues, problem };
 }
 
-export function saveConfig(partial: Partial<OpenLedgerConfig>): void {
-  const configPath = getConfigPath();
+/** Merges the file's values with the DEFINED entries of `patch`, writes 0600,
+ *  and returns the merged values with defaults folded in. No module state. */
+export function saveConfig(confPath: string, patch: Partial<OpenLedgerConfig>): OpenLedgerConfig {
+  const dir = dirname(confPath);
   // 0700 like the cache dir: this tree holds financial data.
-  if (!existsSync(OLED_DIR)) mkdirSync(OLED_DIR, { recursive: true, mode: 0o700 });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const existing = loadFileConfig();
-  const merged = pickConfigFields({ ...existing, ...partial });
-  writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", {
-    mode: 0o600,
-  });
-  chmod600(configPath);
+  // A broken file degrades to {} here; the write below repairs it.
+  const { fileValues } = readFileValues(confPath);
+  const merged = { ...fileValues, ...pickConfigFields(patch) };
+  writeFileSync(confPath, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
+  chmod600(confPath);
 
-  Object.assign(config, merged);
+  return withDefaults(merged);
 }
