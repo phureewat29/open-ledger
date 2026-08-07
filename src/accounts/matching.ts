@@ -1,11 +1,24 @@
 import { round } from "es-toolkit";
 import type Database from "libsql";
-import { listAccounts, type AccountRow } from "../db/queries/accounts.js";
+import { listAccounts, type AccountRow, type AccountType } from "../db/queries/accounts.js";
 import { accountNumberKey, tailAfterMask } from "../lib/masked.js";
 
 export interface FuzzyAccountMatch {
   account: AccountRow;
   similarity: number;
+}
+
+/** The candidates a caller could actually act on. Both fields are required:
+ *  a cross-ledger lookalike proposes a merge the trigger refuses anyway. */
+export interface FuzzyAccountScope {
+  readonly type: AccountType;
+  /** ISO currency, as `currencyOf` and `AccountRow.currency` both spell it. */
+  readonly ledger: string;
+}
+
+// Scoring is the cost, so an out-of-scope row is dropped before it, not after.
+function inScope(row: AccountRow, scope: FuzzyAccountScope): boolean {
+  return row.type === scope.type && row.currency === scope.ledger;
 }
 
 // A mask in the text (`470686XXXXXX9483`) is authoritative: its tail wins over the
@@ -26,11 +39,13 @@ function queryNumberKey(text: string): string {
 const MATCH_THRESHOLD = 0.5;
 
 /** Substring hits get a 0.85 floor; a query carrying an account number matches
- *  the row's masked number. Callers confirm before acting. */
+ *  the row's masked number. Callers confirm before acting. `scope` narrows the
+ *  candidates, never the ranking of the ones that survive it. */
 export function findAccountsByFuzzyName(
   db: Database.Database,
   query: string,
   threshold = MATCH_THRESHOLD,
+  scope?: FuzzyAccountScope,
 ): FuzzyAccountMatch[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -38,6 +53,7 @@ export function findAccountsByFuzzyName(
   const rows = listAccounts(db);
   const out: FuzzyAccountMatch[] = [];
   for (const row of rows) {
+    if (scope && !inScope(row, scope)) continue;
     const name = row.name.toLowerCase();
     let score = similarity(q, name);
     if (name.includes(q) || q.includes(name)) score = Math.max(score, 0.85);

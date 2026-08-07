@@ -19,6 +19,7 @@ import {
 } from "../../db/queries/files.js";
 import { countTransactionsBySourceFile } from "../../db/queries/transactions.js";
 import { countQuestions } from "../../db/queries/questions.js";
+import { cleanCache } from "../../ingest/prepare.js";
 
 const FILE_COLUMNS: Column<FileRow>[] = [
   { header: "Status", value: (r) => r.status },
@@ -70,7 +71,6 @@ async function dropFile(id: string, opts: DropFileOpts): Promise<void> {
   if (!res.removed) fail("NOT_FOUND", `no file: ${id}`);
 
   // Same cache purge `ingest done`/`fail` do: nothing can reach the extracted text once the row is gone.
-  const { cleanCache } = await import("../../ingest/prepare.js");
   const { removed } = cleanCache(id);
   emitObject({
     file_id: id,

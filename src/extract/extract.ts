@@ -2,8 +2,8 @@ import type { Result } from "../lib/result.js";
 import {
   isServerFailure,
   ocrPages,
-  type OcrPageOutcome,
-  type OcrSettings,
+  type OCRPageOutcome,
+  type OCRSettings,
   type ServerFailure,
 } from "./ocr.js";
 import {
@@ -64,7 +64,7 @@ interface ExtractOverrides {
 }
 
 interface ExtractOptions {
-  ocr: OcrSettings | null;
+  ocr: OCRSettings | null;
   overrides?: ExtractOverrides;
 }
 
@@ -106,8 +106,8 @@ function placeholder(page: number): string {
 
 /** A failed page is a hole in the document; the caller reports `failedPages` and exits PARTIAL. */
 function ocrExtraction(
-  outcomes: OcrPageOutcome[],
-  settings: OcrSettings,
+  outcomes: OCRPageOutcome[],
+  settings: OCRSettings,
   textLayer: TextLayer,
 ): ExtractOutcome {
   for (const outcome of outcomes) {

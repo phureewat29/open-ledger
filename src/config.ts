@@ -4,11 +4,11 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
-  chmodSync,
 } from "fs";
 import { createHash } from "crypto";
 import { resolve } from "path";
 import { homedir } from "os";
+import { chmod600 } from "./perms.js";
 
 export interface OpenLedgerConfig {
   country: string;
@@ -70,13 +70,33 @@ export function keyFingerprint(key: string): string {
   return `sha256:${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 }
 
+/** `null` and arrays parse fine but would break every `file[key]` read in buildConfig. */
+function isConfigObject(value: unknown): value is Partial<OpenLedgerConfig> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** What makes the file unusable, or null when it is fine or simply absent. */
+export function configFileProblem(): string | null {
+  const configPath = getConfigPath();
+  if (!existsSync(configPath)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return isConfigObject(parsed) ? null : "it does not hold a JSON object";
+}
+
 function loadFileConfig(): Partial<OpenLedgerConfig> {
   const configPath = getConfigPath();
   if (!existsSync(configPath)) return {};
+  // Runs at module load, so a throw here would take down every command including the repair
+  // ones. A bad file degrades to defaults; `oled doctor` is where it surfaces.
   try {
-    return JSON.parse(readFileSync(configPath, "utf-8"));
+    const parsed: unknown = JSON.parse(readFileSync(configPath, "utf-8"));
+    return isConfigObject(parsed) ? parsed : {};
   } catch {
-    // Must degrade to defaults, not throw, or every command (including repair ones) would crash at startup.
     return {};
   }
 }
@@ -117,9 +137,7 @@ export function saveConfig(partial: Partial<OpenLedgerConfig>): void {
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", {
     mode: 0o600,
   });
-  try {
-    chmodSync(configPath, 0o600);
-  } catch {}
+  chmod600(configPath);
 
   Object.assign(config, merged);
 }

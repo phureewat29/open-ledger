@@ -1,3 +1,4 @@
+import { groupBy, partition } from "es-toolkit";
 import type Database from "libsql";
 import {
   findAccountById,
@@ -132,9 +133,9 @@ export interface BalanceTreeNode {
 
 function treeNode(
   row: AccountBalanceMinor,
-  childrenByParent: Map<string, AccountBalanceMinor[]>,
+  childrenByParent: Record<string, AccountBalanceMinor[]>,
 ): BalanceTreeNode {
-  const children = (childrenByParent.get(row.id) ?? []).map((child) =>
+  const children = (childrenByParent[row.id] ?? []).map((child) =>
     treeNode(child, childrenByParent),
   );
   const rollup: CurrencyTotals = {};
@@ -160,18 +161,9 @@ export function getBalanceTree(
 ): BalanceTreeNode[] {
   const rows = getAccountBalances(db, opts);
   const selected = new Set(rows.map((r) => r.id));
-  const childrenByParent = new Map<string, AccountBalanceMinor[]>();
-  const roots: AccountBalanceMinor[] = [];
-
-  for (const row of rows) {
-    if (!row.parent_id || !selected.has(row.parent_id)) {
-      roots.push(row);
-      continue;
-    }
-    const siblings = childrenByParent.get(row.parent_id) ?? [];
-    siblings.push(row);
-    childrenByParent.set(row.parent_id, siblings);
-  }
+  const [children, roots] = partition(rows, (r) => !!r.parent_id && selected.has(r.parent_id));
+  // Every account id carries a colon, so no key here collides with Object.prototype.
+  const childrenByParent = groupBy(children, (r) => r.parent_id!);
   return roots.map((row) => treeNode(row, childrenByParent));
 }
 

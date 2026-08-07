@@ -12,7 +12,7 @@ import {
 } from "../db/queries/files.js";
 import { extractFile, type Extraction, type TextPage } from "../extract/extract.js";
 import { resolveOcr } from "../extract/ocr.js";
-import { isEncryptedPdf, unlockPdf } from "../extract/pdf.js";
+import { isEncryptedPdf, unlockPdf, type UnlockFailureReason } from "../extract/pdf.js";
 import type { TextLayer } from "../extract/route.js";
 import { SOURCES, loadSource, type LoadedSource } from "../extract/source.js";
 import { tryExecute, type Result } from "../lib/result.js";
@@ -225,6 +225,19 @@ type UnlockedBytes =
       message: string;
     };
 
+const UNLOCK_FAILURES: Record<UnlockFailureReason, Extract<UnlockedBytes, { ok: false }>> = {
+  wrong_password: {
+    ok: false,
+    reason: "wrong_password",
+    message: "the supplied password did not open the PDF",
+  },
+  unsupported_document: {
+    ok: false,
+    reason: "pdf_unreadable",
+    message: "the file carries PDF magic bytes but does not open as a PDF document",
+  },
+};
+
 /** Images are never locked; decrypted PDF bytes stay in memory: only extracted text is written to disk. */
 async function readableBytes(source: LoadedSource, password?: string): Promise<UnlockedBytes> {
   if (source.kind !== "pdf") return { ok: true, bytes: source.bytes };
@@ -242,13 +255,7 @@ async function readableBytes(source: LoadedSource, password?: string): Promise<U
 
   const attempt = await tryExecute(() => unlockPdf(source.bytes, password));
   if (!attempt.ok) return { ok: false, reason: "pdf_unreadable", message: attempt.error };
-  if (!attempt.value.ok) {
-    return {
-      ok: false,
-      reason: "wrong_password",
-      message: "the supplied password did not open the PDF",
-    };
-  }
+  if (!attempt.value.ok) return UNLOCK_FAILURES[attempt.value.reason];
   return { ok: true, bytes: attempt.value.decrypted };
 }
 

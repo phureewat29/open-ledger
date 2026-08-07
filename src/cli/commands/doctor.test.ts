@@ -11,16 +11,16 @@ import { ocrEndpointCheck } from "./doctor.js";
 
 /** The one network-reaching doctor check; everything else is fs/db state already covered by the system integration test. */
 
-type OcrConfig = Pick<typeof config, "ocrBaseUrl" | "ocrModel" | "ocrApiKey">;
+type OCRConfig = Pick<typeof config, "ocrBaseUrl" | "ocrModel" | "ocrApiKey">;
 
-const SAVED: OcrConfig = {
+const SAVED: OCRConfig = {
   ocrBaseUrl: config.ocrBaseUrl,
   ocrModel: config.ocrModel,
   ocrApiKey: config.ocrApiKey,
 };
 
 /** An explicit model override, so the detail line never depends on a shipped model id. */
-function configureOcr(over: Partial<OcrConfig>): void {
+function configureOcr(over: Partial<OCRConfig>): void {
   Object.assign(config, {
     ocrBaseUrl: "",
     ocrModel: "test-ocr-model",

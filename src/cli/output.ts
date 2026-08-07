@@ -283,9 +283,9 @@ export function failReason(
 }
 
 // Matches error message text, for throw sites that use a plain `Error` instead of a typed reason.
-export function mapNotFoundError(err: unknown, extraNotFound?: RegExp): never {
+export function mapNotFoundError(err: unknown): never {
   const message = errorMessage(err);
-  if (/not found/i.test(message) || (extraNotFound && extraNotFound.test(message))) {
+  if (/not found|does not exist/i.test(message)) {
     fail("NOT_FOUND", message);
   }
   fail("INVALID", message);

@@ -36,7 +36,7 @@ By using this harness, your AI can build the app you never found: a budget track
 
 ## Use OpenLedger with your Coding Agents
 
-The whole skill is one file: [`skills/openledger/SKILL.md`](./skills/openledger/SKILL.md). The repo is also an [Agent Plugins](https://agent-plugins.org) 1.0 package, so compliant clients can install it straight from the git URL.
+The whole skill is one file: [`skills/openledger/SKILL.md`](https://cdn.openledger.sh/skills/openledger/SKILL.md). The repo is also an [Agent Plugins](https://agent-plugins.org) 1.0 package, so compliant clients can install it straight from the git URL.
 
 1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
 
@@ -134,7 +134,7 @@ OpenLedger stores everything in `~/.oled/`. `oled config --init` creates it, alo
 | `OLED_DATA_DIR` | Statement drop folder | `~/.oled/data` |
 | `OLED_CACHE_DIR` | Extracted text and page image cache | `~/.oled/cache` |
 | `OLED_OCR_BASE_URL` | Base URL of an OpenAI-compatible OCR endpoint, version segment included; OCR is off until this is set | unset (OCR off) |
-| `OLED_OCR_MODEL` | Model id, spelled as the endpoint serves it. An id carrying `typhoon` selects the tuned prompt and page rendering | `typhoon-ocr1.5` |
+| `OLED_OCR_MODEL` | Model id, spelled as the endpoint serves it. An id from the typhoon or lighton families selects the tuned prompt and page rendering | `typhoon-ocr1.5` |
 | `OLED_OCR_API_KEY` | OCR endpoint API key | unset |
 
 See [`.env.example`](./.env.example) for defaults and full descriptions.

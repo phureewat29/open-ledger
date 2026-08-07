@@ -228,7 +228,6 @@ describe("reportError: rendering (via runAction)", () => {
 interface NotFoundCase {
   desc: string;
   message: string;
-  extra?: RegExp;
   code: "NOT_FOUND" | "INVALID";
   exitCode: number;
 }
@@ -241,9 +240,8 @@ const NOT_FOUND_CASES: NotFoundCase[] = [
     exitCode: 5,
   },
   {
-    desc: "a message matching the extra regex",
+    desc: "a message matching /does not exist/i",
     message: "merchant does not exist",
-    extra: /does not exist/i,
     code: "NOT_FOUND",
     exitCode: 5,
   },
@@ -253,21 +251,14 @@ const NOT_FOUND_CASES: NotFoundCase[] = [
     code: "INVALID",
     exitCode: 6,
   },
-  {
-    desc: "an extra regex given but not matching",
-    message: "currency mismatch",
-    extra: /does not exist/i,
-    code: "INVALID",
-    exitCode: 6,
-  },
 ];
 
 describe("mapNotFoundError", () => {
-  it.each(NOT_FOUND_CASES)("throws $code for $desc", ({ message, extra, code, exitCode }) => {
+  it.each(NOT_FOUND_CASES)("throws $code for $desc", ({ message, code, exitCode }) => {
     const err = new Error(message);
     let thrown: unknown;
     try {
-      mapNotFoundError(err, extra);
+      mapNotFoundError(err);
     } catch (caught) {
       thrown = caught;
     }

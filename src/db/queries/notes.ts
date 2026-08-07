@@ -7,9 +7,11 @@ export interface NoteRow {
   created_at: string;
 }
 
+const NOTE_SELECT = `SELECT id, content, category, created_at FROM notes`;
+
 export function listNotes(db: Database.Database): NoteRow[] {
   return db.prepare(
-    `SELECT id, content, category, created_at FROM notes ORDER BY created_at DESC`,
+    `${NOTE_SELECT} ORDER BY created_at DESC`,
   ).all() as NoteRow[];
 }
 
@@ -21,20 +23,20 @@ export function countNotes(db: Database.Database): number {
 /** Idempotent on (category, content): a verbatim repeat returns the existing row unchanged. Semantic dedup is the calling agent's job. */
 export function addNote(db: Database.Database, content: string, category = "fact"): NoteRow {
   const existing = db
-    .prepare(`SELECT id, content, category, created_at FROM notes WHERE category = ? AND content = ? LIMIT 1`)
+    .prepare(`${NOTE_SELECT} WHERE category = ? AND content = ? LIMIT 1`)
     .get(category, content) as NoteRow | undefined;
   if (existing) return existing;
   const { lastInsertRowid } = db
     .prepare(`INSERT INTO notes (content, category) VALUES (?, ?)`)
     .run(content, category);
   return db
-    .prepare(`SELECT id, content, category, created_at FROM notes WHERE id = ?`)
+    .prepare(`${NOTE_SELECT} WHERE id = ?`)
     .get(lastInsertRowid) as NoteRow;
 }
 
 export function deleteNote(db: Database.Database, id: number): NoteRow | null {
   const row = db
-    .prepare(`SELECT id, content, category, created_at FROM notes WHERE id = ?`)
+    .prepare(`${NOTE_SELECT} WHERE id = ?`)
     .get(id) as NoteRow | undefined;
   if (!row) return null;
   db.prepare(`DELETE FROM notes WHERE id = ?`).run(id);

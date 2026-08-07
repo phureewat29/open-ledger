@@ -1,4 +1,4 @@
-import type { OcrPreset } from "./index.js";
+import type { OCRPreset } from "./index.js";
 
 const PROMPT = `Extract all text from the image.
 
@@ -14,7 +14,7 @@ Formatting Rules:
 - Page Numbers: Wrap page numbers in <page_number>...</page_number>
 - Checkboxes: Use ☐ for unchecked and ☑ for checked boxes.`;
 
-export const typhoonOcrPreset: OcrPreset = {
+export const typhoonOcrPreset: OCRPreset = {
   // Every release so far carries the family name, whatever the version suffix.
   family: /typhoon/i,
   model: "typhoon-ocr1.5",

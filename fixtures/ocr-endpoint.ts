@@ -1,4 +1,4 @@
-import { resolveOcr, type OcrConfigSource, type OcrSettings } from "../src/extract/ocr.js";
+import { resolveOcr, type OCRConfigSource, type OCRSettings } from "../src/extract/ocr.js";
 
 /**
  * Suites needing a real OCR endpoint run under `describe.skipIf(!liveOcr)`:
@@ -7,13 +7,13 @@ import { resolveOcr, type OcrConfigSource, type OcrSettings } from "../src/extra
  */
 
 /** Env only: a persisted `~/.oled/config.json` must not silently turn the live suites on. */
-const liveOcrSource: OcrConfigSource = {
+const liveOcrSource: OCRConfigSource = {
   ocrBaseUrl: process.env.OLED_OCR_BASE_URL || "",
   ocrModel: process.env.OLED_OCR_MODEL || "",
   ocrApiKey: process.env.OLED_OCR_API_KEY || "",
 };
 
-export const liveOcr: OcrSettings | null = resolveOcr(liveOcrSource);
+export const liveOcr: OCRSettings | null = resolveOcr(liveOcrSource);
 
 /** The url alone decides whether OCR is configured; half-set env is a mistake and must not read as a clean skip. */
 if (!liveOcr && liveOcrSource.ocrModel) {
@@ -21,12 +21,12 @@ if (!liveOcr && liveOcrSource.ocrModel) {
 }
 
 /** `skipIf` does not narrow `liveOcr`, so the live cases reach it through here. */
-export function requireLiveOcr(): OcrSettings {
+export function requireLiveOcr(): OCRSettings {
   if (!liveOcr) throw new Error("no live OCR endpoint: set OLED_OCR_BASE_URL");
   return liveOcr;
 }
 
-export function requireLiveOcrSource(): OcrConfigSource {
+export function requireLiveOcrSource(): OCRConfigSource {
   requireLiveOcr();
   return liveOcrSource;
 }
@@ -45,7 +45,7 @@ export function liveOcrEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export const DEAD_OCR_BASE_URL = "http://127.0.0.1:1/v1";
 
 /** Obvious placeholders, with a short timeout so a broken test fails fast. */
-export function deadOcrSettings(over: Partial<OcrSettings> = {}): OcrSettings {
+export function deadOcrSettings(over: Partial<OCRSettings> = {}): OCRSettings {
   return {
     baseUrl: DEAD_OCR_BASE_URL,
     model: "test-ocr-model",

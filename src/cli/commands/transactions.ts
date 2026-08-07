@@ -421,7 +421,7 @@ async function recategorizeTransactions(opts: Record<string, unknown>): Promise<
   } catch (err) {
     // bulkRecategorize pre-filters cross-ledger targets, so a missing --set-account
     // target is the one not-found case reachable here.
-    mapNotFoundError(err, /does not exist/i);
+    mapNotFoundError(err);
   }
   emitObject({
     affected: result.affected,

@@ -186,6 +186,19 @@ interface BatchContext {
   batchId: string;
   /** The `--file` id every row inherits unless it names its own. */
   file?: string;
+  /** file_hash per source file id, resolved on first sight. */
+  fileHashes: Map<string, string | null>;
+}
+
+// file_hash is what makes transaction ids deterministic, and dedup relies on that.
+// Caching is sound because a commit writes transactions, never `files`.
+function fileHashOf(db: Database.Database, batch: BatchContext, fileId: string): string | null {
+  const seen = batch.fileHashes.get(fileId);
+  // A missing file caches as null, which `get` cannot tell from an absent key.
+  if (seen !== undefined) return seen;
+  const hash = findFileById(db, fileId)?.file_hash ?? null;
+  batch.fileHashes.set(fileId, hash);
+  return hash;
 }
 
 // Throws whatever the row's own commit throws; the caller catches it.
@@ -200,8 +213,7 @@ function commitRow(
   if (!record) return failRow(counters, index, "each transaction must be a JSON object.");
 
   const fileId = ((record.source_file_id as string | null | undefined) ?? batch.file) ?? null;
-  // file_hash is what makes transaction ids deterministic, and dedup relies on that.
-  const fileHash = fileId ? findFileById(db, fileId)?.file_hash ?? null : null;
+  const fileHash = fileId ? fileHashOf(db, batch, fileId) : null;
   const row: RowContext = {
     record,
     index,
@@ -234,7 +246,7 @@ export async function commitIngest(opts: CommitIngestOpts): Promise<void> {
   const counters: Counters = { posted: 0, duplicates: 0, failed: 0, raisedTotal: 0 };
   const results: Record<string, unknown>[] = [];
 
-  const batch: BatchContext = { batchId, file: opts.file };
+  const batch: BatchContext = { batchId, file: opts.file, fileHashes: new Map() };
 
   for (let index = 0; index < items.length; index++) {
     try {

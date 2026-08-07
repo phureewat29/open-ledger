@@ -13,10 +13,18 @@ import {
 } from "../output.js";
 import { openDb } from "../db.js";
 import { commitIngest } from "./commit.js";
+import { markFileFailed, markFileIngested } from "../../db/queries/files.js";
 // source.ts avoids mupdf/libsql, so this import is safe on the startup path.
 import { MAX_SOURCE_BYTES, SUPPORTED_EXTS } from "../../extract/source.js";
-// Types only, erased at compile time; the ingest modules themselves load lazily inside each action.
-import type { IngestEntry, PrepareOutcome, PrepareFailure } from "../../ingest/prepare.js";
+// prepare.ts keeps mupdf/libsql lazy internally (getMupdf() in extract/pdf.ts), so this import is safe on the startup path.
+import {
+  cleanCache,
+  discoverFiles,
+  prepareFile,
+  type IngestEntry,
+  type PrepareOutcome,
+  type PrepareFailure,
+} from "../../ingest/prepare.js";
 
 type PrepareSuccess = Extract<PrepareOutcome, { ok: true }>;
 
@@ -34,7 +42,6 @@ interface ListIngestOpts {
 
 async function listIngest(opts: ListIngestOpts): Promise<void> {
   const db = await openDb();
-  const { discoverFiles } = await import("../../ingest/prepare.js");
 
   let regex: RegExp | undefined;
   if (opts.regex) {
@@ -135,7 +142,6 @@ const PREPARE_PAYLOAD: {
 
 async function prepareIngest(pathOrId: string, opts: PrepareIngestOpts): Promise<void> {
   const db = await openDb();
-  const { prepareFile } = await import("../../ingest/prepare.js");
 
   const result = await prepareFile(db, pathOrId, {
     password: opts.password,
@@ -167,11 +173,9 @@ interface CompleteIngestOpts {
 
 async function completeIngest(id: string, opts: CompleteIngestOpts): Promise<void> {
   const db = await openDb();
-  const { markFileIngested } = await import("../../db/queries/files.js");
   const changes = markFileIngested(db, id, { source: opts.agent ?? "external" });
   if (changes === 0) fail("NOT_FOUND", `no ingest entry: ${id}`);
 
-  const { cleanCache } = await import("../../ingest/prepare.js");
   const { removed } = cleanCache(id);
   emitObject({ file_id: id, status: "ingested", cache_removed: removed });
 }
@@ -185,11 +189,9 @@ async function failIngest(id: string, opts: FailIngestOpts): Promise<void> {
   if (!opts.error) fail("USAGE", "`ingest fail` requires --error <text>");
 
   const db = await openDb();
-  const { markFileFailed } = await import("../../db/queries/files.js");
   const changes = markFileFailed(db, id, { source: opts.agent ?? "external", error: opts.error });
   if (changes === 0) fail("NOT_FOUND", `no ingest entry: ${id}`);
 
-  const { cleanCache } = await import("../../ingest/prepare.js");
   const { removed } = cleanCache(id);
   emitObject({ file_id: id, status: "failed", cache_removed: removed });
 }

@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import { getOledDir } from "./config.js";
 import { tryExecute } from "./lib/result.js";
+import { chmod600 } from "./perms.js";
 
 export function getContextPath(): string {
   return resolve(getOledDir(), "context.md");
@@ -19,7 +20,7 @@ function writeContext(content: string): void {
   const dir = dirname(p);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(p, content, { encoding: "utf-8", mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch {}
+  chmod600(p);
 }
 
 export function createContextTemplate(userName: string): void {

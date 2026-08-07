@@ -15,6 +15,12 @@ export interface MerchantRow {
   created_at: string;
 }
 
+const MERCHANT_SELECT = `SELECT id, canonical_name, default_account_id, created_at FROM merchants`;
+
+const MERCHANT_SELECT_BY_ALIAS = `SELECT m.id, m.canonical_name, m.default_account_id, m.created_at
+     FROM merchant_aliases ma
+     JOIN merchants m ON m.id = ma.merchant_id`;
+
 interface MerchantAliasConflict {
   pattern: string;
   held_by: string;
@@ -69,7 +75,7 @@ export function upsertMerchant(
   }
 
   const existing = db
-    .prepare(`SELECT id, canonical_name, default_account_id, created_at FROM merchants WHERE canonical_name = ?`)
+    .prepare(`${MERCHANT_SELECT} WHERE canonical_name = ?`)
     .get(canonical) as MerchantRow | undefined;
 
   let merchant: MerchantRow;
@@ -124,7 +130,7 @@ export function claimAlias(
 
 export function findMerchantByName(db: Database.Database, name: string): MerchantRow | null {
   const row = db
-    .prepare(`SELECT id, canonical_name, default_account_id, created_at FROM merchants WHERE canonical_name = ?`)
+    .prepare(`${MERCHANT_SELECT} WHERE canonical_name = ?`)
     .get(name.trim()) as MerchantRow | undefined;
   return row ?? null;
 }
@@ -174,9 +180,7 @@ export function findMerchantByAlias(
   if (!normalized) return null;
 
   const row = db.prepare(
-    `SELECT m.id, m.canonical_name, m.default_account_id, m.created_at
-     FROM merchant_aliases ma
-     JOIN merchants m ON m.id = ma.merchant_id
+    `${MERCHANT_SELECT_BY_ALIAS}
      WHERE ma.normalized_pattern = ?`,
   ).get(normalized) as MerchantRow | undefined;
 
@@ -223,7 +227,7 @@ export function findMerchantById(
   id: string,
 ): MerchantRow | null {
   const row = db
-    .prepare(`SELECT id, canonical_name, default_account_id, created_at FROM merchants WHERE id = ?`)
+    .prepare(`${MERCHANT_SELECT} WHERE id = ?`)
     .get(id) as MerchantRow | undefined;
   return row ?? null;
 }

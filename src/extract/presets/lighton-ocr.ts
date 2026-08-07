@@ -1,7 +1,7 @@
-import type { OcrPreset } from "./index.js";
+import type { OCRPreset } from "./index.js";
 
 /** LightOnOCR-2-1B: 11 languages, Thai not among them. Plain markdown, no wrapper. Card prescribes 200 DPI, 1540px longest side. */
-export const lightonOcrPreset: OcrPreset = {
+export const lightonOcrPreset: OCRPreset = {
   family: /lighton/i,
   model: "lightonocr-2-1b",
   prompt:

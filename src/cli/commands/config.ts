@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { mkdirSync } from "fs";
 import { openDb } from "../db.js";
+import { STRUCTURAL_ACCOUNTS, ensureStructuralAccount } from "../../accounts/accounts.js";
 import {
   config as appConfig,
   CONFIG_SECRETS,
@@ -11,7 +12,7 @@ import {
   type OpenLedgerConfig,
 } from "../../config.js";
 import { findCountryDefaults, availableCountries } from "../../datasets/defaults.js";
-import { getContextPath } from "../../context.js";
+import { createContextTemplate, getContextPath } from "../../context.js";
 import { printKeyValues } from "../format.js";
 import { currentMode, emit, fail, runAction, type OutputMode } from "../output.js";
 import * as z from "zod";
@@ -129,13 +130,11 @@ async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
   const db = await openDb();
 
   // Seeds the display-currency ledger's structural accounts so first ingest resolves them.
-  const { STRUCTURAL_ACCOUNTS, ensureStructuralAccount } = await import("../../accounts/accounts.js");
   for (const kind of Object.keys(STRUCTURAL_ACCOUNTS) as (keyof typeof STRUCTURAL_ACCOUNTS)[]) {
     ensureStructuralAccount(db, converged.displayCurrency, kind);
   }
 
   // createContextTemplate no-ops if the file exists, so this never clobbers edits.
-  const { createContextTemplate } = await import("../../context.js");
   createContextTemplate(converged.userName);
 }
 

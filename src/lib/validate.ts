@@ -114,6 +114,13 @@ interface Issue {
   values?: unknown[];
 }
 
+// A Map, not an object literal: `issue.expected` is arbitrary text and must not reach Object.prototype.
+const EXPECTED_TYPE_LABEL = new Map([
+  ["int", "an integer"],
+  ["number", "a number"],
+  ["boolean", "a boolean"],
+]);
+
 /** Render one non-missing issue into the pinned `<label> <constraint>` clause,
  *  echoing the raw pre-coercion value in `got "<value>"`. */
 function constraintClause(label: string, issue: Issue, raw: unknown): string {
@@ -121,10 +128,8 @@ function constraintClause(label: string, issue: Issue, raw: unknown): string {
   if (issue.code === "invalid_value") {
     return `${label} must be one of ${(issue.values ?? []).join(", ")}, got "${String(raw)}"`;
   }
-  if (issue.expected === "int") return `${label} must be an integer, got "${String(raw)}"`;
-  if (issue.expected === "number") return `${label} must be a number, got "${String(raw)}"`;
-  if (issue.expected === "boolean") return `${label} must be a boolean, got "${String(raw)}"`;
-  return `${label} ${issue.message}`;
+  const expected = EXPECTED_TYPE_LABEL.get(issue.expected ?? "");
+  return expected ? `${label} must be ${expected}, got "${String(raw)}"` : `${label} ${issue.message}`;
 }
 
 /** An issue whose normalized value is `undefined` is a missing-required field.

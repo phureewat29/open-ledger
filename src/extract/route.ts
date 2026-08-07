@@ -1,8 +1,8 @@
 export type TextLayer = "complete" | "partial" | "none";
-export type OcrAvailability = "ready" | "unset";
+export type OCRAvailability = "ready" | "unset";
 export type Reader = "text-layer" | "ocr" | "agent";
 
-const READER: Record<`${TextLayer}/${OcrAvailability}`, Reader> = {
+const READER: Record<`${TextLayer}/${OCRAvailability}`, Reader> = {
   "complete/ready": "text-layer",
   "complete/unset": "text-layer",
   "partial/ready": "ocr",
@@ -15,7 +15,7 @@ const READER: Record<`${TextLayer}/${OcrAvailability}`, Reader> = {
  * File kind isn't an axis: an image enters as `"none"` and routes like a scan.
  * `ocr` means configured, not reachable: a dead endpoint aborts loudly.
  */
-export function readerFor(textLayer: TextLayer, ocr: OcrAvailability): Reader {
+export function readerFor(textLayer: TextLayer, ocr: OCRAvailability): Reader {
   return READER[`${textLayer}/${ocr}`];
 }
 

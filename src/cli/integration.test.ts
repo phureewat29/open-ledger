@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Database from "libsql";
 import { createSandbox, makeRunCLI, type CLIRunner, type Sandbox } from "../../fixtures/sandbox.js";
-import { COMMANDS } from "./program.js";
+import { buildProgram } from "./program.js";
 import { migrate } from "../db/schema.js";
 import { ensureLedgerRoot } from "../accounts/accounts.js";
 import { insertTransaction } from "../db/queries/transactions.js";
@@ -39,11 +39,11 @@ describe("cli integration (subprocess)", () => {
     expect(/\x1b\[[0-9;]*m/.test(stdout)).toBe(false);
   }, 30000);
 
-  // Derived from COMMANDS, which consistency.test.ts pins to the registered tree.
+  // The screen is derived from the registered tree, so the tree is what it must show.
   it("--help renders every command in the help screen", async () => {
     const { stdout, code } = await runCLI(["--help"]);
     expect(code).toBe(0);
-    for (const { name } of COMMANDS) expect(stdout).toContain(name);
+    for (const command of buildProgram().commands) expect(stdout).toContain(command.name());
   }, 30000);
 });
 

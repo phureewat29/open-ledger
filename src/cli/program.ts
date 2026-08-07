@@ -20,27 +20,21 @@ import { registerNotes } from "./commands/notes.js";
 import { registerDatasets } from "./commands/datasets.js";
 import { registerOpen } from "./commands/open.js";
 
-export const COMMANDS = [
-  { name: "status", desc: "Status: config, database, ledger counts, net worth (default)" },
-  { name: "doctor", desc: "Diagnose the harness environment" },
-  { name: "setup", desc: "Install the skill for an agent CLI (--dir <path>)" },
-  { name: "config", desc: "Configuration" },
-  { name: "ingest", desc: "Ingest pipeline: list / prepare / commit / done / fail" },
-  { name: "files", desc: "Browse ingested files (list / show / drop)" },
-  { name: "transactions", desc: "Transactions: list / show / add / update / delete / recategorize / dedupe / merge" },
-  { name: "accounts", desc: "Manage the chart of accounts" },
-  { name: "merchants", desc: "Manage merchants and their default accounts" },
-  { name: "questions", desc: "List, answer, and defer open questions" },
-  { name: "report", desc: "Income, expenses, and networth" },
-  { name: "notes", desc: "Manage freeform notes" },
-  { name: "datasets", desc: "Reference datasets" },
-  { name: "open", desc: "Open the data folder in file explorer" },
-];
-
 const GLOBAL_OPTIONS = [
   { name: "--json", desc: "Emit NDJSON (machine-readable) instead of human output" },
   { name: "--no-color", desc: "Disable ANSI color output" },
 ];
+
+// Navigation hints the overview screen adds; they would only be noise inside the command's own help.
+const ROOT_HELP_HINTS = new Map([
+  ["status", "(default)"],
+  ["setup", "(--dir <path>)"],
+]);
+
+function rootHelpDesc(cmd: Command): string {
+  const hint = ROOT_HELP_HINTS.get(cmd.name());
+  return hint ? `${cmd.description()} ${hint}` : cmd.description();
+}
 
 // `oled ingest list` for a leaf, `oled` for the root.
 function commandPath(cmd: Command): string {
@@ -88,7 +82,7 @@ export function buildProgram(): Command {
     // Bare `oled` runs the same action as `status`, which redacts by default.
     .action(runAction(showStatus));
 
-  registerOpen(program);
+  // Registration order is the help screen's order.
   registerStatus(program);
   registerDoctor(program);
   registerSetup(program);
@@ -102,6 +96,7 @@ export function buildProgram(): Command {
   registerReport(program);
   registerNotes(program);
   registerDatasets(program);
+  registerOpen(program);
 
   // --json/--no-color repeated on every command so they work before or after the subcommand name.
   function configureEveryLevel(cmd: Command): void {
@@ -124,7 +119,10 @@ export function buildProgram(): Command {
     // configureHelp is inherited by subcommands, so guard explicitly: only the root gets the branded screen.
     formatHelp: (cmd, helper) =>
       cmd === program
-        ? helpScreen(COMMANDS, GLOBAL_OPTIONS)
+        ? helpScreen(
+            program.commands.map((c) => ({ name: c.name(), desc: rootHelpDesc(c) })),
+            GLOBAL_OPTIONS,
+          )
         : Help.prototype.formatHelp.call(helper, cmd, helper),
   });
 

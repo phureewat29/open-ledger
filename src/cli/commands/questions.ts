@@ -1,5 +1,13 @@
 import type { Command } from "commander";
-import type { QuestionRow } from "../../db/queries/questions.js";
+import {
+  listQuestions as queryQuestions,
+  countQuestions,
+  clampQuestionsLimit,
+  closeQuestion,
+  deferQuestion as deferQuestionRow,
+  type QuestionRow,
+} from "../../db/queries/questions.js";
+import { applyRedaction } from "../../privacy/redactor.js";
 import { emitCappedSummary, emitList, fail, redactionEnabled, runAction, type Column } from "../output.js";
 import { clampOffset } from "../../lib/limit.js";
 import { openDb } from "../db.js";
@@ -77,16 +85,12 @@ const LIST_QUESTIONS_SPEC = z.object({
 
 async function listQuestions(opts: ListQuestionsOpts): Promise<void> {
   const parsed = parseInput(LIST_QUESTIONS_SPEC, opts as Record<string, unknown>);
-  const { listQuestions: queryQuestions, countQuestions, clampQuestionsLimit } = await import(
-    "../../db/queries/questions.js"
-  );
   const db = await openDb();
   // One filter object for both queries, so `total` counts what the list filtered.
   const filter = { batch_id: parsed.batch, includeDeferred: !!opts.includeDeferred };
   const rows = queryQuestions(db, { ...filter, limit: parsed.limit, offset: parsed.offset });
   let listRows = rows.map(toListRow);
   if (redactionEnabled(opts)) {
-    const { applyRedaction } = await import("../../privacy/redactor.js");
     listRows = applyRedaction(listRows, true, QUESTION_REDACT_FIELDS);
   }
   emitList(listRows, LIST_COLUMNS);
@@ -111,7 +115,6 @@ async function answerQuestion(id: string, opts: Record<string, unknown>): Promis
     : [];
   const ids = [id, ...also];
 
-  const { closeQuestion } = await import("../../db/queries/questions.js");
   const db = await openDb();
 
   const results: AnsweredRow[] = [];
@@ -129,7 +132,6 @@ const DEFER_SPEC = z.object({
 
 async function deferQuestion(id: string, opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(DEFER_SPEC, opts);
-  const { deferQuestion: deferQuestionRow } = await import("../../db/queries/questions.js");
   const db = await openDb();
   const ok = deferQuestionRow(db, id, parsed.days);
   if (!ok) fail("NOT_FOUND", `question "${id}" not found`);

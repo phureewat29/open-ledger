@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { emitList, emitSummary, fail, runAction, type Column } from "../output.js";
 import {
-  listDatasets,
+  listDatasets as queryDatasets,
   readDataset,
   listDatasetNames,
   datasetHasKinds,
@@ -47,12 +47,12 @@ interface DatasetsOpts {
   kind?: string;
 }
 
-function datasets(name: string | undefined, opts: DatasetsOpts): void {
+function listDatasets(name: string | undefined, opts: DatasetsOpts): void {
   if (name === undefined) {
     if (opts.country || opts.kind) {
       fail("USAGE", "--country/--kind need a dataset name (e.g. `oled datasets institutions --country th`)");
     }
-    const sets = listDatasets();
+    const sets = queryDatasets();
     emitList(sets, DATASET_COLUMNS);
     emitSummary({ returned: sets.length });
     return;
@@ -85,5 +85,5 @@ export function registerDatasets(program: Command): void {
         "Example: oled datasets institutions --country th --kind bank --json",
       ].join("\n"),
     )
-    .action(runAction(datasets));
+    .action(runAction(listDatasets));
 }

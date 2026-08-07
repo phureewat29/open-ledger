@@ -6,7 +6,7 @@ import {
   ocrPages,
   probeOcrEndpoint,
   resolveOcr,
-  type OcrConfigSource,
+  type OCRConfigSource,
 } from "./ocr.js";
 import { PRESETS, PRESET_NAMES } from "./presets/index.js";
 import type { PageImage } from "./pdf.js";
@@ -23,7 +23,7 @@ const page1: PageImage = { page: 1, mime: "image/png", bytes: png };
 const page2: PageImage = { page: 2, mime: "image/png", bytes: png };
 
 // Mirrors the shipped config defaults (OCR unset).
-function cfg(over: Partial<OcrConfigSource> = {}): OcrConfigSource {
+function cfg(over: Partial<OCRConfigSource> = {}): OCRConfigSource {
   return { ocrBaseUrl: "", ocrModel: "", ocrApiKey: "", ...over };
 }
 

@@ -25,21 +25,27 @@ import {
   isLedgerScopedId,
   newTransactionId,
   newGroupId,
-  typeFromId,
 } from "../lib/ids.js";
 import { toMinorUnits } from "../lib/money.js";
-import { ACCOUNT_TYPES, ledgerExists, type AccountType } from "../db/queries/accounts.js";
-import { recordQuestion } from "../db/queries/questions.js";
-import type { MerchantUpsertInput } from "../db/queries/merchants.js";
+import { ledgerExists } from "../db/queries/accounts.js";
+import { upsertMerchant, type MerchantUpsertInput } from "../db/queries/merchants.js";
+import {
+  raiseCurrencyMismatch,
+  raiseDirtyInput,
+  raiseSimilarAccount,
+  raiseUncategorizedFallback,
+  raiseUnknownLedger,
+  raiseUnknownMerchant,
+  type QuestionContext,
+  type TransactionSide,
+} from "./questions.js";
 import { noiseTokens } from "../datasets/noise.js";
 import { config } from "../config.js";
 
 export const CURRENCY_MISMATCH_HINT =
   "add a linked conversion pair through <currency>:equity:conversion (one leg per currency, sharing a group)";
 
-export interface TransactionCommitContext {
-  readonly batchId: string | null;
-  readonly fileId: string | null;
+export interface TransactionCommitContext extends QuestionContext {
   // Enables idempotent transaction id derivation.
   readonly fileHash?: string | null;
 }
@@ -75,8 +81,6 @@ interface CommitDrop {
   raisedQuestions: number;
   unopenedLedger?: string;
 }
-
-type TransactionSide = "debit" | "credit";
 
 type SideHow =
   | "exact"
@@ -126,168 +130,6 @@ type LinkedTransactionsOutcome =
     }
   | CommitDrop;
 
-const NON_WORD = /[^\p{L}\p{N}]+/gu;
-
-function normalizeForKey(raw: string): string {
-  return raw.toLowerCase().replace(NON_WORD, " ").replace(/\s+/g, " ").trim();
-}
-function descriptorKey(descriptor: string): string {
-  return `descriptor:${normalizeForKey(descriptor)}`;
-}
-function accountIdKey(id: string): string {
-  return `account:${id}`;
-}
-function accountPairKey(a: string, b: string): string {
-  const [lo, hi] = [a, b].sort();
-  return `account-pair:${lo}|${hi}`;
-}
-
-/** Questions belong to a batch; outside one there is nothing to hang them on. */
-function raiseQuestion(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  input: Omit<Parameters<typeof recordQuestion>[1], "file_id" | "batch_id">,
-): void {
-  if (!ctx.batchId) return;
-  recordQuestion(db, { ...input, file_id: ctx.fileId, batch_id: ctx.batchId });
-}
-
-function raiseDirtyInput(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  input: RawTransactionInput,
-  reason: string,
-): void {
-  raiseQuestion(db, ctx, {
-    transaction_id: null,
-    account_id: null,
-    kind: "dirty_input",
-    prompt:
-      `The ingest input produced a transaction that couldn't be validated: ${reason}. ` +
-      `Raw description: "${input.description}" on ${input.date}.`,
-    context: { description: input.description, date: input.date, reason },
-  });
-}
-
-function raiseUnknownMerchant(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  input: RawTransactionInput,
-  transactionId: string,
-  attemptedId: string,
-): void {
-  const descriptor = input.raw_descriptor || input.description;
-  raiseQuestion(db, ctx, {
-    transaction_id: transactionId,
-    account_id: null,
-    kind: "unknown_merchant",
-    prompt:
-      `The ingest input referenced merchant id "${attemptedId}" but no such merchant exists. ` +
-      `Link "${descriptor}" to an existing merchant or leave it unlinked.`,
-    context: { rule_key: descriptorKey(descriptor), descriptor, attempted_id: attemptedId },
-  });
-}
-
-function raiseUncategorizedFallback(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  side: TransactionSide,
-  accountId: string,
-  transactionId: string,
-): void {
-  raiseQuestion(db, ctx, {
-    transaction_id: transactionId,
-    account_id: accountId,
-    kind: "uncategorized",
-    prompt:
-      `The ${side} side couldn't be matched to a well-formed account and was booked to ` +
-      `"${accountId}". Recategorize it onto a real account, or re-run with a full ` +
-      `currency-prefixed colon-path hint (e.g. thb:expense:food:dining).`,
-    context: { rule_key: accountIdKey(accountId), placeholder_id: accountId, side },
-  });
-}
-
-/** Anchored on the lookalike: merging deletes the created row, which would
- *  otherwise cascade this question away unanswered. */
-function raiseSimilarAccount(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  side: TransactionSide,
-  accountId: string,
-  similarId: string,
-  transactionId: string,
-): void {
-  raiseQuestion(db, ctx, {
-    transaction_id: transactionId,
-    account_id: similarId,
-    kind: "similar_accounts",
-    prompt:
-      `The ${side} side posted to "${accountId}", created as asked, but "${similarId}" ` +
-      `already looks like the same account. Merge them with \`accounts merge\`, or leave ` +
-      `them apart if they are different.`,
-    context: {
-      rule_key: accountPairKey(accountId, similarId),
-      created_id: accountId,
-      similar_id: similarId,
-      side,
-    },
-  });
-}
-
-function raiseCurrencyMismatch(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  input: RawTransactionInput,
-  debit: { id: string; currency: string },
-  credit: { id: string; currency: string },
-): void {
-  raiseQuestion(db, ctx, {
-    transaction_id: null,
-    account_id: null,
-    kind: "currency_mismatch",
-    prompt:
-      `Transaction "${input.description}" on ${input.date} moves money between ` +
-      `${debit.id} (${debit.currency}) and ${credit.id} (${credit.currency}), which are ` +
-      `different ledgers. A single transaction can't cross currencies: record it as a ` +
-      `linked conversion pair (one leg into ${debit.currency.toLowerCase()}:equity:conversion, one out of ` +
-      `${credit.currency.toLowerCase()}:equity:conversion, sharing a group) so the FX conversion is explicit.`,
-    context: { debit, credit, date: input.date, description: input.description },
-  });
-}
-
-// account_id stays null: the named account can't exist without the ledger.
-function raiseUnknownLedger(
-  db: Database.Database,
-  ctx: TransactionCommitContext,
-  input: RawTransactionInput,
-  side: TransactionSide,
-  accountId: string,
-  ledger: string,
-): void {
-  raiseQuestion(db, ctx, {
-    transaction_id: null,
-    account_id: null,
-    kind: "currency_mismatch",
-    prompt:
-      `Transaction "${input.description}" on ${input.date} books its ${side} side to ` +
-      `"${accountId}", whose ledger "${ledger}" does not exist here. Opening a ledger is a ` +
-      `deliberate act, never an ingest side effect: ` +
-      (ACCOUNT_TYPES.includes(typeFromId(accountId) as AccountType)
-        ? `create the account first ` +
-          `(\`oled accounts create --id ${accountId} --name <name> --type ${typeFromId(accountId)}\`), ` +
-          `or fix the currency prefix and re-ingest. Nothing was posted.`
-        : `fix the id to <currency>:<type>:<path> against an open ledger and re-ingest. ` +
-          `Nothing was posted.`),
-    context: {
-      side,
-      account_id: accountId,
-      ledger,
-      date: input.date,
-      description: input.description,
-    },
-  });
-}
-
 /** One side, resolved: the hint is null only when it posted exactly as asked. */
 interface PreparedSide {
   side: TransactionSide;
@@ -314,9 +156,11 @@ interface UnopenedLedgerRefusal {
   ledger: string;
 }
 
-type PrepareResult =
-  | { ok: true; prepared: PreparedTransaction }
-  | { ok: false; reason: "dirty_input"; message: string }
+type DirtyInput = { ok: false; reason: "dirty_input"; message: string };
+
+/** What `refuseRow` decides, all of it by pure read. */
+type PrepareFailure =
+  | DirtyInput
   | {
       ok: false;
       reason: "currency_mismatch";
@@ -326,7 +170,9 @@ type PrepareResult =
     }
   | UnopenedLedgerRefusal;
 
-type PrepareFailure = Extract<PrepareResult, { ok: false }>;
+/** What `resolveRow` decides, once refusals are past: only the row's own
+ *  accounts can still fail it. */
+type ResolveResult = { ok: true; prepared: PreparedTransaction } | DirtyInput;
 
 function validateRawTransaction(input: RawTransactionInput): ValidateTransactionResult {
   const fields = validateTransactionFields(input);
@@ -438,14 +284,14 @@ function refuseRow(db: Database.Database, input: RawTransactionInput): PrepareFa
   return null;
 }
 
-function prepareTransaction(
+/** Resolution writes — placeholder accounts, ledger structure — and no later
+ *  refusal can take them back, so `refuseRow` must have cleared this row (and,
+ *  in a group, every other leg) before this runs. */
+function resolveRow(
   db: Database.Database,
   ctx: TransactionCommitContext,
   input: RawTransactionInput,
-): PrepareResult {
-  const refused = refuseRow(db, input);
-  if (refused) return refused;
-
+): ResolveResult {
   const resolved = resolveTransactionAccounts(
     db,
     input.debit_account_id,
@@ -527,14 +373,15 @@ const HINT_DISPATCH: {
 } = {
   // A placeholder path is unambiguous: reported in the side summary, no question raised.
   placeholder_created: () => ({ how: "placeholder_created", raised: 0 }),
-  uncategorized_fallback: (hint, { db, ctx, side, transactionId }) => {
-    raiseUncategorizedFallback(db, ctx, side, hint.accountId, transactionId);
-    return { how: "uncategorized_fallback", raised: 1 };
-  },
-  similar_account: (hint, { db, ctx, side, transactionId }) => {
-    raiseSimilarAccount(db, ctx, side, hint.accountId, hint.similarId, transactionId);
-    return { how: "similar_account", similar_to: hint.similarId, raised: 1 };
-  },
+  uncategorized_fallback: (hint, { db, ctx, side, transactionId }) => ({
+    how: "uncategorized_fallback",
+    raised: raiseUncategorizedFallback(db, ctx, side, hint.accountId, transactionId),
+  }),
+  similar_account: (hint, { db, ctx, side, transactionId }) => ({
+    how: "similar_account",
+    similar_to: hint.similarId,
+    raised: raiseSimilarAccount(db, ctx, side, hint.accountId, hint.similarId, transactionId),
+  }),
 };
 
 const POSTED_EXACTLY: SideOutcome = { how: "exact", raised: 0 };
@@ -549,20 +396,20 @@ const PREPARE_FAILURE_DISPATCH: {
     ctx: TransactionCommitContext,
     failure: Extract<PrepareFailure, { reason: K }>,
     input: RawTransactionInput,
-  ) => TransactionDropReason;
+  ) => { reason: TransactionDropReason; raised: 0 | 1 };
 } = {
-  dirty_input: (db, ctx, failure, input) => {
-    raiseDirtyInput(db, ctx, input, failure.message);
-    return "dirty_input";
-  },
-  currency_mismatch: (db, ctx, failure, input) => {
-    raiseCurrencyMismatch(db, ctx, input, failure.debit, failure.credit);
-    return "currency_mismatch";
-  },
-  unknown_ledger: (db, ctx, failure, input) => {
-    raiseUnknownLedger(db, ctx, input, failure.side, failure.accountId, failure.ledger);
-    return "currency_mismatch";
-  },
+  dirty_input: (db, ctx, failure, input) => ({
+    reason: "dirty_input",
+    raised: raiseDirtyInput(db, ctx, input, failure.message),
+  }),
+  currency_mismatch: (db, ctx, failure, input) => ({
+    reason: "currency_mismatch",
+    raised: raiseCurrencyMismatch(db, ctx, input, failure.debit, failure.credit),
+  }),
+  unknown_ledger: (db, ctx, failure, input) => ({
+    reason: "currency_mismatch",
+    raised: raiseUnknownLedger(db, ctx, input, failure.side, failure.accountId, failure.ledger),
+  }),
 };
 
 function reportPrepareFailure(
@@ -571,12 +418,12 @@ function reportPrepareFailure(
   failure: PrepareFailure,
   input: RawTransactionInput,
 ): CommitFailure {
-  const reason = PREPARE_FAILURE_DISPATCH[failure.reason](db, ctx, failure as never, input);
+  const dropped = PREPARE_FAILURE_DISPATCH[failure.reason](db, ctx, failure as never, input);
   return {
     ok: false,
-    reason,
+    reason: dropped.reason,
     message: failure.message,
-    raisedQuestions: 1,
+    raisedQuestions: dropped.raised,
     ...(failure.reason === "unknown_ledger" ? { unopenedLedger: failure.ledger } : {}),
   };
 }
@@ -589,8 +436,13 @@ function applyTransactionHints(
 ): { sides: CommittedSide[]; raisedQuestions: number } {
   let raised = 0;
   if (prepared.merchant.attemptedUnknownId) {
-    raiseUnknownMerchant(db, ctx, prepared.raw, transactionId, prepared.merchant.attemptedUnknownId);
-    raised++;
+    raised += raiseUnknownMerchant(
+      db,
+      ctx,
+      prepared.raw,
+      transactionId,
+      prepared.merchant.attemptedUnknownId,
+    );
   }
 
   const sides: CommittedSide[] = [];
@@ -655,7 +507,10 @@ export function commitTransaction(
   ctx: TransactionCommitContext,
   input: RawTransactionInput,
 ): TransactionCommitOutcome {
-  const prep = prepareTransaction(db, ctx, input);
+  const refused = refuseRow(db, input);
+  if (refused) return reportPrepareFailure(db, ctx, refused, input);
+
+  const prep = resolveRow(db, ctx, input);
   if (!prep.ok) return reportPrepareFailure(db, ctx, prep, input);
   const prepared = prep.prepared;
 
@@ -731,6 +586,24 @@ function mergeHeaderLeg(
   };
 }
 
+/**
+ * Every leg carries the header's merchant, so one claim covers the group: left
+ * to `insertTransaction`, the same merchant would be upserted, and its alias
+ * re-claimed, once per leg. The claim sits ahead of the legs' transaction, so a
+ * transaction still cannot land without its merchant. What that costs: a group
+ * abandoned mid-insert leaves the merchant and its alias claim behind, where a
+ * per-leg upsert would have rolled back with the write.
+ */
+function claimGroupMerchant(
+  db: Database.Database,
+  inputs: TransactionInput[],
+): TransactionInput[] {
+  const first = inputs[0];
+  if (first.merchant_id || !first.merchant) return inputs;
+  const { id } = upsertMerchant(db, first.merchant, first.merchant.noise_tokens);
+  return inputs.map((input) => ({ ...input, merchant_id: id, merchant: null }));
+}
+
 /** Atomic under one group_id: every leg is prepared first; if any fails, nothing is inserted. */
 export function commitLinkedTransactions(
   db: Database.Database,
@@ -759,14 +632,14 @@ export function commitLinkedTransactions(
 
   const preps: PreparedTransaction[] = [];
   for (const raw of merged) {
-    const prep = prepareTransaction(db, ctx, raw);
+    const prep = resolveRow(db, ctx, raw);
     if (!prep.ok) return reportPrepareFailure(db, ctx, prep, raw);
     preps.push(prep.prepared);
   }
 
   const { results, group_id } = insertLinkedTransactions(
     db,
-    preps.map((p) => p.input),
+    claimGroupMerchant(db, preps.map((p) => p.input)),
     { group_id: groupId },
   );
 

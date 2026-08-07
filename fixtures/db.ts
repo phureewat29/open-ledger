@@ -14,7 +14,7 @@ export function freshDb(seed?: (db: Database.Database) => void): Database.Databa
   return db;
 }
 
-export type SeedAccountInput = Partial<CreateAccountInput> & { id: string };
+type SeedAccountInput = Partial<CreateAccountInput> & { id: string };
 
 /**
  * Seeds one account from what its id already says: type from the second

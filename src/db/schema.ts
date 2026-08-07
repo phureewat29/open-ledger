@@ -91,13 +91,10 @@ function hasUserTables(db: Database.Database): boolean {
   return !!row;
 }
 
-// Checkpoints the WAL first so the copy is complete; a non-WAL database tolerates the checkpoint failing.
+// Folds the WAL into the main file first, or the copy would miss every committed row still
+// in it. A rollback-journal database has no WAL and the checkpoint is a no-op there.
 function backupDatabase(db: Database.Database, dbPath: string): void {
-  try {
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  } catch {
-    // Rollback-journal databases have no WAL to checkpoint; the copy still holds.
-  }
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   copyFileSync(dbPath, `${dbPath}.${backupStamp()}.bak`);
   pruneBackups(dbPath);
 }
@@ -123,7 +120,8 @@ function pruneBackups(dbPath: string): void {
     try {
       unlinkSync(join(dir, name));
     } catch {
-      // A backup already gone is fine; pruning is best-effort.
+      // Housekeeping only, and it runs mid-migration: an undeletable stale copy (a virus
+      // scanner holding it open) must not fail the upgrade the new backup already covers.
     }
   }
 }

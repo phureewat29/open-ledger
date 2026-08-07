@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
-import { config, getConfigPath, getDataDir } from "../../config.js";
+import { config, configFileProblem, getConfigPath, getDataDir } from "../../config.js";
 import { listMissingTables } from "../../db/schema.js";
 import { openDb } from "../db.js";
 import { getVersion } from "../../setup/install.js";
@@ -29,6 +29,19 @@ const INIT_HINT = "run `oled config --init` to create it";
 function configCheck(): Check {
   const ok = existsSync(getConfigPath());
   return ok ? { name: "config_exists", ok } : { name: "config_exists", ok, detail: INIT_HINT };
+}
+
+// buildConfig() degrades to defaults so a bad file can't take down the CLI itself; this is where
+// that silence ends.
+function configReadableCheck(): Check {
+  const name = "config_readable";
+  const problem = configFileProblem();
+  if (!problem) return { name, ok: true };
+  return {
+    name,
+    ok: false,
+    detail: `${getConfigPath()} is unusable, so defaults are in use: ${problem}`,
+  };
 }
 
 async function dbOpenCheck(): Promise<{ check: Check; db: Database.Database | null }> {
@@ -105,6 +118,7 @@ async function runChecks(): Promise<Check[]> {
   const checks: Check[] = [];
 
   checks.push(configCheck());
+  checks.push(configReadableCheck());
 
   const { check: dbCheck, db } = await dbOpenCheck();
   checks.push(dbCheck);

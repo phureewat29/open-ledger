@@ -366,7 +366,7 @@ interface BulkRecategorizeSet {
 }
 
 /** Spot-check sample, not the full id list; the CLI help quotes this cap. */
-export const RECATEGORIZE_SAMPLE_LIMIT = 10;
+const RECATEGORIZE_SAMPLE_LIMIT = 10;
 
 interface BulkRecategorizeResult {
   affected: number;

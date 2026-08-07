@@ -93,13 +93,8 @@ function bestFuzzyMatch(db: Database.Database, accountId: string): string | null
   const currency = currencyOf(accountId);
   const leaf = leafSegment(accountId).replace(/[-_]+/g, " ");
   if (!leaf) return null;
-  const matches = findAccountsByFuzzyName(db, leaf, FUZZY_THRESHOLD);
-  const candidate = matches.find(
-    (m) =>
-      m.account.type === type &&
-      currencyOf(m.account.id) === currency &&
-      !sharesLineage(m.account.id, accountId),
-  );
+  const matches = findAccountsByFuzzyName(db, leaf, FUZZY_THRESHOLD, { type, ledger: currency });
+  const candidate = matches.find((m) => !sharesLineage(m.account.id, accountId));
   return candidate?.account.id ?? null;
 }
 

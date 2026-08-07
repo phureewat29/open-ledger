@@ -3,13 +3,13 @@ import {
   classifyPage,
   readerFor,
   verdictOf,
-  type OcrAvailability,
+  type OCRAvailability,
   type PageFacts,
   type Reader,
   type TextLayer,
 } from "./route.js";
 
-const ROUTES: [TextLayer, OcrAvailability, Reader][] = [
+const ROUTES: [TextLayer, OCRAvailability, Reader][] = [
   ["complete", "ready", "text-layer"],
   ["complete", "unset", "text-layer"],
   ["partial", "ready", "ocr"],

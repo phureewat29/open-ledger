@@ -5,13 +5,14 @@ import type { Command } from "commander";
 import { getDataDir } from "../../config.js";
 import { currentMode, emit, runAction } from "../output.js";
 
+const OPENERS: Partial<Record<NodeJS.Platform, string>> = {
+  darwin: "open",
+  win32: "explorer",
+  linux: "xdg-open",
+};
+
 function openerCommand(): string | null {
-  switch (process.platform) {
-    case "darwin": return "open";
-    case "win32":  return "explorer";
-    case "linux":  return "xdg-open";
-    default:       return null;
-  }
+  return OPENERS[process.platform] ?? null;
 }
 
 // Never rejects: resolves with an error message on spawn failure, else undefined.

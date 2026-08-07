@@ -3,7 +3,8 @@ import { config } from "../config.js";
 import { DBNotReadyError } from "./errors.js";
 import { migrate } from "./schema.js";
 import { dirname } from "path";
-import { mkdirSync, existsSync, chmodSync } from "fs";
+import { mkdirSync, existsSync } from "fs";
+import { chmod600 } from "../perms.js";
 
 let singleDb: Database.Database | null = null;
 
@@ -28,7 +29,7 @@ function openDb(dbPath: string): Database.Database {
   migrate(db, dbPath);
   // WAL mode writes committed rows into the -wal/-shm sidecars, so the 0600 promise has to cover them too.
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-    try { chmodSync(path, 0o600); } catch {}
+    chmod600(path);
   }
   return db;
 }

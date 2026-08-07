@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { getPeriodTotals, subtractTotals } from "../../accounts/balances.js";
 import { printKeyValues } from "../format.js";
 import { openDb } from "../db.js";
 import { currentMode, emit, fail, runAction } from "../output.js";
@@ -19,7 +20,6 @@ async function showReport(opts: ShowReportOpts): Promise<void> {
     fail("USAGE", `--to must be an ISO date (YYYY-MM-DD), got "${opts.to}"`);
   }
 
-  const { getPeriodTotals, subtractTotals } = await import("../../accounts/balances.js");
   const db = await openDb();
   const totals = getPeriodTotals(db, opts.from, opts.to);
   // Net is taken in minor units per currency before anything becomes decimal; a THB

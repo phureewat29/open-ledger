@@ -5,11 +5,9 @@ import { buildPatch, type PatchField } from "../../lib/patch.js";
 import { errorMessage } from "../../lib/result.js";
 
 /** At rest: bank_name is uppercased, account_number_masked is check-digit-normalized, metadata is JSON. */
-export type AccountType = "asset" | "liability" | "income" | "expense" | "equity";
+export const ACCOUNT_TYPES = ["asset", "liability", "income", "expense", "equity"] as const;
 
-export const ACCOUNT_TYPES: ReadonlyArray<AccountType> = [
-  "asset", "liability", "income", "expense", "equity",
-];
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 /**
  * Currency is derived from the id's currency head, never stored — the same

@@ -16,9 +16,9 @@ const PDF_MIME = "application/pdf";
 // mupdf's authenticatePassword returns 0 on a wrong password, non-zero on success.
 const MUPDF_AUTH_FAILED = 0;
 
-type UnlockResult =
-  | { ok: true; decrypted: Buffer }
-  | { ok: false; reason: "unsupported_document" | "wrong_password" };
+export type UnlockFailureReason = "unsupported_document" | "wrong_password";
+
+type UnlockResult = { ok: true; decrypted: Buffer } | { ok: false; reason: UnlockFailureReason };
 
 export async function isEncryptedPdf(bytes: Buffer): Promise<boolean> {
   const mupdf = await getMupdf();

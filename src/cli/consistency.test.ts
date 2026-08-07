@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
-import { buildProgram, COMMANDS } from "./program.js";
+import { buildProgram } from "./program.js";
 
 // buildProgram() only builds the commander tree: no argv parsing, no action run.
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
@@ -115,16 +115,14 @@ function extractFlagTokens(span: string): string[] {
 }
 
 describe("docs consistency (no subprocesses)", () => {
-  it("top-level command names: program tree == README Commands section == SKILL.md spans == help-screen COMMANDS array", () => {
+  it("top-level command names: program tree == README Commands section == SKILL.md spans", () => {
     const program = buildProgram();
     const fromProgram = new Set(topLevelNames(program));
     const fromReadme = extractReadmeCommandNames(README);
     const fromSkill = extractSpanNouns(SKILL);
-    const fromCommandsArray = new Set(COMMANDS.map((c) => c.name));
 
     expect(fromReadme).toEqual(fromProgram);
     expect(fromSkill).toEqual(fromProgram);
-    expect(fromCommandsArray).toEqual(fromProgram);
   });
 
   it("every subcommand named in a SKILL.md span resolves to a real subcommand (no silent fallback to the parent)", () => {
@@ -186,7 +184,7 @@ describe("docs consistency (no subprocesses)", () => {
 const PLUGIN_MANIFEST = JSON.parse(readFileSync(resolve(repoRoot, "plugin.json"), "utf8")) as Record<string, unknown>;
 const PACKAGE = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")) as Record<string, unknown>;
 
-/** The ten permitted top-level fields of the closed manifest schema (spec §5.2). */
+// Permitted top-level fields of the closed manifest schema (spec §5.2).
 const PERMITTED_MANIFEST_FIELDS = [
   "$schema", "name", "version", "description", "author",
   "homepage", "repository", "license", "keywords", "extensions",
@@ -209,7 +207,7 @@ describe("plugin manifest (agent-plugins.org 1.0)", () => {
   it("uses only fields the closed schema permits", () => {
     const unknown = Object.keys(PLUGIN_MANIFEST).filter((key) => !PERMITTED_MANIFEST_FIELDS.includes(key));
     expect(unknown).toEqual([]);
-    // The author sub-schema is closed too: name/email/url only.
+    // The author sub-schema is closed too, so it needs its own check.
     const author = (PLUGIN_MANIFEST.author ?? {}) as Record<string, unknown>;
     expect(Object.keys(author).filter((key) => !["name", "email", "url"].includes(key))).toEqual([]);
   });

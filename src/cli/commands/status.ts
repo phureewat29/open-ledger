@@ -1,7 +1,15 @@
 import type { Command } from "commander";
 import chalk from "chalk";
 import { uniq } from "es-toolkit";
+import { getNetWorth } from "../../accounts/balances.js";
 import { config, getConfigPath, getDataDir } from "../../config.js";
+import { countAccounts } from "../../db/queries/accounts.js";
+import { countFiles } from "../../db/queries/files.js";
+import { countMerchants } from "../../db/queries/merchants.js";
+import { countNotes } from "../../db/queries/notes.js";
+import { countQuestions } from "../../db/queries/questions.js";
+import { countTransactions } from "../../db/queries/transactions.js";
+import { applyRedaction } from "../../privacy/redactor.js";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { sep } from "path";
@@ -79,15 +87,6 @@ async function buildReport(): Promise<StatusReport> {
     return report;
   }
 
-  // Deferred so non-db commands skip the libsql cost at startup.
-  const { getNetWorth } = await import("../../accounts/balances.js");
-  const { countAccounts } = await import("../../db/queries/accounts.js");
-  const { countTransactions } = await import("../../db/queries/transactions.js");
-  const { countFiles } = await import("../../db/queries/files.js");
-  const { countQuestions } = await import("../../db/queries/questions.js");
-  const { countMerchants } = await import("../../db/queries/merchants.js");
-  const { countNotes } = await import("../../db/queries/notes.js");
-
   // Opening the db is the only reachability check; a failing count query must not read as not-ready.
   const opened = await tryExecute(() => openDb());
   if (!opened.ok) {
@@ -126,7 +125,6 @@ export async function showStatus(opts: { redact?: boolean } = {}): Promise<void>
   // Decided before redaction: paths and error prose are display strings, not facts to branch on.
   const ledgerMissing = !report.db.reachable && !existsSync(config.dbPath);
   if (redactionEnabled(opts)) {
-    const { applyRedaction } = await import("../../privacy/redactor.js");
     report = applyRedaction(report, true, STATUS_REDACT_FIELDS);
   }
   const mode = currentMode();

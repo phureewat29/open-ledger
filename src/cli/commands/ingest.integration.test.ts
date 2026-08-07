@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { closeSync, mkdirSync, openSync, readFileSync, truncateSync, writeFileSync, existsSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  truncateSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import Database from "libsql";
 import { migrate } from "../../db/schema.js";
 import { createAccount } from "../../accounts/accounts.js";
@@ -211,9 +221,6 @@ describe("ingest commit v2 (subprocess)", () => {
   }, 30000);
 
   it("reads the batch from a file via --input (agent file-staging path)", async () => {
-    const { writeFileSync, mkdtempSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(join(tmpdir(), "oled-input-"));
     const inputPath = join(dir, "batch.ndjson");
     writeFileSync(

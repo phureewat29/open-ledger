@@ -225,7 +225,7 @@ async function showAccount(id: string, opts: { redact?: boolean } = {}): Promise
 const CREATE_ACCOUNT_SPEC = z.object({
   id: str(),
   name: str(),
-  type: z.enum(ACCOUNT_TYPES as unknown as [AccountType, ...AccountType[]]),
+  type: z.enum(ACCOUNT_TYPES),
   parent_id: str().optional(),
   subtype: str().optional(),
   bank_name: str().optional(),
@@ -423,7 +423,7 @@ async function mergeAccounts(opts: MergeAccountsOpts): Promise<void> {
     result = mergeAccountRows(db, parsed.from, parsed.to);
   } catch (err) {
     // A cross-ledger merge's message matches neither not-found pattern, so it maps to INVALID.
-    mapNotFoundError(err, /does not exist/i);
+    mapNotFoundError(err);
   }
   emitObject({
     from: parsed.from,
@@ -441,7 +441,7 @@ async function deleteAccount(id: string, opts: { yes?: boolean }): Promise<void>
   try {
     deleteAccountRow(db, id);
   } catch (err) {
-    mapNotFoundError(err, /does not exist/i);
+    mapNotFoundError(err);
   }
   emitObject({ id, deleted: true });
 }
@@ -465,7 +465,7 @@ async function adjustAccount(id: string, opts: Record<string, unknown>): Promise
       date: parsed.date,
     });
   } catch (err) {
-    mapNotFoundError(err, /does not exist/i);
+    mapNotFoundError(err);
   }
   emitObject({ transaction_id: result.transactionId, delta: result.delta });
 }
@@ -533,7 +533,7 @@ async function updateAccount(id: string, opts: Record<string, unknown>): Promise
     try {
       metaResult = updateAccountMetadata(db, id, patch);
     } catch (err) {
-      mapNotFoundError(err, /does not exist/i);
+      mapNotFoundError(err);
     }
     result.before = metaResult.before;
     result.after = metaResult.after;
