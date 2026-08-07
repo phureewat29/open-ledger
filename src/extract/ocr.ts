@@ -1,8 +1,8 @@
 import * as z from "zod";
-import { config, type OpenLedgerConfig } from "../config.js";
+import type { OpenLedgerConfig } from "../config.js";
 import { tryExecute, type Result } from "../lib/result.js";
 import type { PageImage, RenderSpec } from "./pdf.js";
-import { presetForModel, type OCRParams, type PresetName } from "./presets/index.js";
+import { modelCardFor, type ModelCardName, type OCRParams } from "./cards/index.js";
 
 /** A small local model can spend minutes on a dense page; this is a stuck-server bound, not a target. */
 export const OCR_TIMEOUT_MS = 300_000;
@@ -18,13 +18,13 @@ const ERROR_BODY_CHARS = 200;
 export interface OCRSettings {
   /** Includes the version segment, no trailing slash: `http://127.0.0.1:1234/v1`. */
   baseUrl: string;
-  /** `ocrModel` when set, otherwise the house preset's own model. */
+  /** `ocrModel` when set, otherwise the default model card's own model. */
   model: string;
   /** `""` when the endpoint needs no auth (the local case). */
   apiKey: string;
   timeoutMs: number;
-  /** Which preset the model id selected; internal, not part of the request. */
-  preset: PresetName;
+  /** Which model card the id selected; internal, not part of the request. */
+  modelCard: ModelCardName;
   prompt: string;
   params: OCRParams;
   render: RenderSpec;
@@ -33,22 +33,22 @@ export interface OCRSettings {
 export type OCRConfigSource = Pick<OpenLedgerConfig, "ocrBaseUrl" | "ocrModel" | "ocrApiKey">;
 
 /** The endpoint URL alone decides whether OCR is configured; `null` means cleanly unset. */
-export function resolveOcr(source: OCRConfigSource = config): OCRSettings | null {
+export function resolveOcr(source: OCRConfigSource): OCRSettings | null {
   const baseUrl = source.ocrBaseUrl.trim().replace(/\/+$/, "");
   if (!baseUrl) return null;
 
   const configured = source.ocrModel.trim();
-  const { name, preset } = presetForModel(configured);
+  const { name, card } = modelCardFor(configured);
 
   return {
     baseUrl,
-    model: configured || preset.model,
+    model: configured || card.model,
     apiKey: source.ocrApiKey.trim(),
     timeoutMs: OCR_TIMEOUT_MS,
-    preset: name,
-    prompt: preset.prompt,
-    params: preset.params,
-    render: preset.render,
+    modelCard: name,
+    prompt: card.prompt,
+    params: card.params,
+    render: card.render,
   };
 }
 

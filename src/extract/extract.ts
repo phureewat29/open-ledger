@@ -17,7 +17,7 @@ import { readerFor, verdictOf, type TextLayer } from "./route.js";
 import type { SourceKind } from "./source.js";
 
 /** The agent route's raster spec, deliberately the same one the built-in OCR
- *  preset renders at: 200 dpi keeps statement glyphs legible, 1800 px stays
+ *  model card renders at: 200 dpi keeps statement glyphs legible, 1800 px stays
  *  under common vision-model input limits. */
 export const PAGE_RENDER: RenderSpec = { dpi: 200, maxLongestDimPx: 1800 };
 

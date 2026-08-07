@@ -1,4 +1,4 @@
-import type { OCRPreset } from "./index.js";
+import type { ModelCard } from "./index.js";
 
 const PROMPT = `Extract all text from the image.
 
@@ -14,9 +14,10 @@ Formatting Rules:
 - Page Numbers: Wrap page numbers in <page_number>...</page_number>
 - Checkboxes: Use ☐ for unchecked and ☑ for checked boxes.`;
 
-export const typhoonOcrPreset: OCRPreset = {
+export const typhoonModelCard: ModelCard = {
   // Every release so far carries the family name, whatever the version suffix.
   family: /typhoon/i,
+  // README's config-key table repeats this default; change both together.
   model: "typhoon-ocr1.5",
   prompt: PROMPT,
   params: { temperature: 0.1, top_p: 0.6, max_tokens: 4096, seed: 42 },

@@ -8,7 +8,7 @@ import {
   resolveOcr,
   type OCRConfigSource,
 } from "./ocr.js";
-import { PRESETS, PRESET_NAMES } from "./presets/index.js";
+import { MODEL_CARDS, MODEL_CARD_NAMES } from "./cards/index.js";
 import type { PageImage } from "./pdf.js";
 import { samplePng } from "../../fixtures/images.js";
 import {
@@ -16,7 +16,7 @@ import {
   deadOcrSettings,
   liveOcr,
   requireLiveOcr,
-} from "../../fixtures/ocr-endpoint.js";
+} from "../../fixtures/ocr.js";
 
 const png = samplePng();
 const page1: PageImage = { page: 1, mime: "image/png", bytes: png };
@@ -27,7 +27,8 @@ function cfg(over: Partial<OCRConfigSource> = {}): OCRConfigSource {
   return { ocrBaseUrl: "", ocrModel: "", ocrApiKey: "", ...over };
 }
 
-const HOUSE = PRESETS["typhoon-ocr"];
+const TYPHOON = MODEL_CARDS.typhoon;
+const FALLBACK = MODEL_CARDS.fallback;
 
 describe("resolveOcr", () => {
   it("reads null when no endpoint url is set", () => {
@@ -42,56 +43,59 @@ describe("resolveOcr", () => {
     expect(resolveOcr(cfg({ ocrModel: "some-ocr-model" }))).toBeNull();
   });
 
-  it("builds settings from the url alone, taking the rest from the default preset", () => {
+  it("builds settings from the url alone, taking the rest from the default model card", () => {
     const settings = resolveOcr(
       cfg({ ocrBaseUrl: "http://127.0.0.1:1234/v1//", ocrApiKey: "sk-test" }),
     );
     expect(settings).toEqual({
       baseUrl: "http://127.0.0.1:1234/v1",
-      model: HOUSE.model,
+      model: TYPHOON.model,
       apiKey: "sk-test",
       timeoutMs: OCR_TIMEOUT_MS,
-      preset: "typhoon-ocr",
-      prompt: HOUSE.prompt,
-      params: HOUSE.params,
-      render: HOUSE.render,
+      modelCard: "typhoon",
+      prompt: TYPHOON.prompt,
+      params: TYPHOON.params,
+      render: TYPHOON.render,
     });
   });
 
-  it("keeps a model id from no known family, reading it with the house preset", () => {
+  it("keeps a model id from no known family, reading it with the fallback card", () => {
     expect(resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: "test-ocr-model" }))).toMatchObject({
       model: "test-ocr-model",
-      preset: "typhoon-ocr",
-      prompt: HOUSE.prompt,
-      render: HOUSE.render,
+      modelCard: "fallback",
+      prompt: FALLBACK.prompt,
+      render: FALLBACK.render,
     });
   });
 
   // Model ids come from the registry: spelling one out here would name a vendor.
   it("matches a family whatever the version suffix", () => {
-    const model = `${HOUSE.model}-preview-v9`;
+    const model = `${TYPHOON.model}-preview-v9`;
     expect(resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: model }))).toMatchObject({
       model,
-      preset: "typhoon-ocr",
+      modelCard: "typhoon",
     });
   });
 
-  it("matches a family case-insensitively, carrying that preset's own render", () => {
-    const preset = PRESETS["lighton-ocr"];
-    const model = preset.model.toUpperCase();
+  it("matches a family case-insensitively, carrying that card's own render", () => {
+    const model = TYPHOON.model.toUpperCase();
     expect(resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: model }))).toMatchObject({
       model,
-      preset: "lighton-ocr",
-      prompt: preset.prompt,
-      params: preset.params,
-      render: { dpi: 200, maxLongestDimPx: 1540 },
+      modelCard: "typhoon",
+      prompt: TYPHOON.prompt,
+      params: TYPHOON.params,
+      render: TYPHOON.render,
     });
   });
 
-  it.each(PRESET_NAMES)("selects preset %s from its own model id", (name) => {
-    const settings = resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: PRESETS[name].model }));
-    expect(settings).toMatchObject({ preset: name });
-  });
+  // The fallback card has no id of its own; only cards with one can self-select.
+  it.each(MODEL_CARD_NAMES.filter((name) => MODEL_CARDS[name].model))(
+    "selects model card %s from its own model id",
+    (name) => {
+      const settings = resolveOcr(cfg({ ocrBaseUrl: "http://x/v1", ocrModel: MODEL_CARDS[name].model }));
+      expect(settings).toMatchObject({ modelCard: name });
+    },
+  );
 });
 
 describe("isServerFailure", () => {
