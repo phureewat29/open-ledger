@@ -73,7 +73,7 @@ Every row becomes a *transaction*: it debits one account and credits another by 
 This is the loop the skill and `oled ingest --help` steer an agent through:
 
 1. **Discover**: `oled ingest list --json` to find new/pending files.
-2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it. A locked PDF exits 4 until the agent re-runs with `--password <password>`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. OCR is off until `oled config --ocr-url` sets it; with no text layer and no OCR endpoint, it comes back as one image per page.
+2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it. A locked PDF exits 4 until the agent re-runs with `--password <password>`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. OCR is off until `oled config --ocr-base-url` sets it; with no text layer and no OCR endpoint, it comes back as one image per page.
 3. **Read**: the agent reads what prepare returned, either the text document or the page images, and picks out every transaction row.
 4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, a lookalike account, uncategorized fallback, cross-currency row).
 5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
@@ -106,38 +106,43 @@ oled open           # Open the data folder in file explorer
 ## Security & Privacy
 
 - All financial data stays on your machine; default `~/.oled/db.sqlite`. Both it and the config file are written with `0600` permissions.
-- The config file (`~/.oled/config.json`) holds one secret at most, the OCR endpoint API key; `config show` surfaces a fingerprint of it, never the plaintext.
+- The config file (default `~/.oled/config.json`) holds one secret at most, the OCR endpoint API key; `oled config` surfaces a fingerprint of it, never the plaintext.
 - Statement passwords are never stored. The caller keeps them and passes one per run with `--password`, a command-line argument, so it shows up in shell history and process listings.
 - A decrypted statement stays in memory. Only what an agent has to read is written to `cache/`: the extracted text, or the page images.
 - Read commands mask PII in free-text fields by default; `--no-redact` returns verbatim text.
-- No telemetry, no analytics. OpenLedger makes no network calls of its own; OCR is the one exception, and it stays off until you set `--ocr-url`. Once set, `ingest prepare` sends page images to the endpoint to read, and `doctor` asks it which models it serves.
+- No telemetry, no analytics. OpenLedger makes no network calls of its own; OCR is the one exception, and it stays off until you set `--ocr-base-url`. Once set, `ingest prepare` sends page images to the endpoint to read, and `doctor` asks it which models it serves.
 
 ## Configuration
 
-OpenLedger stores everything in `~/.oled/`. `oled config --init` creates it, along with the database and data directory:
+OpenLedger reads one JSON config file per run and nothing else: no environment variables, no hidden state. The default file is `~/.oled/config.json`; `oled config [path]` reads and writes a named file directly, and every command accepts `--conf <path>` to run against it, so two conf files are two independent ledgers. Commands that touch the ledger refuse to run until the file exists; `oled config --init` creates it, along with the database and data directory:
 
 ```
 ~/.oled/
-  config.json    # locale, currency, paths (0600 permissions)
-  context.md     # persistent freeform context an agent can read (path shown as context_path in oled config show)
+  config.json    # all settings (0600 permissions)
+  context.md     # persistent freeform context an agent can read (lives beside the config file)
   db.sqlite      # SQLite database (0600 permissions)
   data/          # drop your statements here, as PDFs or images (subfolders allowed)
   cache/         # extracted text and page images handed to an agent
 ```
 
-### Environment variables
+### Config keys
 
-| Variable | Meaning | Default |
-| --- | --- | --- |
-| `OLED_DIR` | Relocates `~/.oled`; other `OLED_*` vars still win for their own paths | `~/.oled` |
-| `OLED_DB_PATH` | Database file path | `~/.oled/db.sqlite` |
-| `OLED_DATA_DIR` | Statement drop folder | `~/.oled/data` |
-| `OLED_CACHE_DIR` | Extracted text and page image cache | `~/.oled/cache` |
-| `OLED_OCR_BASE_URL` | Base URL of an OpenAI-compatible OCR endpoint, version segment included; OCR is off until this is set | unset (OCR off) |
-| `OLED_OCR_MODEL` | Model id, spelled as the endpoint serves it. An id from the typhoon or lighton families selects the tuned prompt and page rendering | `typhoon-ocr1.5` |
-| `OLED_OCR_API_KEY` | OCR endpoint API key | unset |
+Each key is set with an `oled config` flag and read back with bare `oled config`. Values resolve file, then default.
 
-See [`.env.example`](./.env.example) for defaults and full descriptions.
+| Key | Flag | Meaning | Default |
+| --- | --- | --- | --- |
+| `country` | `--country` | Country whose reference data applies; also seeds locale and currency | `TH` |
+| `displayLocale` | `--locale` | Locale used to format money | from country |
+| `displayCurrency` | `--currency` | Display currency; also seeds that ledger's structural accounts | from country |
+| `dbPath` | `--db` | Database file path | `~/.oled/db.sqlite` |
+| `dataDir` | `--data-dir` | Statement drop folder | `~/.oled/data` |
+| `cacheDir` | `--cache-dir` | Extracted text and page image cache | `~/.oled/cache` |
+| `userName` | `--user-name` | Your name; redaction masks it | `User` |
+| `ocrBaseUrl` | `--ocr-base-url` | Base URL of an OpenAI-compatible OCR endpoint, version segment included; OCR is off until this is set | unset (OCR off) |
+| `ocrModel` | `--ocr-model` | Model id, spelled as the endpoint serves it. A typhoon-family id selects the tuned prompt and page rendering; any other id is sent with the generic settings | `typhoon-ocr1.5` |
+| `ocrApiKey` | `--ocr-api-key` | OCR endpoint API key; shown only as a fingerprint | unset |
+
+[`.env.example`](./.env.example) documents build-and-test variables only; the CLI reads no environment configuration.
 
 ## Contributing
 
