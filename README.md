@@ -60,7 +60,7 @@ This repo supports [Agent Plugins](https://agent-plugins.org) package, so compli
 
    Or run `oled setup`, which writes the skill to `.agents/skills/`, the shared directory most agents read. Pass `--dir <path>` to name your agent's own skills directory instead, such as `--dir .claude/skills` for Claude Code.
 
-### Use cases
+### Use Cases
 
 1. Start with the statements you have waiting: *"Ingest my credit cards and bank statements."* It discovers new files, prepares and reads each one, commits the transactions it finds, and raises a question for anything it can't resolve on its own.
 2. Clear whatever it flagged: *"Show me anything you weren't sure about, and let's resolve it."* It walks you through the questions the ingestion raised, such as an unrecognized merchant or an ambiguous account match.

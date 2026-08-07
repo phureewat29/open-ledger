@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openledger",
-  "version": "0.21.1",
+  "version": "0.21.2",
   "description": "OpenLedger — A deterministic ledger for your AI",
   "author": {
     "name": "Phureewat Aphibansri",
