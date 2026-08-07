@@ -268,7 +268,7 @@ describe("ingest commit v2 (subprocess)", () => {
     ].join("\n");
 
     const { stdout, stderr, code } = await runCLI(["ingest", "commit", "--json"], { stdin: ndjson });
-    expect(code).toBe(7); // EXIT.PARTIAL
+    expect(code).toBe(7);
 
     const objs = parseNdjson(stdout);
     const results = objs.filter((o) => o.type === "result");
@@ -590,7 +590,7 @@ describe("ingest commit v2 (subprocess)", () => {
     const objs = parseNdjson(stdout);
     const [rOk, rLedger, rId] = objs.filter((o) => o.type === "result");
 
-    // The discarded "currency" field is only visible because the row says so.
+    // The stated currency is discarded; currency_overridden is how the result says so.
     expect(rOk.ok).toBe(true);
     expect(rOk.currency_overridden).toBe(true);
 
@@ -622,7 +622,7 @@ describe("ingest commit v2 (subprocess)", () => {
 
   it("fails with USAGE when stdin has no transaction data", async () => {
     const { stdout, stderr, code } = await runCLI(["ingest", "commit", "--json"], { stdin: "" });
-    expect(code).toBe(2); // EXIT.USAGE
+    expect(code).toBe(2);
     expect(stdout.trim()).toBe("");
     const parsed = JSON.parse(stderr.trim());
     expect(parsed.error.code).toBe("E_USAGE");
@@ -705,13 +705,13 @@ describe("ingest prepare (subprocess)", () => {
     const path = stage("bucket/notes.docx", Buffer.from("PK"));
 
     const unsupported = await runCLI(["ingest", "prepare", path, "--json"]);
-    expect(unsupported.code).toBe(2); // EXIT.USAGE
+    expect(unsupported.code).toBe(2);
     const { error } = JSON.parse(unsupported.stderr.trim());
     expect(error.code).toBe("E_USAGE");
     expect(error.hint).toContain(".pdf");
 
     const missing = await runCLI(["ingest", "prepare", "no/such/statement.pdf", "--json"]);
-    expect(missing.code).toBe(5); // EXIT.NOT_FOUND
+    expect(missing.code).toBe(5);
     expect(JSON.parse(missing.stderr.trim()).error.code).toBe("E_NOT_FOUND");
   }, 30000);
 
@@ -719,7 +719,7 @@ describe("ingest prepare (subprocess)", () => {
     const path = stage("statements/locked.pdf", await encryptedPdf("secret"));
 
     const locked = await runCLI(["ingest", "prepare", path, "--json"]);
-    expect(locked.code).toBe(4); // EXIT.INPUT_REQUIRED
+    expect(locked.code).toBe(4);
     const { error } = JSON.parse(locked.stderr.trim());
     expect(error.code).toBe("E_INPUT_REQUIRED");
     expect(error.hint).toContain("--password");
@@ -778,7 +778,7 @@ describe("ingest prepare against an OCR server (subprocess)", () => {
         OLED_OCR_MODEL: "test-ocr-model",
       },
     });
-    expect(code).toBe(3); // EXIT.NOT_READY
+    expect(code).toBe(3);
     const { error } = JSON.parse(stderr.trim());
     expect(error.code).toBe("E_NOT_READY");
     expect(error.hint).toContain("--no-ocr");
@@ -842,7 +842,6 @@ describe("ingest fail (subprocess)", () => {
       db.close();
     }
 
-    // Precreate the cache subdir so there's something real for the subprocess to remove.
     const cacheSubdir = join(sandbox.cacheDir, fileId);
     mkdirSync(cacheSubdir, { recursive: true });
     writeFileSync(join(cacheSubdir, "page-1.png"), "fake png bytes");

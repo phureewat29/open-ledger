@@ -27,7 +27,7 @@ function isFileStatus(status: string): status is FileStatus {
   return (FILE_STATUSES as readonly string[]).includes(status);
 }
 
-/** Missing status buckets are filled with 0 so callers get a stable shape without null checks. */
+/** Missing status buckets are filled with 0, so the shape is stable. */
 export function countFiles(db: Database.Database): FileTotals {
   const rows = db
     .prepare(`SELECT status, COUNT(*) AS n FROM files GROUP BY status`)
@@ -129,7 +129,6 @@ interface MarkFileIngestedOpts {
 }
 
 interface MarkFileFailedOpts {
-  /** Who attempted the ingest (e.g. the external agent name). */
   source?: string | null;
   error: string;
 }

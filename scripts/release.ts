@@ -29,6 +29,6 @@ pluginManifest.version = next;
 writeFileSync("plugin.json", `${JSON.stringify(pluginManifest, null, 2)}\n`);
 run("git add package.json package-lock.json plugin.json");
 run(`git commit -m "release: ${next}"`);
-run("npm link"); // Expose the freshly built CLI on the global bin path.
+run("npm link");
 
 console.log(`release: published ${next}`);

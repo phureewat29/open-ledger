@@ -1,10 +1,10 @@
-import { resolveOcr, type OCRConfigSource, type OCRSettings } from "../src/extract/ocr.js";
-
 /**
  * Suites needing a real OCR endpoint run under `describe.skipIf(!liveOcr)`:
  *
  *     OLED_OCR_BASE_URL=http://127.0.0.1:1234/v1 OLED_OCR_MODEL=<served-id> npm test
  */
+
+import { resolveOcr, type OCRConfigSource, type OCRSettings } from "../src/extract/ocr.js";
 
 /** Env only: a persisted `~/.oled/config.json` must not silently turn the live suites on. */
 const liveOcrSource: OCRConfigSource = {
@@ -44,7 +44,7 @@ export function liveOcrEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 /** Binding port 1 needs root, so a connect there is reliably refused. */
 export const DEAD_OCR_BASE_URL = "http://127.0.0.1:1/v1";
 
-/** Obvious placeholders, with a short timeout so a broken test fails fast. */
+/** Short timeout so a test pointed at the dead endpoint fails fast. */
 export function deadOcrSettings(over: Partial<OCRSettings> = {}): OCRSettings {
   return {
     baseUrl: DEAD_OCR_BASE_URL,

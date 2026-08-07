@@ -42,7 +42,7 @@ afterEach((ctx) => {
   if (ctx.task.result?.state === "fail") stepFailed = true;
 });
 
-/** Every step asserts the machine surface, so `--json` is appended here rather than in 40 argument arrays. */
+/** Appends `--json`: every step asserts the machine surface. */
 function oled(args: string[], stdin?: string): Promise<CLIResult> {
   return runCLI([...args, "--json"], { stdin });
 }
@@ -54,12 +54,11 @@ async function ok(args: string[], stdin?: string): Promise<CLIResult> {
   return result;
 }
 
-/** The before/after quantity most steps below compare. */
 async function transactionCount(): Promise<number> {
   return parseOne((await ok(["status"])).stdout).counts.transactions;
 }
 
-/** Void-inclusive row total, for steps where void state is the variable. */
+/** Void-inclusive row total; `transactionCount` counts live rows only. */
 async function allTransactionCount(): Promise<number> {
   const rows = parseNdjson((await ok(["transactions", "list", "--include-void"])).stdout);
   const summary = rows.find((row) => row.type === "summary");
@@ -163,7 +162,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
     "ingest list finds exactly the staged locked statement and reports it encrypted",
     async () => {
-      // Staging is setup, not an assertion; `ingest list` finding the file is what proves it landed.
+      // Staging is setup; `ingest list` finding the file is the assertion.
       statementPath = join(sandbox.dataDir, "corgi-bank", "card-statement-2026-05.pdf");
       mkdirSync(dirname(statementPath), { recursive: true });
       writeFileSync(
@@ -240,7 +239,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       expect(results.map((r) => r.duplicate)).toEqual([true, true, true]);
       expect(objs.find((o) => o.type === "summary")).toMatchObject({ duplicates: 3, posted: 0 });
 
-      // Sides come from the stored rows now, not from re-resolving the input.
+      // A duplicate reports its stored sides, not a re-resolution of the input.
       const stale = results.flatMap((r) =>
         ((r.sides ?? []) as CommitSide[]).filter((s) => s.how !== "as_committed"),
       );
@@ -287,7 +286,6 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
     "transactions update rewrites a description that transactions show then reflects",
     async () => {
-      // groomingId comes from the commit step.
       const updated = parseOne(
         (await ok(["transactions", "update", groomingId, "--description", "updated by integration"]))
           .stdout,
@@ -446,7 +444,6 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   it(
     "transactions delete drops exactly one row from the ledger",
     async () => {
-      // salaryId comes from the commit step.
       const before = await transactionCount();
       expect(
         parseOne((await ok(["transactions", "delete", salaryId, "--yes"])).stdout),

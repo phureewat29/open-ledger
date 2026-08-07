@@ -27,7 +27,7 @@ export interface AccountLegSumsOptions {
   idOrParent?: string;
 }
 
-/** Per-account leg sums, including accounts with no legs at all (LEFT JOIN). */
+/** Per-account leg sums, including accounts with no legs at all. */
 export function getAccountLegSums(
   db: Database.Database,
   opts: AccountLegSumsOptions = {},
@@ -87,7 +87,7 @@ export function getPeriodLegSums(
     .all(from, to) as TypeCurrencyLegSums[];
 }
 
-/** Leg sums for a set of accounts (a subtree), grouped by (type, currency). */
+/** Leg sums for one subtree's ids, grouped by (type, currency). */
 export function getLegSumsForAccounts(
   db: Database.Database,
   ids: string[],

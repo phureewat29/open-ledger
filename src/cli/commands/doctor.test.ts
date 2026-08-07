@@ -1,3 +1,5 @@
+/** The one network-reaching doctor check; everything else is fs/db state already covered by the system integration test. */
+
 import { describe, it, expect, afterEach } from "vitest";
 import { config } from "../../config.js";
 import {
@@ -8,8 +10,6 @@ import {
 } from "../../../fixtures/ocr-endpoint.js";
 import { probeOcrEndpoint } from "../../extract/ocr.js";
 import { ocrEndpointCheck } from "./doctor.js";
-
-/** The one network-reaching doctor check; everything else is fs/db state already covered by the system integration test. */
 
 type OCRConfig = Pick<typeof config, "ocrBaseUrl" | "ocrModel" | "ocrApiKey">;
 

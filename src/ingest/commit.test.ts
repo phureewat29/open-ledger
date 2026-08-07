@@ -78,7 +78,6 @@ describe("commitTransaction", () => {
     expect(row.debit_account_id).toBe("thb:expense:food");
     expect(countQuestions(db)).toBe(0);
 
-    // Both sides posted where the row asked, and it named no merchant.
     expect(out.sides).toEqual([
       { side: "debit", requested: "thb:expense:food", resolved: "thb:expense:food", how: "exact" },
       { side: "credit", requested: "thb:asset:cash", resolved: "thb:asset:cash", how: "exact" },
@@ -600,7 +599,6 @@ describe("commitLinkedTransactions", () => {
       [
         // Leg 0 would build thb:expense:coffee:beans as a placeholder tree.
         { debit_account_id: "thb:expense:coffee:beans", credit_account_id: "thb:asset:bank", amount: 300 },
-        // Leg 1 is refused: no eur ledger exists.
         { debit_account_id: "eur:expense:coffee", credit_account_id: "thb:asset:bank", amount: 100 },
       ],
     );

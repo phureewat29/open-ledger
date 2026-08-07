@@ -69,11 +69,8 @@ export function ensureUncategorizedFallback(db: Database.Database, currency: str
 
 const CURRENCY_HEAD_RE = /^[A-Za-z]{3}:/;
 
-/**
- * True when the hint's currency head names a ledger that doesn't exist. The
- * head alone decides; booking elsewhere would relabel the amount at the
- * wrong exponent.
- */
+/** The currency head alone decides: booking elsewhere would relabel the
+ *  amount at the wrong exponent. */
 export function namesUnopenedLedger(db: Database.Database, accountId: string): boolean {
   if (!CURRENCY_HEAD_RE.test(accountId)) return false;
   return !ledgerExists(db, currencyOf(accountId));
@@ -98,7 +95,6 @@ function bestFuzzyMatch(db: Database.Database, accountId: string): string | null
   return candidate?.account.id ?? null;
 }
 
-/** The same account, or one of the two an ancestor of the other. */
 function sharesLineage(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}:`) || b.startsWith(`${a}:`);
 }

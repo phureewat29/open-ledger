@@ -55,7 +55,7 @@ export function recordQuestion(db: Database.Database, input: RecordQuestionInput
   return id;
 }
 
-/** Deletes the row outright (rather than marking it closed); null if the id doesn't exist. */
+/** Hard-deletes the row rather than marking it closed. */
 export function closeQuestion(
   db: Database.Database,
   id: string,

@@ -134,10 +134,7 @@ function insertParams(id: string, merchantId: string | null, input: TransactionI
   ];
 }
 
-/**
- * Validates, then `INSERT ... ON CONFLICT(id) DO NOTHING`: re-inserting the
- * same derived id is a no-op. `duplicate` is true when the row already existed.
- */
+/** `ON CONFLICT(id) DO NOTHING`: re-inserting the same derived id is a no-op, reported as `duplicate`. */
 export function insertTransaction(
   db: Database.Database,
   input: TransactionInput,
@@ -207,7 +204,7 @@ const ROW_SELECT = `SELECT t.id, t.group_id, t.date, t.description, t.merchant_i
         m.canonical_name AS merchant_name
    ${LIST_FROM}`;
 
-/** `group` carries every member of the group (self included), ordered by id. */
+/** `group` is ordered by id. */
 export function findTransactionById(db: Database.Database, id: string): TransactionDetail | null {
   const row = db.prepare(`${ROW_SELECT} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
   if (!row) return null;
@@ -230,7 +227,7 @@ export interface ListTransactionsOptions {
   /** Exact match on the stored minor-unit amount. */
   amount?: number;
   limit?: number;
-  /** Rows to skip; page with `offset += returned` while the summary says has_more. */
+  /** Page with `offset += returned` while the summary says `has_more`. */
   offset?: number;
   /** When true, fold rows into per-group_id clusters (NULLs stay standalone). */
   group?: boolean;
@@ -338,7 +335,7 @@ function clusterByGroup(rows: TransactionRow[]): TransactionCluster[] {
   return clusters;
 }
 
-/** Deleting a surviving twin un-voids its mirrors (`void_of` FK, ON DELETE SET NULL); the count is reported. */
+/** Deleting a surviving twin un-voids its mirrors (`void_of` ON DELETE SET NULL). */
 export function deleteTransaction(
   db: Database.Database,
   id: string,
@@ -365,7 +362,7 @@ interface BulkRecategorizeSet {
   accountId: string;
 }
 
-/** Spot-check sample, not the full id list; the CLI help quotes this cap. */
+/** Spot-check sample, not the full id list. */
 const RECATEGORIZE_SAMPLE_LIMIT = 10;
 
 interface BulkRecategorizeResult {
@@ -485,7 +482,7 @@ export function repointTransactions(
   return { moved, deletedSelfTransactions };
 }
 
-/** Same filters as listTransactions, no limit; no opts counts every row (the case `status` uses). */
+/** Same filters as listTransactions, no limit; with no opts it counts every live row (voided mirrors excluded). */
 export function countTransactions(db: Database.Database, opts: ListFilters = {}): number {
   const { whereSql, params } = buildListWhere(opts);
   return (

@@ -1,10 +1,10 @@
+/** Every target receives the checked-in skills/openledger/SKILL.md verbatim: no templating, no per-agent wrapper. */
+
 import { createRequire } from "module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { DEFAULT_SKILLS_DIR, SKILL_PACK_DIR } from "./locations.js";
-
-/** Every target receives the checked-in skills/openledger/SKILL.md verbatim: no templating, no per-agent wrapper. */
 
 interface InstalledTarget {
   path: string;

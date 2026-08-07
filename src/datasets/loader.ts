@@ -1,13 +1,13 @@
-import * as z from "zod";
-import { readFileSync, readdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
 /**
  * Generic loader for the shipped reference datasets: one `<cc>.json` per
  * country under `datasets/`. Adding a country is a new file, not a code
  * change; dataset-specific shape lives in the per-dataset modules.
  */
+
+import * as z from "zod";
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Two levels below the package root under both tsx (src/datasets/) and the dist build.
 const DATASETS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../datasets");
@@ -24,7 +24,7 @@ export interface DatasetDefinition<F extends { country: string } = { country: st
   kinds?: readonly string[];
 }
 
-// Memoized per dataset name so importing a dataset module does no file I/O.
+// Memoized per dataset name, so importing a dataset module does no file I/O.
 const cache = new Map<string, DatasetRow[]>();
 
 const parsedFiles = new Map<string, unknown>();

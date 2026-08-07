@@ -5,7 +5,6 @@ import { typeFromId } from "../lib/ids.js";
 
 export type TransactionSide = "debit" | "credit";
 
-/** What a question hangs on: the batch that owns it and the file it came from. */
 export interface QuestionContext {
   readonly batchId: string | null;
   readonly fileId: string | null;

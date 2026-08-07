@@ -19,7 +19,7 @@ import { currentMode, emit, redactionEnabled, runAction } from "../output.js";
 import { tryExecute } from "../../lib/result.js";
 import { openDb } from "../db.js";
 
-// Rewrites a leading home dir prefix to "~/"; any other string (e.g. error prose) passes through unchanged.
+// Error prose passes through unchanged, so this is safe on any field.
 function homeRelative(p: string): string {
   const prefix = homedir() + sep;
   return p.startsWith(prefix) ? "~" + sep + p.slice(prefix.length) : p;

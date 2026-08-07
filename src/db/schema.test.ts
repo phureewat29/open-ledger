@@ -512,7 +512,7 @@ describe("version-1 databases are rebaselined, not adopted", () => {
 
       const kept = backups(dir).sort();
       expect(kept).toHaveLength(5);
-      // The three oldest fakes are gone; the newest four survive with today's real copy.
+      // 7 fakes + 1 fresh copy, capped at 5: the three oldest go.
       expect(kept.slice(0, 4)).toEqual(stale.slice(3));
       expect(kept[4]).not.toBe(stale[6]);
     });
@@ -546,7 +546,7 @@ describe("version-1 databases are rebaselined, not adopted", () => {
       const fresh = freshDb();
       migrate(fresh);
 
-      // Byte-for-byte the same tables, indexes and triggers, from the one authority.
+      // Rebaselined and fresh must match: baseline is the one authority for the shape.
       expect(userSchema(db)).toEqual(userSchema(fresh));
       expect(userSchema(db)).toEqual(
         expect.arrayContaining([

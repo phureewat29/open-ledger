@@ -217,7 +217,7 @@ describe("transactions CLI integration (subprocess)", () => {
           "--amount", "10",
           ...args,
         ]);
-        expect(result.code, args.join(" ")).toBe(2); // EXIT.USAGE
+        expect(result.code, args.join(" ")).toBe(2);
         expect(result.stdout.trim()).toBe("");
         expect(JSON.parse(result.stderr.trim()).error.code).toBe("E_USAGE");
       }
@@ -246,7 +246,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "--amount", "1e30",
         "--json",
       ]);
-      expect(strict.code).toBe(6); // EXIT.INVALID
+      expect(strict.code).toBe(6);
       const strictErr = JSON.parse(strict.stderr.trim()).error;
       expect(strictErr.code).toBe("E_INVALID");
       // The pinned prose, never the DDL's own words.
@@ -261,7 +261,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "--amount", "1e30",
         "--json",
       ]);
-      expect(resolved.code).toBe(6); // EXIT.INVALID
+      expect(resolved.code).toBe(6);
       expect(JSON.parse(resolved.stderr.trim()).error.code).toBe("E_INVALID");
 
       // Refused before resolution, so the placeholder tree was never built.
@@ -317,7 +317,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "eur:income:salary",
         "--json",
       ]);
-      expect(result.code).toBe(6); // EXIT.INVALID
+      expect(result.code).toBe(6);
       const err = JSON.parse(result.stderr.trim()).error;
       expect(err.code).toBe("E_INVALID");
       expect(err.message).toContain('names ledger "eur"');
@@ -374,7 +374,7 @@ describe("transactions CLI integration (subprocess)", () => {
         ["--filter-account", "thb:expense:food", "--set-account", ""],
       ]) {
         const empty = await runCLI(["transactions", "recategorize", ...args, "--json"]);
-        expect(empty.code).toBe(2); // EXIT.USAGE
+        expect(empty.code).toBe(2);
         const err = JSON.parse(empty.stderr.trim()).error;
         expect(err.code).toBe("E_USAGE");
         expect(err.message).toMatch(/required$/);
@@ -386,7 +386,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "--set-account", "thb:expense:nowhere",
         "--json",
       ]);
-      expect(missing.code).toBe(5); // EXIT.NOT_FOUND
+      expect(missing.code).toBe(5);
       const err = JSON.parse(missing.stderr.trim()).error;
       expect(err.code).toBe("E_NOT_FOUND");
       expect(err.message).toMatch(/does not exist/);
@@ -567,7 +567,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "--clear",
         "--json",
       ]);
-      expect(both.code).toBe(2); // EXIT.USAGE
+      expect(both.code).toBe(2);
     },
     45000,
   );
@@ -632,7 +632,7 @@ describe("transactions CLI integration (subprocess)", () => {
       const blank = await runCLI([
         "merchants", "update", "--merchant", merchantId, "--name", "   ", "--json",
       ]);
-      expect(blank.code).toBe(2); // EXIT.USAGE
+      expect(blank.code).toBe(2);
       expect(blank.stdout.trim()).toBe("");
       expect(JSON.parse(blank.stderr.trim()).error.code).toBe("E_USAGE");
 
@@ -641,7 +641,7 @@ describe("transactions CLI integration (subprocess)", () => {
       const missing = await runCLI([
         "merchants", "update", "--merchant", "mc:not-here", "--name", "  ", "--json",
       ]);
-      expect(missing.code).toBe(2); // EXIT.USAGE
+      expect(missing.code).toBe(2);
 
       const still = parseNdjson((await runCLI(["merchants", "list", "--json"])).stdout);
       expect(still.some((m) => m.canonical_name === "Whitespace Guard")).toBe(true);
@@ -697,7 +697,7 @@ describe("transactions CLI integration (subprocess)", () => {
       expect(metaResult.renamed).toBeUndefined();
 
       const none = await runCLI(["accounts", "update", "thb:asset:wallet", "--json"]);
-      expect(none.code).toBe(2); // EXIT.USAGE
+      expect(none.code).toBe(2);
       expect(JSON.parse(none.stderr.trim()).error.code).toBe("E_USAGE");
     },
     45000,
@@ -760,7 +760,7 @@ describe("transactions CLI integration (subprocess)", () => {
         "--type", "asset",
         "--json",
       ]);
-      expect(mismatch.code).toBe(6); // EXIT.INVALID
+      expect(mismatch.code).toBe(6);
       expect(mismatch.stdout.trim()).toBe("");
       expect(JSON.parse(mismatch.stderr.trim()).error.code).toBe("E_INVALID");
     },
@@ -871,7 +871,7 @@ describe("transactions CLI integration (subprocess)", () => {
       const result = await runCLI([
         "accounts", "create", "--input", inputPath, "--name", "Nope", "--json",
       ]);
-      expect(result.code).toBe(2); // EXIT.USAGE
+      expect(result.code).toBe(2);
       expect(result.stdout.trim()).toBe("");
       const err = JSON.parse(result.stderr.trim());
       expect(err.error.code).toBe("E_USAGE");
@@ -1016,13 +1016,13 @@ describe("transactions CLI integration (subprocess)", () => {
       const mismatch = await runCLI([
         "transactions", "merge", "--from", otherId, "--to", a, "--yes", "--json",
       ]);
-      expect(mismatch.code).toBe(6); // EXIT.INVALID
+      expect(mismatch.code).toBe(6);
       expect(JSON.parse(mismatch.stderr.trim()).error.code).toBe("E_INVALID");
 
       const missing = await runCLI([
         "transactions", "merge", "--from", "tx:nope", "--to", a, "--yes", "--json",
       ]);
-      expect(missing.code).toBe(5); // EXIT.NOT_FOUND
+      expect(missing.code).toBe(5);
       expect(JSON.parse(missing.stderr.trim()).error.code).toBe("E_NOT_FOUND");
     },
     90000,
@@ -1076,9 +1076,9 @@ describe("transactions CLI integration (subprocess)", () => {
 
       // Without an amount, --currency still narrows the listing to one ledger; the
       // summary's total uses the same filter.
-      const jpyOnly = await runCLI(["transactions", "list", "--currency", "thb", "--json"]);
-      expect(jpyOnly.code).toBe(0);
-      const thbObjs = parseNdjson(jpyOnly.stdout);
+      const thbOnly = await runCLI(["transactions", "list", "--currency", "thb", "--json"]);
+      expect(thbOnly.code).toBe(0);
+      const thbObjs = parseNdjson(thbOnly.stdout);
       const thbRows = thbObjs.filter((o) => o.type !== "summary");
       expect(thbRows.length).toBeGreaterThan(0);
       expect(new Set(thbRows.map((r) => r.currency))).toEqual(new Set(["THB"]));

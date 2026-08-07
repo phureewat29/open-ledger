@@ -16,10 +16,9 @@ import {
 import { readerFor, verdictOf, type TextLayer } from "./route.js";
 import type { SourceKind } from "./source.js";
 
-/** Spec for the agent route, which hands rasters to an unknown vision model.
- *  200 dpi keeps statement glyphs legible; 1800 px on the longest side stays
- *  under common vision-model input limits. Not a neutral derivation — it is
- *  the same spec the built-in OCR preset renders at. */
+/** The agent route's raster spec, deliberately the same one the built-in OCR
+ *  preset renders at: 200 dpi keeps statement glyphs legible, 1800 px stays
+ *  under common vision-model input limits. */
 export const PAGE_RENDER: RenderSpec = { dpi: 200, maxLongestDimPx: 1800 };
 
 export interface TextPage {
@@ -161,7 +160,7 @@ export async function extractFile(
 
   const images = await pageImages(input, ocr ? ocr.render : PAGE_RENDER);
   if (!images.ok) return { ok: false, reason: "pdf_unreadable", message: images.error };
-  // The "agent" arm: READER only reaches it with no endpoint configured.
+  // The "agent" arm: `readerFor` only returns it with no endpoint configured.
   if (!ocr) return { ok: true, value: { kind: "images", textLayer, ...images.value } };
   return ocrExtraction(await ocrPages(images.value.pages, ocr), ocr, textLayer);
 }

@@ -258,8 +258,7 @@ class RefusedCreate extends Error {
   }
 }
 
-// Auto-creates missing ancestors when no parent was given; the whole chain is one
-// transaction, so a refused leaf can't leave an unwanted ledger open.
+// Ancestors are auto-created only when --parent was omitted.
 export function createOneAccount(
   db: Database.Database,
   parsed: z.infer<typeof CREATE_ACCOUNT_SPEC>,

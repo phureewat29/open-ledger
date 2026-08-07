@@ -28,10 +28,10 @@ const OLED_DIR = process.env.OLED_DIR
 
 /** Also the persisted-key list: unknown keys on disk are tolerated on read, dropped on next write (`saveConfig` writes only these fields). */
 const CONFIG_FIELDS: Record<keyof OpenLedgerConfig, { envVar?: string; default: string }> = {
-  // Overridden by `config --init`; other modules should read the resolved value, not hardcode a currency.
-  /** Picks `src/datasets/` reference data; deliberately not derived from `displayLocale` (which only formats numbers/dates). */
+  /** Picks `datasets/<cc>.json`; deliberately not derived from `displayLocale`, which only formats numbers and dates. */
   country: { default: "TH" },
   displayLocale: { default: "th-TH" },
+  /** Resolved value only; no module may hardcode a currency. `config --init` overrides it. */
   displayCurrency: { default: "THB" },
   dbPath: { envVar: "OLED_DB_PATH", default: resolve(OLED_DIR, "db.sqlite") },
   dataDir: { envVar: "OLED_DATA_DIR", default: resolve(OLED_DIR, "data") },

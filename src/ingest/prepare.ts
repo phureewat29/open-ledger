@@ -23,7 +23,7 @@ export interface IngestEntry {
   path: string;
   /** Forward-slashed relative path from the data dir. */
   relPath: string;
-  /** null when the bytes could not be read, so there is nothing to hash. */
+  /** null when the bytes could not be read. */
   hash: string | null;
   fileId: string | null;
   status: IngestStatus;
@@ -341,7 +341,7 @@ const WRITE_ARTIFACTS: {
   images: writePages,
 };
 
-/** A failure leaves the ledger exactly as it found it. */
+/** A failed --force keeps the prior file row and its transactions; only success replaces it. */
 export async function prepareFile(
   db: Database.Database,
   entryOrId: string,

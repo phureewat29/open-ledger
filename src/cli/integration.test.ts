@@ -76,9 +76,9 @@ describe("money rendering across ledgers (subprocess)", () => {
   beforeAll(() => seedLedgers(sandbox.dbPath));
 
   it("gives every table cell its own ledger's digits, THB unchanged", async () => {
-    // Piped, so both reads take the plain tab-separated renderer.
     const accounts = await runCLI(["accounts", "list"]);
     expect(accounts.code).toBe(0);
+    // Piped, so the plain tab-separated renderer runs and `cell` can split on \t.
     // ID, Name, Type, Parent, Balance, Debits, Credits, Currency
     expect(cell(accounts.stdout, "thb:expense", 4)).toBe("135.00");
     expect(cell(accounts.stdout, "jpy:expense", 4)).toBe("1500");
@@ -105,7 +105,7 @@ describe("money rendering across ledgers (subprocess)", () => {
 
   it("refuses --amount with no ledger to measure it in", async () => {
     const { code, stderr } = await runCLI(["transactions", "list", "--amount", "1500", "--json"]);
-    expect(code).toBe(2); // EXIT.USAGE
+    expect(code).toBe(2);
     const { error } = JSON.parse(stderr.trim());
     expect(error.code).toBe("E_USAGE");
     expect(error.message).toContain("--amount needs a unit");

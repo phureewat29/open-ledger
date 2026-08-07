@@ -17,7 +17,6 @@ export function failAccountNotFound(db: Database.Database, id: string, hint?: st
   });
 }
 
-/** `findAccountById` + `failAccountNotFound` in one call, for call sites that need the row itself. */
 export function requireAccount(db: Database.Database, id: string, hint?: string): AccountRow {
   const account = findAccountById(db, id);
   if (!account) failAccountNotFound(db, id, hint);

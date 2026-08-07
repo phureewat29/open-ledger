@@ -4,7 +4,6 @@ import { normalizeMaskedAccountNumber } from "../../lib/masked.js";
 import { buildPatch, type PatchField } from "../../lib/patch.js";
 import { errorMessage } from "../../lib/result.js";
 
-/** At rest: bank_name is uppercased, account_number_masked is check-digit-normalized, metadata is JSON. */
 export const ACCOUNT_TYPES = ["asset", "liability", "income", "expense", "equity"] as const;
 
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
@@ -18,13 +17,13 @@ export function accountCurrencySQL(alias: string): string {
   return `upper(substr(${alias}.id,1,3))`;
 }
 
-/** Currency is derived from the id's currency head, never stored; see `accountCurrencySQL`. */
 export const ACCOUNT_CURRENCY_SQL = accountCurrencySQL("a");
 
 /** The projection every account read goes through, so `AccountRow.currency` can
  *  never come back undefined. */
 export const ACCOUNT_COLUMNS_SQL = `a.*, ${ACCOUNT_CURRENCY_SQL} AS currency`;
 
+/** At rest: bank_name is uppercased, account_number_masked is check-digit-normalized, metadata is JSON. */
 export interface AccountRow {
   id: string;
   name: string;
@@ -147,7 +146,7 @@ export function insertAccount(
   }
 }
 
-/** Idempotent via `ON CONFLICT(id) DO NOTHING`: a concurrent writer claiming the id between check and insert is a lost race, not a broken invariant. */
+/** A concurrent writer claiming the id between check and insert is a lost race, not a broken invariant. */
 export function insertStructuralAccount(
   db: Database.Database,
   row: { id: string; name: string; type: AccountType; parent_id: string | null },
@@ -178,8 +177,7 @@ const ACCOUNT_PATCH: Record<string, PatchField> = {
   },
 };
 
-/** Returns before/after snapshots of touched fields; `metadata` is
- *  shallow-merged into the existing metadata_json blob. */
+/** `metadata` is shallow-merged into the existing `metadata_json` blob, not replaced. */
 export function updateAccountMetadata(
   db: Database.Database,
   id: string,

@@ -31,7 +31,7 @@ beforeAll(() => {
     JSON.stringify({ displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" }, null, 2) + "\n",
   );
 
-  // Create + migrate the shared db once; tests below seed their own rows against it.
+  // Shared db: every test below seeds rows against this one file.
   const raw = new Database(dbPath);
   raw.pragma("foreign_keys = ON");
   migrate(raw);
@@ -475,7 +475,7 @@ describe("system CLI integration (subprocess)", () => {
           env: isolated.env,
           cwd: isolated.root,
         });
-        expect(res.code).toBe(5); // EXIT.NOT_FOUND
+        expect(res.code).toBe(5);
         const err = parseOne(res.stderr).error;
         expect(err.code).toBe("E_NOT_FOUND");
         expect(err.message).toBe('account "expense:food" not found');
@@ -491,7 +491,7 @@ describe("system CLI integration (subprocess)", () => {
     "merchants upsert: an empty --name is USAGE (2), not a leaked GENERIC",
     async () => {
       const res = await runCLI(["merchants", "upsert", "--name", "   ", "--json"]);
-      expect(res.code).toBe(2); // EXIT.USAGE
+      expect(res.code).toBe(2);
       expect(res.stdout.trim()).toBe("");
       const err = parseOne(res.stderr).error;
       expect(err.code).toBe("E_USAGE");

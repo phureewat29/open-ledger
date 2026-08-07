@@ -61,7 +61,6 @@ function isArgToken(token: string): boolean {
   return token.includes("<");
 }
 
-/** The command noun a span names; undefined for a bare `oled`, a root flag, or a template placeholder. */
 function commandNounOf(span: string): string | undefined {
   const noun = span.trim().split(/\s+/)[1];
   if (!noun || isFlagToken(noun) || isArgToken(noun)) return undefined;
@@ -77,7 +76,6 @@ function extractSpanNouns(md: string): Set<string> {
   return nouns;
 }
 
-/** The first bare (non-flag, non-placeholder) token after the noun, or undefined. */
 function firstSubToken(span: string): string | undefined {
   const tokens = span.trim().split(/\s+/).filter(Boolean);
   for (let i = 2; i < tokens.length; i++) {
@@ -88,7 +86,6 @@ function firstSubToken(span: string): string | undefined {
   return undefined;
 }
 
-// Resolves the command a doc code-span refers to, drilling into a subcommand when named.
 function resolveTargetCommand(program: Command, span: string): Command | undefined {
   const nounName = commandNounOf(span);
   if (!nounName) return undefined;
@@ -102,7 +99,6 @@ function resolveTargetCommand(program: Command, span: string): Command | undefin
   return child ?? nounCmd;
 }
 
-/** Every `--flag` token mentioned in a code span (brackets/pipes/values stripped). */
 function extractFlagTokens(span: string): string[] {
   const tokens = span.trim().split(/\s+/).filter(Boolean);
   const flags: string[] = [];

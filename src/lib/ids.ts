@@ -29,7 +29,7 @@ export function currencyOf(accountId: string): string {
   return accountId.slice(0, 3).toUpperCase();
 }
 
-/** The type segment of an account id; "" when the id has no second segment. */
+/** "" when the id has no second segment. */
 export function typeFromId(accountId: string): string {
   return accountId.split(":")[1] ?? "";
 }

@@ -16,7 +16,6 @@ export interface FuzzyAccountScope {
   readonly ledger: string;
 }
 
-// Scoring is the cost, so an out-of-scope row is dropped before it, not after.
 function inScope(row: AccountRow, scope: FuzzyAccountScope): boolean {
   return row.type === scope.type && row.currency === scope.ledger;
 }

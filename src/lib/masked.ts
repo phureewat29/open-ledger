@@ -1,12 +1,12 @@
 /**
  * Canonical key behind both the stored form (`accounts.account_number_masked`)
- * and the fuzzy matcher, so `••7652-0` and `470686XXXXXX9483` resolve alike.
+ * and the fuzzy matcher, so `••7652`, `••7652-0` and `76520` resolve alike.
  */
 
 // Characters statements use to blank the hidden middle of an account number.
 const MASK_CHARS = "Xx•*…";
 
-/** Everything after the last mask char in `s` (`s` unchanged if none), so a masked run isn't confused with a check-digit separator. */
+/** Splits after the LAST mask char, so a masked run isn't mistaken for a check-digit separator. */
 export function tailAfterMask(s: string): string {
   let lastAt = -1;
   for (const ch of MASK_CHARS) {

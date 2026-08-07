@@ -98,7 +98,7 @@ function failOutcome(
   };
 }
 
-// Header + >=1 linked legs, committed atomically as one group.
+// Legs commit atomically under one group id.
 function commitCompoundRow(
   db: Database.Database,
   counters: Counters,
@@ -186,7 +186,6 @@ interface BatchContext {
   batchId: string;
   /** The `--file` id every row inherits unless it names its own. */
   file?: string;
-  /** file_hash per source file id, resolved on first sight. */
   fileHashes: Map<string, string | null>;
 }
 
@@ -201,7 +200,6 @@ function fileHashOf(db: Database.Database, batch: BatchContext, fileId: string):
   return hash;
 }
 
-// Throws whatever the row's own commit throws; the caller catches it.
 function commitRow(
   db: Database.Database,
   counters: Counters,

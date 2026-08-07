@@ -1,8 +1,8 @@
+/** A preset pairs a model's prescribed prompt, sampling, and render spec; this folder is the only place in src/ that names a model. */
+
 import type { RenderSpec } from "../pdf.js";
 import { lightonOcrPreset } from "./lighton-ocr.js";
 import { typhoonOcrPreset } from "./typhoon-ocr.js";
-
-/** A preset pairs a model's prescribed prompt, sampling, and render spec; this folder is the only place in src/ that names a model. */
 
 /** Wire names: spread straight into the request body. */
 export interface OCRParams {

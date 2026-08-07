@@ -17,9 +17,8 @@ export function freshDb(seed?: (db: Database.Database) => void): Database.Databa
 type SeedAccountInput = Partial<CreateAccountInput> & { id: string };
 
 /**
- * Seeds one account from what its id already says: type from the second
- * segment, parent from all-but-the-leaf, a title-cased leaf for the name.
- * Anything a test asserts on directly is passed explicitly. A refusal throws.
+ * Derives type, parent, and name from the id. Pass anything a test asserts
+ * on directly. A refusal throws.
  */
 export function seedAccount(db: Database.Database, account: SeedAccountInput): string {
   const segments = account.id.split(":");

@@ -350,9 +350,7 @@ describe("bulkRecategorize", () => {
 
     const res = bulkRecategorize(db, { accountId: "thb:expense:food" }, { accountId: "usd:asset:cash" });
 
-    // All three seeded rows touch thb:expense:food on one side; every one of
-    // them has a THB account on the other side, so all three are pre-filtered
-    // before the cross-ledger trigger would ever see the UPDATE.
+    // Every seeded row's other side is THB, so all three are pre-filtered before the cross-ledger trigger would see the UPDATE.
     expect(res).toEqual({
       affected: 0,
       skipped_self_transaction: 0,

@@ -26,7 +26,7 @@ describe("config show defaults (subprocess)", () => {
 describe("config --currency (subprocess)", () => {
   it("refuses a code that could never name a ledger, before anything is persisted", async () => {
     const { stderr, code } = await runCLI(["config", "--init", "--currency", "us", "--json"]);
-    expect(code).toBe(2); // EXIT.USAGE
+    expect(code).toBe(2);
 
     const { error } = JSON.parse(stderr.trim());
     expect(error.code).toBe("E_USAGE");

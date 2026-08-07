@@ -131,8 +131,7 @@ describe("deleteFile", () => {
 
     const result = deleteFile(db, "a");
 
-    // The survivor (file a) is gone; the mirror (file b) survives but its
-    // void_of got nulled out by the self-FK's ON DELETE SET NULL.
+    // The self-FK's ON DELETE SET NULL un-voids the mirror; nothing else does.
     expect(result.removedTransactions).toBe(1);
     expect(result.unvoided).toBe(1);
     expect(findTransactionById(db, mirrorId)?.void_of).toBeNull();

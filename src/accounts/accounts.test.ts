@@ -27,7 +27,6 @@ import { freshDb, seedAccount } from "../../fixtures/db.js";
 
 const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-/** Narrows a refusal for assertion, and fails loudly on an unexpected success. */
 function refused(result: AccountResult): AccountRefusal {
   if (result.ok) throw new Error("expected a refusal, got { ok: true }");
   return result;

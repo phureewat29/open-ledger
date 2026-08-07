@@ -1,7 +1,7 @@
 import { groupBy, range } from "es-toolkit";
 import type { DuplicateTransactionRow } from "../db/queries/transactions.js";
 
-/** Groups by same amount and account pair; a bucket of size 1 can't duplicate anything. */
+/** Candidate duplicates share an amount and an account pair. */
 export function bucketDuplicateCandidates(
   rows: DuplicateTransactionRow[],
 ): DuplicateTransactionRow[][] {

@@ -70,7 +70,7 @@ function currentVersion(db: Database.Database): number {
   return row.version;
 }
 
-/** Which of `tables` this database does not have: the schema half of `doctor`. */
+/** Feeds the schema half of `doctor`. */
 export function listMissingTables(db: Database.Database, tables: string[]): string[] {
   const placeholders = tables.map(() => "?").join(",");
   const rows = db
@@ -79,7 +79,6 @@ export function listMissingTables(db: Database.Database, tables: string[]): stri
   return difference(tables, rows.map((r) => r.name));
 }
 
-/** True if the database holds any table other than the migration ledger itself. */
 function hasUserTables(db: Database.Database): boolean {
   const row = db
     .prepare(
@@ -108,7 +107,7 @@ function backupStamp(): string {
   );
 }
 
-/** Keeps the five newest `<dbPath>.<stamp>.bak` copies; older ones are pruned. */
+/** Keeps the five newest `<dbPath>.<stamp>.bak` copies. */
 function pruneBackups(dbPath: string): void {
   const dir = dirname(dbPath);
   const prefix = `${basename(dbPath)}.`;
@@ -120,8 +119,7 @@ function pruneBackups(dbPath: string): void {
     try {
       unlinkSync(join(dir, name));
     } catch {
-      // Housekeeping only, and it runs mid-migration: an undeletable stale copy (a virus
-      // scanner holding it open) must not fail the upgrade the new backup already covers.
+      // Housekeeping mid-migration: an undeletable stale copy must not fail an upgrade the new backup already covers.
     }
   }
 }

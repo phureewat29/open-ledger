@@ -1,7 +1,7 @@
+// Locale + currency read from the top level of `datasets/<cc>.json`.
+
 import * as z from "zod";
 import { loadDatasetRows, type DatasetDefinition } from "./loader.js";
-
-// Locale + currency per country, read from the top level of `datasets/<cc>.json`; `config --init` seeds display defaults from it.
 
 const countryDefaultsSchema = z.object({
   country: z.string(),
@@ -22,7 +22,7 @@ function all(): CountryDefaults[] {
   return loadDatasetRows("defaults", defaultsDataset) as unknown as CountryDefaults[];
 }
 
-/** The locale/currency defaults for a country (case-insensitive), or null. */
+/** Case-insensitive lookup; null when the country has no defaults. */
 export function findCountryDefaults(country: string): CountryDefaults | null {
   const cc = country.toUpperCase();
   return all().find((r) => r.country === cc) ?? null;

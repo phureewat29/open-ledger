@@ -115,7 +115,7 @@ function buildRedactions(): RedactionEntry[] {
   return entries;
 }
 
-/** Builds redaction rules once, returning a reusable masker that amortizes that cost. */
+/** Returns a closure, not a `redact(text)`: the context read and pattern compile happen once, then amortize over every field of a payload. */
 function createRedactor(): (text: string) => string {
   const redactions = buildRedactions();
   // ASCII lookarounds, not \b: Thai text has no spaces, so a Unicode letter

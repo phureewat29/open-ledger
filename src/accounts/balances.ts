@@ -183,8 +183,7 @@ interface AdjustAccountBalanceResult {
   delta: number;
 }
 
-/** Ledger comes from the target account, never config. Delta math is integer
- *  minor units; a zero delta is a no-op. */
+/** Ledger comes from the target account, never config; delta math is integer minor units. */
 export function adjustAccountBalance(
   db: Database.Database,
   opts: AdjustAccountBalanceOpts,

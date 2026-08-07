@@ -126,7 +126,7 @@ async function applyConvergedConfig(converged: ConvergedConfig): Promise<void> {
   const patch: Partial<OpenLedgerConfig> = { ...converged };
   saveConfig(patch);
 
-  // openDb() runs the migration against the (freshly) configured db path.
+  // After saveConfig, so the migration lands on the new db path.
   const db = await openDb();
 
   // Seeds the display-currency ledger's structural accounts so first ingest resolves them.

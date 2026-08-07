@@ -36,7 +36,6 @@ function rootHelpDesc(cmd: Command): string {
   return hint ? `${cmd.description()} ${hint}` : cmd.description();
 }
 
-// `oled ingest list` for a leaf, `oled` for the root.
 function commandPath(cmd: Command): string {
   const names: string[] = [];
   for (let c: Command | null = cmd; c; c = c.parent) names.unshift(c.name());

@@ -54,7 +54,7 @@ describe("accounts create (subprocess)", () => {
     const res = await runCLI([
       "accounts", "create", "--id", "eur:asset:x", "--name", "X", "--type", "expense", "--json",
     ]);
-    expect(res.code).toBe(6); // EXIT.INVALID
+    expect(res.code).toBe(6);
 
     const { error } = JSON.parse(res.stderr.trim());
     expect(error.code).toBe("E_INVALID");
@@ -113,7 +113,7 @@ describe("accounts create (subprocess)", () => {
     const res = await runCLI([
       "accounts", "create", "--id", "thb:asset:cash", "--name", "Second Cash", "--type", "asset", "--json",
     ]);
-    expect(res.code).toBe(6); // EXIT.INVALID
+    expect(res.code).toBe(6);
 
     const { error } = JSON.parse(res.stderr.trim());
     expect(error.code).toBe("E_INVALID");
@@ -131,7 +131,7 @@ describe("accounts create (subprocess)", () => {
       "accounts", "create", "--id", "thb:expense:food:nuts", "--name", "Nuts",
       "--type", "expense", "--parent", "thb:expense:snacks", "--json",
     ]);
-    expect(res.code).toBe(5); // EXIT.NOT_FOUND
+    expect(res.code).toBe(5);
 
     const { error } = JSON.parse(res.stderr.trim());
     expect(error.code).toBe("E_NOT_FOUND");

@@ -1,10 +1,11 @@
+/** Lives beside the other fixtures, not in src/, so it never ships in the published package. */
+
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Lives beside the other fixtures, not in src/, so it never ships in the published package. */
 export interface Sandbox {
   root: string;
   home: string;

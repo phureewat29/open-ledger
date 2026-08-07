@@ -216,7 +216,6 @@ describe("renameMerchant", () => {
     expect(renamed).toEqual({ before: "STARBUCKS COFFEE #456", after: "Starbucks" });
     expect(findMerchantById(db, m.id)!.canonical_name).toBe("Starbucks");
 
-    // Both the original alias and the pre-rename name still hit the merchant.
     expect(findMerchantByAlias(db, "STARBUCKS #456 BKK", TH_NOISE)?.id).toBe(m.id);
     expect(findMerchantByAlias(db, "STARBUCKS COFFEE #456", TH_NOISE)?.id).toBe(m.id);
   });

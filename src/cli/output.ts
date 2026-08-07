@@ -8,8 +8,6 @@ import { errorMessage } from "../lib/result.js";
 import { DBNotReadyError } from "../db/errors.js";
 import type { AccountFailure } from "../accounts/accounts.js";
 
-/** emit()/emitSummary() no-op outside --json; use emitObject() for a single result instead. */
-
 export const EXIT = {
   OK: 0,
   GENERIC: 1,
@@ -98,6 +96,7 @@ function writeLine(stream: NodeJS.WriteStream, obj: unknown): void {
   stream.write(JSON.stringify(stripMetadata(obj)) + "\n");
 }
 
+/** emit()/emitSummary() no-op outside --json; use emitObject() for a single result instead. */
 export function emit(obj: unknown): void {
   if (currentMode().json) writeLine(process.stdout, obj);
 }
@@ -200,8 +199,7 @@ async function readStdinToEnd(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-// Reads `--input <file>` or stdin, auto-detecting a JSON array (leading `[`) vs NDJSON.
-// Row validation is the caller's job.
+// Auto-detects a JSON array (leading `[`) vs NDJSON; row validation is the caller's job.
 export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   const from = inputPath ?? "stdin";
   let source: string;

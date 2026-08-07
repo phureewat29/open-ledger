@@ -23,7 +23,7 @@ export interface OCRSettings {
   /** `""` when the endpoint needs no auth (the local case). */
   apiKey: string;
   timeoutMs: number;
-  /** Which preset the model id selected; stays internal, used only to pick the prompt/params/render spec. */
+  /** Which preset the model id selected; internal, not part of the request. */
   preset: PresetName;
   prompt: string;
   params: OCRParams;
@@ -175,7 +175,7 @@ export async function ocrPages(
   return outcomes;
 }
 
-/** The model ids the endpoint serves, for `oled doctor`. */
+/** Diagnostic only: the model ids the endpoint serves. */
 export async function probeOcrEndpoint(settings: OCRSettings): Promise<Result<string[]>> {
   const response = await tryExecute(async () => {
     const res = await fetch(`${settings.baseUrl}/models`, {

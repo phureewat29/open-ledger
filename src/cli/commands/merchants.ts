@@ -127,7 +127,6 @@ async function updateMerchant(opts: Record<string, unknown>): Promise<void> {
   const parsed = parseInput(UPDATE_MERCHANT_SPEC, opts, {
     atLeastOne: "at least one of --name, --alias, --default-account is required",
   });
-  // An all-whitespace name is the flag not being passed, and reads that way.
   if (parsed.name !== undefined && !parsed.name.trim()) fail("USAGE", "--name required");
   const db = await openDb();
   const current = findMerchantById(db, parsed.merchant);

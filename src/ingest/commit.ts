@@ -158,7 +158,7 @@ interface UnopenedLedgerRefusal {
 
 type DirtyInput = { ok: false; reason: "dirty_input"; message: string };
 
-/** What `refuseRow` decides, all of it by pure read. */
+/** Refusals decided by pure read, before resolution writes anything. */
 type PrepareFailure =
   | DirtyInput
   | {
@@ -170,8 +170,7 @@ type PrepareFailure =
     }
   | UnopenedLedgerRefusal;
 
-/** What `resolveRow` decides, once refusals are past: only the row's own
- *  accounts can still fail it. */
+/** Once refusals are past, only the row's own accounts can still fail it. */
 type ResolveResult = { ok: true; prepared: PreparedTransaction } | DirtyInput;
 
 function validateRawTransaction(input: RawTransactionInput): ValidateTransactionResult {
@@ -191,7 +190,7 @@ function validateRawTransaction(input: RawTransactionInput): ValidateTransaction
   return { ok: true };
 }
 
-/** An unplaced side carries the fallback as its own hint, so it explains itself. */
+/** An unplaced side carries the uncategorized fallback as its own hint. */
 function preparedSide(
   side: TransactionSide,
   requested: string,
@@ -360,11 +359,9 @@ interface HintDispatchArgs {
 interface SideOutcome {
   how: SideHow;
   similar_to?: string;
-  /** Questions this hint raised. */
   raised: number;
 }
 
-/** Each arm raises the question its hint earns and names how the side landed. */
 const HINT_DISPATCH: {
   [K in AccountHint["type"]]: (
     hint: Extract<AccountHint, { type: K }>,
@@ -587,12 +584,10 @@ function mergeHeaderLeg(
 }
 
 /**
- * Every leg carries the header's merchant, so one claim covers the group: left
- * to `insertTransaction`, the same merchant would be upserted, and its alias
- * re-claimed, once per leg. The claim sits ahead of the legs' transaction, so a
- * transaction still cannot land without its merchant. What that costs: a group
- * abandoned mid-insert leaves the merchant and its alias claim behind, where a
- * per-leg upsert would have rolled back with the write.
+ * One merchant claim covers the group, ahead of the legs' insert, so no
+ * transaction lands without its merchant. The cost: a group abandoned
+ * mid-insert leaves the merchant and its alias claim behind, where a per-leg
+ * upsert would have rolled back with the write.
  */
 function claimGroupMerchant(
   db: Database.Database,
