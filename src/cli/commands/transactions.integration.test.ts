@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSandbox,
+  writeConf,
   makeRunCLI,
   parseNdjson,
   parseOne,
@@ -17,6 +18,7 @@ let runCLI: CLIRunner;
 beforeAll(() => {
   sandbox = createSandbox("oled-ledger-it-");
   runCLI = makeRunCLI(sandbox);
+  writeConf(sandbox, {});
 });
 
 afterAll(() => {
@@ -884,12 +886,8 @@ describe("transactions CLI integration (subprocess)", () => {
     "transactions list --json masks PII by default (card number + configured user name); --no-redact returns verbatim",
     async () => {
       const userName = "Nutcha Wong";
-      // The redactor sources config.userName from OLED_DIR/config.json (no env var override).
-      mkdirSync(join(sandbox.home, ".oled"), { recursive: true });
-      writeFileSync(
-        join(sandbox.home, ".oled", "config.json"),
-        JSON.stringify({ userName }, null, 2) + "\n",
-      );
+      // The redactor sources userName from the conf file this invocation resolves.
+      writeConf(sandbox, { userName });
 
       await runCLI([
         "accounts", "create", "--id", "thb:expense:travel", "--name", "Travel",

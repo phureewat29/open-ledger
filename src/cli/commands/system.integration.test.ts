@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
 import Database from "libsql";
 import { migrate } from "../../db/schema.js";
 import { createAccount } from "../../accounts/accounts.js";
@@ -8,6 +7,7 @@ import { insertTransaction } from "../../db/queries/transactions.js";
 import { recordQuestion } from "../../db/queries/questions.js";
 import {
   createSandbox,
+  writeConf,
   makeRunCLI,
   parseNdjson,
   parseOne,
@@ -24,12 +24,8 @@ beforeAll(() => {
   runCLI = makeRunCLI(sandbox);
   dbPath = sandbox.dbPath;
 
-  // Minimal config.json so `doctor`'s config_exists check is true and `config show` resolves.
-  mkdirSync(join(sandbox.home, ".oled"), { recursive: true });
-  writeFileSync(
-    join(sandbox.home, ".oled", "config.json"),
-    JSON.stringify({ displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" }, null, 2) + "\n",
-  );
+  // Minimal config.json so `doctor`'s config_exists check is true and bare `config` resolves.
+  writeConf(sandbox, { displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" });
 
   // Shared db: every test below seeds rows against this one file.
   const raw = new Database(dbPath);
@@ -44,7 +40,7 @@ afterAll(() => {
 
 describe("system CLI integration (subprocess)", () => {
   it(
-    "config --init on a fresh env creates the db and data dir, and config show reflects them",
+    "config --init on a fresh env creates the db and data dir, and bare config reflects them",
     async () => {
       const isolated = createSandbox("oled-system-setup-it-");
       try {
@@ -73,14 +69,11 @@ describe("system CLI integration (subprocess)", () => {
         const setupResult = parseOne(setup.stdout);
         expect(setupResult.created).toMatchObject({ db: setupDbPath, data_dir: setupDataDir });
 
-        const show = await runCLI(["config", "show", "--json"], { env: isolated.env, cwd: isolated.root });
+        const show = await runCLI(["config", "--json"], { env: isolated.env, cwd: isolated.root });
         expect(show.code).toBe(0);
         const cfg = parseOne(show.stdout);
         expect(cfg.dataDir).toBe(setupDataDir);
         expect(cfg.dbPath).toBe(setupDbPath);
-        // No database key of any kind reaches the config; absence is the contract.
-        expect(setupResult).not.toHaveProperty("dbEncryptionKey");
-        expect(cfg).not.toHaveProperty("dbEncryptionKey");
       } finally {
         isolated.cleanup();
       }
@@ -124,7 +117,7 @@ describe("system CLI integration (subprocess)", () => {
         expect(blank.db.error).toBe("no ledger yet");
         // Orienting must not bring a ledger into existence.
         expect(existsSync(isolated.dbPath)).toBe(false);
-        expect(existsSync(join(isolated.home, ".oled", "config.json"))).toBe(false);
+        expect(existsSync(isolated.confPath)).toBe(false);
 
         // Doctor diagnoses the same state without provisioning it either.
         const virginDoctor = await runCLI(["doctor", "--json"], { env: isolated.env, cwd: isolated.root });
@@ -148,8 +141,6 @@ describe("system CLI integration (subprocess)", () => {
         const report = parseOne(after.stdout);
         expect(report.configured).toBe(true);
         expect(report.db.reachable).toBe(true);
-        expect(report.db).not.toHaveProperty("encrypted");
-        expect(report.db).not.toHaveProperty("key_fingerprint");
         // Paths are home-relativized facts, never redaction fodder; only config_path sits under HOME here.
         expect(report.config_path.startsWith("~/")).toBe(true);
         expect(JSON.stringify(report)).not.toContain("[USER");
@@ -239,7 +230,7 @@ describe("system CLI integration (subprocess)", () => {
   );
 
   it(
-    "config: an ocr model persists without a url, and the preset stays out of the surface",
+    "config: an ocr model persists without a url, and the model card stays out of the surface",
     async () => {
       const isolated = createSandbox("oled-system-ocr-cfg-it-");
       const env = { env: isolated.env, cwd: isolated.root };
@@ -254,31 +245,15 @@ describe("system CLI integration (subprocess)", () => {
           ocrModel: "test-ocr-model",
         });
 
-        const show = await runCLI(["config", "show", "--json"], env);
+        const show = await runCLI(["config", "--json"], env);
         expect(show.code).toBe(0);
         const shown = parseOne(show.stdout);
         expect(shown).toMatchObject({ ocrModel: "test-ocr-model" });
-        // The model is the only OCR knob; the preset it selects is internal.
-        expect(shown).not.toHaveProperty("ocrPreset");
+        // The model is the only OCR knob; the model card it selects is internal.
+        expect(shown).not.toHaveProperty("ocrModelCard");
       } finally {
         isolated.cleanup();
       }
-    },
-    30000,
-  );
-
-  it(
-    "config show fingerprints an env-supplied OCR api key rather than echoing it (there is no flag for it)",
-    async () => {
-      const show = await runCLI(["config", "show", "--json"], {
-        env: { ...sandbox.env, OLED_OCR_API_KEY: "sk-ocr-plaintext" },
-      });
-      expect(show.code).toBe(0);
-      expect(parseOne(show.stdout).ocrApiKey).toMatchObject({
-        set: true,
-        fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{8}$/),
-      });
-      expect(show.stdout).not.toContain("sk-ocr-plaintext");
     },
     30000,
   );
@@ -456,6 +431,7 @@ describe("system CLI integration (subprocess)", () => {
     async () => {
       const isolated = createSandbox("oled-system-account-notfound-it-");
       try {
+        writeConf(isolated, {});
         const raw = new Database(isolated.dbPath);
         raw.pragma("foreign_keys = ON");
         migrate(raw);

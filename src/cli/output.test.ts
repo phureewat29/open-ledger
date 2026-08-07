@@ -197,9 +197,8 @@ describe("reportError: rendering (via runAction)", () => {
   it("json mode omits hint and details keys entirely when absent", async () => {
     const { exitCode, stderrLines } = await captureReport(new Error("boom"), jsonCommand());
     expect(exitCode).toBe(EXIT.GENERIC);
-    const parsed = JSON.parse(stderrLines[0]);
-    expect(Object.keys(parsed.error).sort()).toEqual(["code", "message"]);
-    expect(parsed.error).toEqual({ code: "E_GENERIC", message: "boom" });
+    // An exact toEqual is already the key-set check the title asks for.
+    expect(JSON.parse(stderrLines[0]).error).toEqual({ code: "E_GENERIC", message: "boom" });
   });
 
   it("json mode is honored when --json sits on an ancestor command", async () => {

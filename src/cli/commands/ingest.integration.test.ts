@@ -18,6 +18,7 @@ import {
   createSandbox,
   makeRunCLI,
   parseNdjson,
+  writeConf,
   type CLIRunner,
   type Sandbox,
 } from "../../../fixtures/sandbox.js";
@@ -27,9 +28,9 @@ import { samplePng } from "../../../fixtures/images.js";
 import {
   DEAD_OCR_BASE_URL,
   liveOcr,
-  liveOcrEnv,
   requireLiveOcr,
-} from "../../../fixtures/ocr-endpoint.js";
+  requireLiveOcrSource,
+} from "../../../fixtures/ocr.js";
 
 let sandbox: Sandbox;
 let runCLI: CLIRunner;
@@ -39,6 +40,7 @@ beforeAll(() => {
   sandbox = createSandbox("oled-ingest-it-");
   runCLI = makeRunCLI(sandbox);
   dbPath = sandbox.dbPath;
+  writeConf(sandbox, {});
 
   // Closed before the CLI runs so the subprocess owns the writer.
   const db = new Database(dbPath);
@@ -771,13 +773,15 @@ describe("ingest prepare against an OCR server (subprocess)", () => {
   it("exits NOT_READY rather than degrading to images when nothing is listening", async () => {
     // Two pages, so this doesn't hash-dedup onto the live case's one-page scan.
     const path = stage("statements/scan-dead.pdf", pdfOf(["image", "image"]));
-    const { code, stderr } = await runCLI(["ingest", "prepare", path, "--json"], {
-      env: {
-        ...sandbox.env,
-        OLED_OCR_BASE_URL: DEAD_OCR_BASE_URL,
-        OLED_OCR_MODEL: "test-ocr-model",
-      },
-    });
+    // OCR settings live in a conf file now; --conf scopes them to this run.
+    const deadConf = join(sandbox.root, "dead-ocr.json");
+    writeFileSync(
+      deadConf,
+      JSON.stringify({ ocrBaseUrl: DEAD_OCR_BASE_URL, ocrModel: "test-ocr-model" }) + "\n",
+    );
+    const { code, stderr } = await runCLI([
+      "ingest", "prepare", path, "--conf", deadConf, "--json",
+    ]);
     expect(code).toBe(3);
     const { error } = JSON.parse(stderr.trim());
     expect(error.code).toBe("E_NOT_READY");
@@ -791,9 +795,11 @@ describe.skipIf(!liveOcr)("ingest prepare against an OCR server (live OCR endpoi
     async () => {
       const path = stage("statements/scan-ocr.pdf", pdfOf(["image"]));
 
-      const { stdout, code } = await runCLI(["ingest", "prepare", path, "--json"], {
-        env: liveOcrEnv(sandbox.env),
-      });
+      const liveConf = join(sandbox.root, "live-ocr.json");
+      writeFileSync(liveConf, JSON.stringify(requireLiveOcrSource()) + "\n");
+      const { stdout, code } = await runCLI([
+        "ingest", "prepare", path, "--conf", liveConf, "--json",
+      ]);
       expect(code).toBe(0);
       const obj = JSON.parse(stdout.trim());
       expect(obj).toMatchObject({

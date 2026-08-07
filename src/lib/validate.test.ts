@@ -96,7 +96,6 @@ describe("validate: nullable", () => {
 describe("validate: optional", () => {
   it("omits an absent optional key entirely", () => {
     const parsed = parseInput(z.object({ name: str().optional() }), {});
-    expect("name" in parsed).toBe(false);
     expect(Object.keys(parsed)).toEqual([]);
   });
 });

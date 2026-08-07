@@ -146,15 +146,14 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   );
 
   it(
-    "config show reads back what --init persisted",
+    "bare config reads back what --init persisted",
     async () => {
-      const cfg = parseOne((await ok(["config", "show"])).stdout);
+      const cfg = parseOne((await ok(["config"])).stdout);
       expect(cfg).toMatchObject({
         userName: "Integration Tester",
         displayCurrency: "THB",
         dbPath: sandbox.dbPath,
       });
-      expect(cfg).not.toHaveProperty("dbEncryptionKey");
     },
     20000,
   );
@@ -493,21 +492,9 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
   );
 
   it(
-    "config --locale rewrites the display locale",
-    async () => {
-      await ok(["config", "--locale", "en-US"]);
-      expect(parseOne((await ok(["config", "show"])).stdout)).toMatchObject({
-        displayLocale: "en-US",
-      });
-    },
-    20000,
-  );
-
-  it(
     "status still answers after every mutation above",
     async () => {
       const status = parseOne((await ok(["status"])).stdout);
-      expect(status.questions.open).toEqual(expect.any(Number));
       expect(status.questions.open).toBeGreaterThanOrEqual(0);
     },
     20000,

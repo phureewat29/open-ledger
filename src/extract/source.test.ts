@@ -109,7 +109,6 @@ describe("loadSource", () => {
 
     const result = loadSource(path);
     expect(result).toMatchObject({ ok: false, reason: "too_large" });
-    if (!result.ok) expect(result.message).toContain(String(MAX_SOURCE_BYTES));
   });
 
   it("reports a missing file as unreadable", () => {

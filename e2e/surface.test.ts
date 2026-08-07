@@ -31,7 +31,7 @@ interface SurfaceCase {
 const SURFACE_CASES: SurfaceCase[] = [
   { label: "status", args: ["status"], exit: 0 },
   { label: "doctor", args: ["doctor"], exit: 0 },
-  { label: "config show", args: ["config", "show"], exit: 0 },
+  { label: "config", args: ["config"], exit: 0 },
   { label: "ingest list", args: ["ingest", "list"], exit: 0, list: true },
   { label: "files list", args: ["files", "list"], exit: 0, list: true },
   { label: "transactions list", args: ["transactions", "list"], exit: 0, list: true },

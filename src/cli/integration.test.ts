@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Database from "libsql";
-import { createSandbox, makeRunCLI, type CLIRunner, type Sandbox } from "../../fixtures/sandbox.js";
+import { createSandbox, makeRunCLI, writeConf, type CLIRunner, type Sandbox } from "../../fixtures/sandbox.js";
 import { buildProgram } from "./program.js";
 import { migrate } from "../db/schema.js";
 import { ensureLedgerRoot } from "../accounts/accounts.js";
@@ -12,6 +12,7 @@ let runCLI: CLIRunner;
 beforeAll(() => {
   sandbox = createSandbox("oled-it-");
   runCLI = makeRunCLI(sandbox);
+  writeConf(sandbox, {});
 });
 
 afterAll(() => {

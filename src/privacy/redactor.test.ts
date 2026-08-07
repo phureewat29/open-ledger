@@ -1,11 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { applyRedaction, type RedactionSource } from "./redactor.js";
 
-vi.mock("../config.js", () => ({
-  config: { userName: "Alpaca Beagle" },
-}));
+let dir: string;
+let SOURCE: RedactionSource;
 
-vi.mock("../context.js", () => ({
-  readContext: vi.fn().mockReturnValue(
+beforeAll(() => {
+  dir = mkdtempSync(resolve(tmpdir(), "oled-redactor-"));
+  const contextPath = resolve(dir, "context.md");
+  writeFileSync(
+    contextPath,
     `## Family
 - Partner: Corgi
 - User
@@ -13,14 +19,17 @@ vi.mock("../context.js", () => ({
 ## Income
 - 80,000 THB/month from Zentry Thailand Co.
 `,
-  ),
-}));
+  );
+  SOURCE = { userName: "Alpaca Beagle", contextPath };
+});
 
-import { applyRedaction } from "./redactor.js";
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
 
 // createRedactor is private; exercised here through applyRedaction, round-tripping a single allowlisted field.
 function redact(text: string): string {
-  return applyRedaction({ text }, true, ["text"]).text;
+  return applyRedaction({ text }, true, ["text"], SOURCE).text;
 }
 
 describe("applyRedaction (masking patterns)", () => {
@@ -30,10 +39,6 @@ describe("applyRedaction (masking patterns)", () => {
 
   it("redacts user first and last names", () => {
     expect(redact("Hi Alpaca, Mr. Beagle")).toBe("Hi [USER_FIRST], Mr. [USER_LAST]");
-  });
-
-  it("redacts partner names from context", () => {
-    expect(redact("Payment to Corgi")).toBe("Payment to [PARTNER]");
   });
 
   it("matches terms literally, never as regex patterns", () => {
@@ -72,20 +77,20 @@ describe("applyRedaction (masking patterns)", () => {
   });
 
   it("never rewrites a path: the default name is not a term, and terms respect boundaries", () => {
-    // The mocked context's Family section carries "- User", which must not become a term.
+    // The context's Family section carries "- User", which must not become a term.
     expect(redact("/Users/phureewat/.oled/db.sqlite")).toBe("/Users/phureewat/.oled/db.sqlite");
   });
 
-  it("matches whole words only: Corgi inside Corgis stays put", () => {
-    expect(redact("Corgis are a breed")).toBe("Corgis are a breed");
+  it("redacts a partner name from context, whole words only: Corgi inside Corgis stays put", () => {
     expect(redact("Payment to Corgi")).toBe("Payment to [PARTNER]");
+    expect(redact("Corgis are a breed")).toBe("Corgis are a breed");
   });
 });
 
 describe("applyRedaction (field allowlisting)", () => {
   it("is an identity no-op when disabled", () => {
     const data = { memo: "call 0812345678", account_id: "asset:kbank" };
-    expect(applyRedaction(data, false, ["memo"])).toBe(data);
+    expect(applyRedaction(data, false, ["memo"], SOURCE)).toBe(data);
   });
 
   it("redacts allowlisted string fields but leaves other fields verbatim", () => {
@@ -94,7 +99,7 @@ describe("applyRedaction (field allowlisting)", () => {
       memo: "refund to 0812345678",
       currency: "THB",
     };
-    const out = applyRedaction(row, true, ["memo"]);
+    const out = applyRedaction(row, true, ["memo"], SOURCE);
     expect(out.memo).toBe("refund to [PHONE]");
     // ids/enums must survive untouched even when they contain digits.
     expect(out.account_id).toBe("asset:0812345678");
@@ -110,7 +115,7 @@ describe("applyRedaction (field allowlisting)", () => {
         { id: "e:3", account_id: "expense:food", memo: null },
       ],
     };
-    const out = applyRedaction(detail, true, ["description", "memo"]);
+    const out = applyRedaction(detail, true, ["description", "memo"], SOURCE);
     expect(out.description).toBe("salary [NATID]");
     expect(out.entries[0].memo).toBe("card [CARD]");
     expect(out.entries[0].account_id).toBe("asset:kbank");
@@ -120,7 +125,7 @@ describe("applyRedaction (field allowlisting)", () => {
 
   it("does not mutate the input", () => {
     const row = { memo: "0812345678" };
-    const out = applyRedaction(row, true, ["memo"]);
+    const out = applyRedaction(row, true, ["memo"], SOURCE);
     expect(row.memo).toBe("0812345678");
     expect(out.memo).toBe("[PHONE]");
   });

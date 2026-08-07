@@ -31,8 +31,9 @@ describe("chmod600", () => {
     expect(() => chmod600(join(scratchDir(), "absent-wal"))).not.toThrow();
   });
 
-  it("propagates a refusal, so a broken 0600 promise cannot pass silently", () => {
-    if (process.platform === "win32" || process.getuid?.() === 0) return;
+  it("propagates a refusal, so a broken 0600 promise cannot pass silently", (ctx) => {
+    // Root and Windows cannot be denied search permission; report that as skipped, never as passed.
+    ctx.skip(process.platform === "win32" || process.getuid?.() === 0, "needs an unprivileged posix uid");
     const dir = scratchDir();
     const path = join(dir, "locked.json");
     writeFileSync(path, "{}");

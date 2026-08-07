@@ -142,7 +142,7 @@ describe("docs consistency (no subprocesses)", () => {
 
   it("every --flag on an oled span in SKILL.md is a real option on the resolved command", () => {
     const program = buildProgram();
-    const globalFlags = new Set(["--json", "--no-color"]);
+    const globalFlags = new Set(["--json", "--no-color", "--conf"]);
     const problems: string[] = [];
     const sources: Array<[string, string]> = [["SKILL.md", SKILL]];
 

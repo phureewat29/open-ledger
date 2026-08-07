@@ -1,7 +1,7 @@
 /** Lives beside the other fixtures, not in src/, so it never ships in the published package. */
 
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 export interface Sandbox {
   root: string;
   home: string;
+  /** `<home>/.oled` — where the default conf path and every default location resolve. */
+  oledDir: string;
+  confPath: string;
   dbPath: string;
   dataDir: string;
   cacheDir: string;
@@ -16,28 +19,19 @@ export interface Sandbox {
   cleanup(): void;
 }
 
-/** A throwaway `mkdtemp` root plus an `env` that redirects HOME and every OLED_* path into it, so nothing touches the real `~/.oled`. */
+/** A throwaway `mkdtemp` root plus an `env` that redirects HOME into it, so the
+ *  default `~/.oled` tree lands in the sandbox and nothing touches the real one. */
 export function createSandbox(prefix: string): Sandbox {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const home = join(root, "home");
-  const dataDir = join(root, "data");
-  const cacheDir = join(root, "cache");
-  const dbPath = join(root, "db.sqlite");
-  mkdirSync(home, { recursive: true });
+  const oledDir = join(home, ".oled");
+  const dataDir = join(oledDir, "data");
   mkdirSync(dataDir, { recursive: true });
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
-    OLED_DIR: join(home, ".oled"),
-    OLED_DB_PATH: dbPath,
-    OLED_DATA_DIR: dataDir,
-    OLED_CACHE_DIR: cacheDir,
-    // Blanked so no test reaches a live OCR endpoint or leaks a developer's own model choice.
-    OLED_OCR_BASE_URL: "",
-    OLED_OCR_MODEL: "",
-    OLED_OCR_API_KEY: "",
     NO_COLOR: "1",
   };
   // Node warns on stderr when NO_COLOR and FORCE_COLOR are both set, corrupting the
@@ -48,12 +42,20 @@ export function createSandbox(prefix: string): Sandbox {
   return {
     root,
     home,
-    dbPath,
+    oledDir,
+    confPath: join(oledDir, "config.json"),
+    dbPath: join(oledDir, "db.sqlite"),
     dataDir,
-    cacheDir,
+    cacheDir: join(oledDir, "cache"),
     env,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
+}
+
+/** Seeds the sandbox's config.json so gated commands run without a prior `config --init`. */
+export function writeConf(sandbox: Sandbox, values: Record<string, unknown>): void {
+  mkdirSync(sandbox.oledDir, { recursive: true });
+  writeFileSync(sandbox.confPath, JSON.stringify(values, null, 2) + "\n");
 }
 
 /** This file lives in fixtures/, so the repo root is one level up. */

@@ -45,6 +45,7 @@ const CTX: TransactionCommitContext = {
   batchId: "ib:1",
   fileId: "sf:1",
   fileHash: "hashABC",
+  country: "TH",
 };
 
 function raw(over: Partial<RawTransactionInput> = {}): RawTransactionInput {

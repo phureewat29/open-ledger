@@ -5,10 +5,10 @@ import { distEntry, repoRoot } from "../fixtures/sandbox.js";
 // These suites assert on the published artifact, so dist/ must match the working tree first.
 // vitest awaits globalSetup before the first spec, so nothing reads dist/ while the build replaces it.
 export function setup(): void {
-  if (process.env.OLED_E2E_SKIP_BUILD === "1") {
+  if (process.env.E2E_SKIP_BUILD === "1") {
     if (!existsSync(distEntry)) {
       throw new Error(
-        `OLED_E2E_SKIP_BUILD=1 but ${distEntry} is missing: run \`npm run build\` first`,
+        `E2E_SKIP_BUILD=1 but ${distEntry} is missing: run \`npm run build\` first`,
       );
     }
     return;

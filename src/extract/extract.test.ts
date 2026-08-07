@@ -7,7 +7,7 @@ import {
   deadOcrSettings,
   liveOcr,
   requireLiveOcr,
-} from "../../fixtures/ocr-endpoint.js";
+} from "../../fixtures/ocr.js";
 
 const NO_OCR = { ocr: null };
 
@@ -48,10 +48,10 @@ describe("extractFile: text-layer route", () => {
 describe("extractFile: agent route", () => {
   it("rasterizes a scanned PDF at the render spec when no endpoint is set", async () => {
     const outcome = await extractFile(pdfInput(scanPdf()), NO_OCR);
-    expect(outcome.ok).toBe(true);
+    // Named before the narrowing guard, so a silent fallback to the text route can't pass this vacuously.
+    expect(outcome.ok && outcome.value.kind).toBe("images");
     if (!outcome.ok || outcome.value.kind !== "images") return;
     expect(outcome.value).toMatchObject({
-      kind: "images",
       source: "raster",
       textLayer: "none",
       dpi: PAGE_RENDER.dpi,
@@ -72,7 +72,8 @@ describe("extractFile: agent route", () => {
   it("passes an image through as its own bytes, with no dpi and no mupdf", async () => {
     const input = imageInput();
     const outcome = await extractFile(input, NO_OCR);
-    expect(outcome.ok).toBe(true);
+    // Named before the narrowing guard: an image must never be routed through mupdf.
+    expect(outcome.ok && outcome.value.kind).toBe("images");
     if (!outcome.ok || outcome.value.kind !== "images") return;
     expect(outcome.value).toMatchObject({ source: "original", textLayer: "none" });
     expect(outcome.value.dpi).toBeUndefined();

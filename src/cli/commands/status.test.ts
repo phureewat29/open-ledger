@@ -1,9 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { config } from "../../config.js";
+import { describe, expect, it } from "vitest";
 import { renderTty, type StatusReport } from "./status.js";
-
-const ORIGINAL_LOCALE = config.displayLocale;
-const ORIGINAL_CURRENCY = config.displayCurrency;
 
 function report(over: Partial<StatusReport> = {}): StatusReport {
   return {
@@ -11,8 +7,8 @@ function report(over: Partial<StatusReport> = {}): StatusReport {
     configured: true,
     config_path: "/tmp/none/config.json",
     data_dir: "/tmp/none/data",
-    locale: config.displayLocale,
-    currency: config.displayCurrency,
+    locale: "th-TH",
+    currency: "THB",
     user_name: "User",
     db: { path: "/tmp/none/db.sqlite", reachable: true, error: null },
     counts: { accounts: 1, transactions: 1, merchants: 0, notes: 0 },
@@ -39,16 +35,8 @@ function capture(run: () => void): string {
 }
 
 describe("renderTty (the only surface that formats money for humans)", () => {
-  afterEach(() => {
-    config.displayLocale = ORIGINAL_LOCALE;
-    config.displayCurrency = ORIGINAL_CURRENCY;
-  });
-
   it("renders a negative net worth signed, in the currency's own fraction digits", () => {
-    config.displayLocale = "ja-JP";
-    config.displayCurrency = "JPY";
-
-    const out = capture(() => renderTty(report(), false));
+    const out = capture(() => renderTty(report({ locale: "ja-JP", currency: "JPY" }), false));
 
     // JPY has no minor unit: 1,500 exactly, never 1,500.00.
     expect(out).toContain("1,500");
@@ -59,12 +47,11 @@ describe("renderTty (the only surface that formats money for humans)", () => {
 
   it("gives every ledger its own labelled rows, each in its own currency", () => {
     // The display currency is THB; the JPY figures must not borrow its exponent.
-    config.displayLocale = "en-US";
-    config.displayCurrency = "THB";
-
     const out = capture(() =>
       renderTty(
         report({
+          locale: "en-US",
+          currency: "THB",
           net_worth: {
             assets: { JPY: 1500, THB: 20.5 },
             liabilities: {},
@@ -76,7 +63,7 @@ describe("renderTty (the only surface that formats money for humans)", () => {
     );
 
     expect(out).toMatch(/JPY net worth\s+¥1,500\n/);
-    expect(out).toMatch(/THB net worth\s+THB 20\.50\n/);
+    expect(out).toMatch(/THB net worth\s+THB\s20\.50\n/);
     // Ledgers sort by ISO code, and neither total is folded into the other.
     expect(out.indexOf("JPY net worth")).toBeLessThan(out.indexOf("THB net worth"));
     expect(out).not.toContain("1,520");
