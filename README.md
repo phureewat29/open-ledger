@@ -36,7 +36,7 @@ By using this harness, your AI can build the app you never found: a budget track
 
 ## Use OpenLedger with your Coding Agents
 
-The whole skill is one file: [`skills/SKILL.md`](./skills/SKILL.md).
+The whole skill is one file: [`skills/openledger/SKILL.md`](./skills/openledger/SKILL.md). The repo is also an [Agent Plugins](https://agent-plugins.org) 1.0 package, so compliant clients can install it straight from the git URL.
 
 1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
 

@@ -28,13 +28,15 @@
   "files": [
     "dist/",
     "skills/",
-    "datasets/"
+    "datasets/",
+    "plugin.json"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc && chmod +x dist/cli/index.js",
     "test": "vitest run --typecheck --typecheck.tsconfig ./tsconfig.typecheck.json",
     "dev": "tsx src/cli/index.ts",
     "release": "tsx scripts/release.ts",
+    "publish:skills": "tsx scripts/publish-skills.ts",
     "integration": "vitest run -c vitest.e2e.config.ts",
     "prepublishOnly": "npm run build"
   },
@@ -49,6 +51,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "aws4fetch": "^1.0.20",
     "semver": "^7.8.4",
     "tsx": "^4.7.0",
     "typescript": "^5.5.0",

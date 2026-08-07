@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "openledger",
+  "version": "0.20.1",
+  "description": "OpenLedger — A deterministic ledger for your AI",
+  "author": {
+    "name": "Phureewat Aphibansri",
+    "url": "https://openledger.sh"
+  },
+  "homepage": "https://openledger.sh",
+  "repository": "https://github.com/phureewat29/openledger",
+  "license": "MIT",
+  "keywords": [
+    "finance",
+    "ledger",
+    "bookkeeping",
+    "cli",
+    "ai",
+    "agent-plugins"
+  ]
+}

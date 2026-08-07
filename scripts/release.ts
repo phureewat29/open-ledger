@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import semver from "semver";
 
 function fail(reason: string): never {
@@ -24,7 +24,10 @@ console.log(`release: ${current} -> ${next}`);
 
 run("npm run build"); // Fail fast: a broken build must abort before the version changes.
 run(`npm version ${next} --no-git-tag-version`);
-run("git add package.json package-lock.json");
+const pluginManifest = JSON.parse(readFileSync("plugin.json", "utf8"));
+pluginManifest.version = next;
+writeFileSync("plugin.json", `${JSON.stringify(pluginManifest, null, 2)}\n`);
+run("git add package.json package-lock.json plugin.json");
 run(`git commit -m "release: ${next}"`);
 run("npm link"); // Expose the freshly built CLI on the global bin path.
 

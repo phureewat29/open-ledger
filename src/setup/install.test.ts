@@ -35,7 +35,7 @@ function parseFrontmatter(md: string): Record<string, string> {
   return out;
 }
 
-describe("skillMd (checked-in skills/SKILL.md)", () => {
+describe("skillMd (checked-in skills/openledger/SKILL.md)", () => {
   it("carries name/description frontmatter and no version key", () => {
     const fm = parseFrontmatter(skillMd());
     expect(fm.name).toBe("openledger");

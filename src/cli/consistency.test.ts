@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
@@ -8,7 +8,7 @@ import { buildProgram, COMMANDS } from "./program.js";
 // buildProgram() only builds the commander tree: no argv parsing, no action run.
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const README = readFileSync(resolve(repoRoot, "README.md"), "utf8");
-const SKILL = readFileSync(resolve(repoRoot, "skills", "SKILL.md"), "utf8");
+const SKILL = readFileSync(resolve(repoRoot, "skills", "openledger", "SKILL.md"), "utf8");
 
 function topLevelNames(program: Command): string[] {
   return program.commands.map((c) => c.name());
@@ -180,5 +180,43 @@ describe("docs consistency (no subprocesses)", () => {
   // The frontmatter's own shape is pinned harder in src/setup/install.test.ts.
   it("SKILL.md carries no references/ pointer", () => {
     expect(SKILL.includes("references/")).toBe(false);
+  });
+});
+
+const PLUGIN_MANIFEST = JSON.parse(readFileSync(resolve(repoRoot, "plugin.json"), "utf8")) as Record<string, unknown>;
+const PACKAGE = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")) as Record<string, unknown>;
+
+/** The ten permitted top-level fields of the closed manifest schema (spec §5.2). */
+const PERMITTED_MANIFEST_FIELDS = [
+  "$schema", "name", "version", "description", "author",
+  "homepage", "repository", "license", "keywords", "extensions",
+];
+
+describe("plugin manifest (agent-plugins.org 1.0)", () => {
+  it("declares the exact 1.0.0 schema id", () => {
+    expect(PLUGIN_MANIFEST.$schema).toBe("https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
+  });
+
+  it("name obeys the spec pattern and names an existing skill directory", () => {
+    const name = PLUGIN_MANIFEST.name as string;
+    expect(name).toMatch(/^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/);
+    expect(name.length).toBeLessThanOrEqual(64);
+    expect(existsSync(resolve(repoRoot, "skills", name, "SKILL.md"))).toBe(true);
+    // agentskills.io hard rule: the skill's frontmatter name equals its directory name.
+    expect(SKILL).toMatch(new RegExp(`^name: ${name}$`, "m"));
+  });
+
+  it("uses only fields the closed schema permits", () => {
+    const unknown = Object.keys(PLUGIN_MANIFEST).filter((key) => !PERMITTED_MANIFEST_FIELDS.includes(key));
+    expect(unknown).toEqual([]);
+    // The author sub-schema is closed too: name/email/url only.
+    const author = (PLUGIN_MANIFEST.author ?? {}) as Record<string, unknown>;
+    expect(Object.keys(author).filter((key) => !["name", "email", "url"].includes(key))).toEqual([]);
+  });
+
+  it("mirrors package.json version, description, and license", () => {
+    expect(PLUGIN_MANIFEST.version).toBe(PACKAGE.version);
+    expect(PLUGIN_MANIFEST.description).toBe(PACKAGE.description);
+    expect(PLUGIN_MANIFEST.license).toBe(PACKAGE.license);
   });
 });

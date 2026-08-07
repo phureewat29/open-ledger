@@ -4,7 +4,7 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 import { DEFAULT_SKILLS_DIR, SKILL_PACK_DIR } from "./locations.js";
 
-/** Every target receives the checked-in skills/SKILL.md verbatim: no templating, no per-agent wrapper. */
+/** Every target receives the checked-in skills/openledger/SKILL.md verbatim: no templating, no per-agent wrapper. */
 
 interface InstalledTarget {
   path: string;
@@ -47,7 +47,7 @@ export function getVersion(): string {
 }
 
 export function skillMd(): string {
-  return readFileSync(new URL("../../skills/SKILL.md", import.meta.url), "utf8");
+  return readFileSync(new URL("../../skills/openledger/SKILL.md", import.meta.url), "utf8");
 }
 
 // Result is always <skills dir>/openledger; --dir names the skills dir directly, else home or cwd's default.

@@ -1,6 +1,7 @@
 ---
 name: openledger
 description: A local double-entry personal-finance harness driven through the `oled` cli. Use for anything about the ledger, bank or credit-card statements, net worth, spending, accounts, transactions, or merchants.
+compatibility: Requires Node.js >= 18 and the oled CLI (npm install -g @aquartier/openledger)
 ---
 
 # OpenLedger
