@@ -82,6 +82,13 @@ export function getAccountBalances(
   });
 }
 
+/** One account's own signed balance in minor units, excluding its children;
+ *  null when the account does not exist. */
+export function getAccountBalanceMinor(db: Database.Database, accountId: string): number | null {
+  const own = getAccountBalances(db, { idOrParent: accountId }).find((a) => a.id === accountId);
+  return own ? own.balance_minor : null;
+}
+
 export function getNetWorth(db: Database.Database): NetWorth {
   const assets: CurrencyTotals = {};
   const liabilities: CurrencyTotals = {};

@@ -13,11 +13,13 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "libsql";
 import { migrate } from "../../db/schema.js";
-import { createAccount } from "../../accounts/accounts.js";
+import { ACCOUNT_TYPES } from "../../db/queries/accounts.js";
+import { createAccount, ensureLedgerRoot } from "../../accounts/accounts.js";
 import {
   createSandbox,
   makeRunCLI,
   parseNdjson,
+  parseOne,
   writeConfig,
   type CLIRunner,
   type Sandbox,
@@ -773,14 +775,14 @@ describe("ingest prepare against an OCR server (subprocess)", () => {
   it("exits NOT_READY rather than degrading to images when nothing is listening", async () => {
     // Two pages, so this doesn't hash-dedup onto the live case's one-page scan.
     const path = stage("statements/scan-dead.pdf", pdfOf(["image", "image"]));
-    // OCR settings live in a conf file now; --conf scopes them to this run.
-    const deadConf = join(sandbox.root, "dead-ocr.json");
+    // OCR settings live in the config file; --config scopes them to this run.
+    const deadConfig = join(sandbox.root, "dead-ocr.json");
     writeFileSync(
-      deadConf,
+      deadConfig,
       JSON.stringify({ ocrBaseUrl: DEAD_OCR_BASE_URL, ocrModel: "test-ocr-model" }) + "\n",
     );
     const { code, stderr } = await runCLI([
-      "ingest", "prepare", path, "--config", deadConf, "--json",
+      "ingest", "prepare", path, "--config", deadConfig, "--json",
     ]);
     expect(code).toBe(3);
     const { error } = JSON.parse(stderr.trim());
@@ -795,10 +797,10 @@ describe.skipIf(!liveOcr)("ingest prepare against an OCR server (live OCR endpoi
     async () => {
       const path = stage("statements/scan-ocr.pdf", pdfOf(["image"]));
 
-      const liveConf = join(sandbox.root, "live-ocr.json");
-      writeFileSync(liveConf, JSON.stringify(requireLiveOcrSource()) + "\n");
+      const liveConfig = join(sandbox.root, "live-ocr.json");
+      writeFileSync(liveConfig, JSON.stringify(requireLiveOcrSource()) + "\n");
       const { stdout, code } = await runCLI([
-        "ingest", "prepare", path, "--config", liveConf, "--json",
+        "ingest", "prepare", path, "--config", liveConfig, "--json",
       ]);
       expect(code).toBe(0);
       const obj = JSON.parse(stdout.trim());
@@ -834,6 +836,252 @@ describe("ingest list (subprocess)", () => {
     expect(oversized.note).toBeTruthy();
     expect(objs.find((o) => o.type === "summary").unreadable).toBe(1);
   }, 30000);
+});
+
+describe("the pipeline tells an agent what is unfinished (subprocess)", () => {
+  it("status counts waiting statements, and stops counting once prepare registers them", async () => {
+    const isolated = createSandbox("oled-ingest-new-it-");
+    try {
+      writeConfig(isolated, {});
+      const run = makeRunCLI(isolated);
+      mkdirSync(join(isolated.dataDir, "bank"), { recursive: true });
+      writeFileSync(join(isolated.dataDir, "bank", "waiting.pdf"), textPdf());
+
+      const before = await run(["status", "--json"]);
+      expect(before.code).toBe(0);
+      expect(parseOne(before.stdout).files).toMatchObject({ new: 1, ingested: 0, pending: 0 });
+
+      const prepared = await run(["ingest", "prepare", "bank/waiting.pdf", "--json"]);
+      expect(prepared.code).toBe(0);
+
+      const after = await run(["status", "--json"]);
+      expect(parseOne(after.stdout).files).toMatchObject({ new: 0, pending: 1 });
+    } finally {
+      isolated.cleanup();
+    }
+  }, 60000);
+
+  it("an empty files list points at ingest list instead of reading as nothing to do", async () => {
+    const isolated = createSandbox("oled-ingest-empty-it-");
+    try {
+      writeConfig(isolated, {});
+      const { stdout, code } = await makeRunCLI(isolated)(["files", "list", "--json"]);
+      expect(code).toBe(0);
+      const summary = parseOne(stdout);
+      expect(summary.total).toBe(0);
+      expect(summary.hint).toContain("oled ingest list");
+    } finally {
+      isolated.cleanup();
+    }
+  }, 30000);
+
+  it("the commit summary names the file it left pending and the command that closes it", async () => {
+    const fileId = "sf:pending-hint";
+    const db = readDb();
+    try {
+      db.prepare(
+        `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
+      ).run(fileId, "/tmp/pending-hint.pdf", "pending-hint-hash", "application/pdf");
+    } finally {
+      db.close();
+    }
+
+    const ndjson = JSON.stringify({
+      date: "2026-03-01",
+      description: "Hint row",
+      debit_account: "thb:expense:food",
+      credit_account: "thb:asset:cash",
+      amount: 12,
+      row_index: 900,
+    });
+    const { stdout, code } = await runCLI(["ingest", "commit", "--file", fileId, "--json"], {
+      stdin: ndjson,
+    });
+    expect(code).toBe(0);
+    const summary = parseNdjson(stdout).find((o) => o.type === "summary");
+    expect(summary).toMatchObject({ file_id: fileId, file_status: "pending" });
+    expect(summary.hint).toContain(`oled ingest done ${fileId}`);
+  }, 30000);
+});
+
+describe("ingest done reconciliation (subprocess)", () => {
+  interface Row {
+    debit_account: string;
+    credit_account: string;
+    amount: number;
+  }
+
+  /** A ledger holding exactly `rows`, all attributed to one pending file. */
+  async function seedStatement(
+    box: Sandbox,
+    run: CLIRunner,
+    fileId: string,
+    ledger: string,
+    rows: Row[],
+  ): Promise<void> {
+    const db = new Database(box.dbPath);
+    try {
+      db.pragma("foreign_keys = ON");
+      migrate(db);
+      db.prepare(
+        `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
+      ).run(fileId, `/tmp/${fileId}.pdf`, `${fileId}-hash`, "application/pdf");
+      for (const type of ACCOUNT_TYPES) ensureLedgerRoot(db, ledger, type);
+      createAccount(db, { id: `${ledger}:asset:bank`, name: "Bank", type: "asset", parent_id: `${ledger}:asset` });
+      createAccount(db, { id: `${ledger}:expense:food`, name: "Food", type: "expense", parent_id: `${ledger}:expense` });
+      createAccount(db, { id: `${ledger}:income:salary`, name: "Salary", type: "income", parent_id: `${ledger}:income` });
+      createAccount(db, { id: `${ledger}:liability:card`, name: "Card", type: "liability", parent_id: `${ledger}:liability` });
+    } finally {
+      db.close();
+    }
+
+    const ndjson = rows
+      .map((r, i) => JSON.stringify({ date: "2026-03-02", description: `Row ${i}`, row_index: i, ...r }))
+      .join("\n");
+    const committed = await run(["ingest", "commit", "--file", fileId, "--json"], { stdin: ndjson });
+    expect(committed.code).toBe(0);
+  }
+
+  /** A card: 250.00 charged, 50.00 paid off, so the ledger holds 200.00. */
+  const cardRows: Row[] = [
+    { debit_account: "thb:expense:food", credit_account: "thb:liability:card", amount: 250 },
+    { debit_account: "thb:liability:card", credit_account: "thb:asset:bank", amount: 50 },
+  ];
+
+  it("closes a card statement when the ledger holds what the statement closes at", async () => {
+    const box = createSandbox("oled-recon-card-it-");
+    try {
+      writeConfig(box, {});
+      const run = makeRunCLI(box);
+      await seedStatement(box, run, "sf:card", "thb", cardRows);
+
+      const { stdout, code } = await run([
+        "ingest", "done", "sf:card",
+        "--account", "thb:liability:card", "--closing-balance", "200", "--json",
+      ]);
+      expect(code).toBe(0);
+      expect(parseOne(stdout)).toMatchObject({
+        status: "ingested",
+        reconciliation: { account: "thb:liability:card", closing: 200, balance: 200 },
+      });
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
+
+  it("closes a bank statement too, reading a debit-normal balance the other way round", async () => {
+    const box = createSandbox("oled-recon-bank-it-");
+    try {
+      writeConfig(box, {});
+      const run = makeRunCLI(box);
+      await seedStatement(box, run, "sf:bank", "thb", [
+        { debit_account: "thb:asset:bank", credit_account: "thb:income:salary", amount: 5000 },
+        { debit_account: "thb:expense:food", credit_account: "thb:asset:bank", amount: 1200 },
+      ]);
+
+      const { stdout, code } = await run([
+        "ingest", "done", "sf:bank",
+        "--account", "thb:asset:bank", "--closing-balance", "3800", "--json",
+      ]);
+      expect(code).toBe(0);
+      expect(parseOne(stdout).reconciliation).toMatchObject({ closing: 3800, balance: 3800 });
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
+
+  it("compares in minor units, so sums no double can hold still tie", async () => {
+    const box = createSandbox("oled-recon-exact-it-");
+    try {
+      writeConfig(box, {});
+      const run = makeRunCLI(box);
+      // 0.1 + 0.2 !== 0.3 as doubles; as satang, 10 + 20 === 30.
+      await seedStatement(box, run, "sf:exact", "thb", [
+        { debit_account: "thb:expense:food", credit_account: "thb:liability:card", amount: 0.1 },
+        { debit_account: "thb:expense:food", credit_account: "thb:liability:card", amount: 0.2 },
+      ]);
+
+      const { stdout, code } = await run([
+        "ingest", "done", "sf:exact",
+        "--account", "thb:liability:card", "--closing-balance", "0.3", "--json",
+      ]);
+      expect(code).toBe(0);
+      expect(parseOne(stdout).reconciliation).toMatchObject({ closing: 0.3, balance: 0.3 });
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
+
+  it("refuses a closing balance the ledger disagrees with, and leaves the file pending", async () => {
+    const box = createSandbox("oled-recon-bad-it-");
+    try {
+      writeConfig(box, {});
+      const run = makeRunCLI(box);
+      await seedStatement(box, run, "sf:bad", "thb", cardRows);
+
+      // One satang out: a misread amount is exactly this shape.
+      const { stderr, code } = await run([
+        "ingest", "done", "sf:bad",
+        "--account", "thb:liability:card", "--closing-balance", "200.01", "--json",
+      ]);
+      expect(code).toBe(6);
+      const { error } = JSON.parse(stderr.trim());
+      expect(error.code).toBe("E_INVALID");
+      expect(error.message).toContain("off by 0.01");
+      expect(error.hint).toContain("opening balance");
+
+      const listed = await run(["files", "list", "--json"]);
+      expect(parseNdjson(listed.stdout).find((o) => o.id === "sf:bad").status).toBe("pending");
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
+
+  it("counts a mismatch in the ledger's own units, not in hundredths", async () => {
+    const box = createSandbox("oled-recon-jpy-it-");
+    try {
+      writeConfig(box, { displayCurrency: "JPY", displayLocale: "ja-JP" });
+      const run = makeRunCLI(box);
+      await seedStatement(box, run, "sf:jpy", "jpy", [
+        { debit_account: "jpy:expense:food", credit_account: "jpy:liability:card", amount: 1500 },
+      ]);
+
+      const { stderr, code } = await run([
+        "ingest", "done", "sf:jpy",
+        "--account", "jpy:liability:card", "--closing-balance", "1501", "--json",
+      ]);
+      expect(code).toBe(6);
+      // Yen carries no minor unit: one yen out reads as 1, never 1.00.
+      const { message } = JSON.parse(stderr.trim()).error;
+      expect(message).toContain("holds 1500");
+      expect(message).toContain("off by 1)");
+      expect(message).not.toMatch(/\d\.\d/);
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
+
+  it("needs both reconciling flags, and closes plainly with neither", async () => {
+    const box = createSandbox("oled-recon-flags-it-");
+    try {
+      writeConfig(box, {});
+      const run = makeRunCLI(box);
+      await seedStatement(box, run, "sf:flags", "thb", cardRows);
+
+      // Arity is checked before the ledger opens, so a bogus id is not what fails.
+      const partial = await run(["ingest", "done", "sf:nope", "--closing-balance", "200", "--json"]);
+      expect(partial.code).toBe(2);
+      expect(JSON.parse(partial.stderr.trim()).error.code).toBe("E_USAGE");
+
+      const plain = await run(["ingest", "done", "sf:flags", "--json"]);
+      expect(plain.code).toBe(0);
+      const out = parseOne(plain.stdout);
+      expect(out.status).toBe("ingested");
+      expect(out).not.toHaveProperty("reconciliation");
+    } finally {
+      box.cleanup();
+    }
+  }, 60000);
 });
 
 describe("ingest fail (subprocess)", () => {

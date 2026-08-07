@@ -36,7 +36,7 @@ By using this harness, your AI can build the app you never found: a budget track
 
 ## Use OpenLedger with your Coding Agents
 
-The whole skill is one file: [`skills/openledger/SKILL.md`](https://cdn.openledger.sh/skills/openledger/SKILL.md). The repo is also an [Agent Plugins](https://agent-plugins.org) 1.0 package, so compliant clients can install it straight from the git URL.
+This repo supports [Agent Plugins](https://agent-plugins.org) package, so compliant clients can install it straight from the git URL.
 
 1. Install the CLI. It needs [Node.js](https://nodejs.org) (LTS). Paste into your terminal:
 
@@ -44,10 +44,10 @@ The whole skill is one file: [`skills/openledger/SKILL.md`](https://cdn.openledg
    npm install -g @aquartier/openledger
    ```
 
-2. Run OCR locally (optional). Download [typhoon-ocr1.5-2b](https://huggingface.co/typhoon-ai/typhoon-ocr1.5-2b) in [LM Studio](https://lmstudio.ai) and start its local server, then hand this to your agent:
+2. Run OCR locally (optional). Download [Typhoon-OCR-1.5-2B](https://huggingface.co/typhoon-ai/typhoon-ocr1.5-2b) in [LM Studio](https://lmstudio.ai) and start its local server, then hand this to your agent:
 
    ```
-   Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5-2b), then run `oled doctor` to confirm.
+   Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5), then run `oled doctor` to confirm.
    ```
 
    Name the model as the server spells it. Only scans and photos need OCR; PDFs with a text layer are read directly.
@@ -76,7 +76,8 @@ This is the loop the skill and `oled ingest --help` steer an agent through:
 2. **Prepare**: `oled ingest prepare <path>` registers the file and extracts it. A locked PDF exits 4 until the agent re-runs with `--password <password>`. A PDF carrying its own text layer, or a scan read by a configured OCR endpoint, comes back as a `document` text file. OCR is off until `oled config --ocr-base-url` sets it; with no text layer and no OCR endpoint, it comes back as one image per page.
 3. **Read**: the agent reads what prepare returned, either the text document or the page images, and picks out every transaction row.
 4. **Commit**: the agent pipes the transactions it extracted (one debit account, one credit account, one positive amount per row; splits go as a compound `linked` group) into `oled ingest commit`. The harness posts them into the ledger and raises a question for anything it can't resolve confidently (unknown merchant, a lookalike account, uncategorized fallback, cross-currency row).
-5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised, then closes the file out with `oled ingest done <id>`.
+5. **Resolve**: the agent (or you) works through `oled questions` for whatever got raised.
+6. **Close**: `oled ingest done <id>` closes the file out, and until it runs the file stays pending. When the statement prints a closing balance, pass it: `oled ingest done <id> --account <card-or-bank> --closing-balance <n>` refuses to close unless that account's balance in the ledger equals the statement's figure, so a misread amount surfaces instead of settling in. A first statement needs its opening balance posted as a row against `<currency>:equity:opening` for the two to agree.
 
 ## Commands
 
@@ -86,7 +87,7 @@ Run `oled --help` (or `oled <noun> --help`) for the full flag reference. Grouped
 oled                # Status: config, database, ledger counts, net worth (default)
 oled doctor         # Diagnose the harness environment
 oled setup          # Install the skill for an agent CLI (--dir <path>)
-oled config         # Configuration
+oled config         # OpenLedger configuration
 
 oled ingest         # Ingest pipeline: list / prepare / commit / done / fail
 oled files          # Browse ingested files (list / show / drop)
@@ -114,7 +115,7 @@ oled open           # Open the data folder in file explorer
 
 ## Configuration
 
-OpenLedger reads one JSON config file per run and nothing else: no environment variables, no hidden state. The default file is `~/.oled/config.json`; `oled config [path]` reads and writes a named file directly, and every other command accepts `--config <path>` to run against it, so two conf files are two independent ledgers. Commands that touch the ledger refuse to run until the file exists; `oled config --init` creates it, along with the database and data directory:
+OpenLedger reads one JSON config file per run and nothing else: no environment variables, no hidden state. The default file is `~/.oled/config.json`; `oled config [path]` reads and writes a named file directly, and every other command accepts `--config <path>` to run against it, so two config files are two independent ledgers. Commands that touch the ledger refuse to run until the file exists; `oled config --init` creates it, along with the database and data directory:
 
 ```
 ~/.oled/
@@ -125,11 +126,11 @@ OpenLedger reads one JSON config file per run and nothing else: no environment v
   cache/         # extracted text and page images handed to an agent
 ```
 
-### Config keys
+### Config Properties
 
-Each key is set with an `oled config` flag and read back with bare `oled config`. Values resolve file, then default.
+Each property is set with an `oled config` flag and read back with bare `oled config`. Values resolve file, then default.
 
-| Key | Flag | Meaning | Default |
+| Property | Flag | Meaning | Default |
 | --- | --- | --- | --- |
 | `country` | `--country` | Country whose reference data applies; also seeds locale and currency | `TH` |
 | `displayLocale` | `--locale` | Locale used to format money | from country |

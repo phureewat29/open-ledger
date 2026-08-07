@@ -46,7 +46,14 @@ async function listFiles(opts: ListFilesOpts, command: Command): Promise<void> {
   const rows = queryFiles(db);
   const shown = status ? rows.filter((r) => r.status === status) : rows;
   emitList(shown, FILE_COLUMNS);
-  emitSummary({ total: rows.length, returned: shown.length });
+  emitSummary({
+    total: rows.length,
+    returned: shown.length,
+    // Empty must not read as "nothing to do": registration happens at ingest, not here.
+    ...(rows.length === 0
+      ? { hint: "files lists what ingest already registered; new statements in the data dir appear with `oled ingest list`" }
+      : {}),
+  });
 }
 
 async function showFile(id: string, _opts: Record<string, unknown>, command: Command): Promise<void> {

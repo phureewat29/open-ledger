@@ -104,6 +104,19 @@ export async function discoverFiles(
   return entries;
 }
 
+/** How many data-dir files ingest has not registered. Hashes but never parses,
+ *  so `status` can call it without pulling mupdf onto its path; a null db is a
+ *  ledger that does not exist yet, where every readable file is new. */
+export function countNewFiles(db: Database.Database | null, dataDir: string): number {
+  const walked: WalkedFile[] = [];
+  walk(dataDir, dataDir, walked);
+
+  return walked.filter((file) => {
+    const loaded = loadSource(file.path);
+    return loaded.ok && (!db || !findFileByHash(db, loaded.value.hash));
+  }).length;
+}
+
 function newFileId(): string {
   return `sf:${randomUUID()}`;
 }

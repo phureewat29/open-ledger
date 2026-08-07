@@ -40,6 +40,7 @@ import {
 } from "../../fixtures/ocr.js";
 import {
   cleanCache,
+  countNewFiles,
   discoverFiles,
   prepareFile,
   registerPendingFile,
@@ -151,6 +152,33 @@ describe("discoverFiles", () => {
     const entries = await discoverFiles(db, dataDir);
     expect(entries.find((e) => e.relPath === "kbank.pdf")).toMatchObject({ encrypted: true });
     expect(entries.find((e) => e.relPath === "kbank.png")).toMatchObject({ encrypted: false });
+  });
+});
+
+describe("countNewFiles", () => {
+  it("counts what ingest has not registered, and stops counting once it has", () => {
+    const db = freshDb();
+    const path = write("a.pdf", textPdf());
+    write("b.pdf", pdfOf(["text", "text"]));
+    expect(countNewFiles(db, dataDir)).toBe(2);
+
+    registerPendingFile(db, loaded(path));
+    expect(countNewFiles(db, dataDir)).toBe(1);
+  });
+
+  it("skips what it could never read, so status never advertises phantom work", () => {
+    const db = freshDb();
+    write("real.pdf", textPdf());
+    write("notes.docx", Buffer.from("PK"));
+    const huge = resolve(dataDir, "huge.pdf");
+    closeSync(openSync(huge, "w"));
+    truncateSync(huge, MAX_SOURCE_BYTES + 1024);
+
+    expect(countNewFiles(db, dataDir)).toBe(1);
+  });
+
+  it("is zero on an empty data dir", () => {
+    expect(countNewFiles(freshDb(), dataDir)).toBe(0);
   });
 });
 

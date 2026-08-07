@@ -4,6 +4,7 @@ import {
   ensureLedgerRoot,
   ensureStructuralAccount,
   isLedgerRootId,
+  structuralAccountId,
   type AccountRefusal,
 } from "./accounts.js";
 import {
@@ -13,7 +14,7 @@ import {
   type AccountType,
 } from "../db/queries/accounts.js";
 import { merchantExists } from "../db/queries/merchants.js";
-import { currencyOf, typeFromId } from "../lib/ids.js";
+import { currencyOf, isLedgerScopedId, typeFromId } from "../lib/ids.js";
 import { findAccountsByFuzzyName } from "./matching.js";
 
 export interface ResolvedMerchant {
@@ -24,11 +25,21 @@ export interface ResolvedMerchant {
 export type AccountHint =
   | { readonly type: "placeholder_created"; readonly accountId: string }
   | { readonly type: "uncategorized_fallback"; readonly accountId: string }
+  | { readonly type: "uncategorized_requested"; readonly accountId: string }
   | {
       readonly type: "similar_account";
       readonly accountId: string;
       readonly similarId: string;
     };
+
+/** The ledger's own uncategorized account, and nothing under it. Compared
+ *  against the id `ensureStructuralAccount` would build, never re-parsed. */
+export function isUncategorizedId(accountId: string): boolean {
+  return (
+    isLedgerScopedId(accountId) &&
+    accountId === structuralAccountId(currencyOf(accountId), "uncategorized")
+  );
+}
 
 export function resolveMerchantId(
   db: Database.Database,

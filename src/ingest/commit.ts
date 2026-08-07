@@ -1,6 +1,7 @@
 import type Database from "libsql";
 import {
   ensureUncategorizedFallback,
+  isUncategorizedId,
   namesUnopenedLedger,
   resolveOnePosting,
   resolveMerchantId,
@@ -33,13 +34,17 @@ import {
   raiseCurrencyMismatch,
   raiseDirtyInput,
   raiseSimilarAccount,
-  raiseUncategorizedFallback,
+  raiseUncategorized,
   raiseUnknownLedger,
   raiseUnknownMerchant,
   type QuestionContext,
   type TransactionSide,
 } from "./questions.js";
 import { noiseTokens } from "../datasets/noise.js";
+
+/** One authority for the bookkeeping directions; both the ingest-commit and transactions help screens print it. */
+export const DIRECTION_RULES =
+  "Direction, not sign: debit the account that grows, amount always positive. Card purchase: debit thb:expense:<cat>, credit thb:liability:credit_card:<x>. Bank spend: debit thb:expense:<cat>, credit thb:asset:bank:<x>. Salary: debit thb:asset:bank:<x>, credit thb:income:salary. A refund reverses the purchase's accounts; a card payment debits the liability and credits the bank; opening balances post against thb:equity:opening. Money crossing currencies is two linked legs through <currency>:equity:conversion, never one row.";
 
 export const CURRENCY_MISMATCH_HINT =
   "add a linked conversion pair through <currency>:equity:conversion (one leg per currency, sharing a group)";
@@ -191,17 +196,19 @@ function validateRawTransaction(input: RawTransactionInput): ValidateTransaction
   return { ok: true };
 }
 
-/** An unplaced side carries the uncategorized fallback as its own hint. */
+/** Keyed on where the row landed, not on how it got there: every road to
+ *  uncategorized carries a hint, so parking a row there is never the quiet path. */
 function preparedSide(
   side: TransactionSide,
   requested: string,
   resolved: string,
   posting: PostingResolution,
 ): PreparedSide {
-  const hint = posting.accountId
-    ? posting.hint
-    : ({ type: "uncategorized_fallback", accountId: resolved } as const);
-  return { side, requested, resolved, hint };
+  if (isUncategorizedId(resolved)) {
+    const type = posting.accountId ? "uncategorized_requested" : "uncategorized_fallback";
+    return { side, requested, resolved, hint: { type, accountId: resolved } };
+  }
+  return { side, requested, resolved, hint: posting.hint };
 }
 
 /** An unplaced side inherits the other side's ledger; both unplaced is dirty_input. */
@@ -372,7 +379,12 @@ const HINT_DISPATCH: {
   placeholder_created: () => ({ how: "placeholder_created", raised: 0 }),
   uncategorized_fallback: (hint, { db, ctx, side, transactionId }) => ({
     how: "uncategorized_fallback",
-    raised: raiseUncategorizedFallback(db, ctx, side, hint.accountId, transactionId),
+    raised: raiseUncategorized(db, ctx, side, hint.accountId, transactionId, "fallback"),
+  }),
+  // Asked for and granted, so `exact` is where it landed; the question carries the doubt.
+  uncategorized_requested: (hint, { db, ctx, side, transactionId }) => ({
+    how: "exact",
+    raised: raiseUncategorized(db, ctx, side, hint.accountId, transactionId, "requested"),
   }),
   similar_account: (hint, { db, ctx, side, transactionId }) => ({
     how: "similar_account",

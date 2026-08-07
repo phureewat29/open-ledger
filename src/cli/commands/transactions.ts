@@ -37,6 +37,7 @@ import {
 import {
   commitTransaction,
   CURRENCY_MISMATCH_HINT,
+  DIRECTION_RULES,
   type TransactionCommitContext,
   type RawTransactionInput,
 } from "../../ingest/commit.js";
@@ -479,7 +480,7 @@ export function registerTransactions(program: Command): void {
         "",
         "Behavior: reads the ledger (list, show) and edits it (add, update, delete, recategorize, dedupe, merge).",
         "Typical flow: list to find a tx:id, then show, recategorize, or delete it. Statement rows go through ingest commit, not add. Account ids are currency-prefixed (<currency>:<type>:<path>) everywhere, and both accounts on a transaction must share that prefix.",
-        "Direction, not sign: debit the account that grows, amount always positive. Card purchase: debit thb:expense:<cat>, credit thb:liability:credit_card:<x>. Bank spend: debit thb:expense:<cat>, credit thb:asset:bank:<x>. Salary: debit thb:asset:bank:<x>, credit thb:income:salary. A refund reverses the purchase's accounts; a card payment debits the liability and credits the bank; opening balances post against thb:equity:opening. Money crossing currencies is two linked legs through <currency>:equity:conversion, never one row.",
+        DIRECTION_RULES,
         "Example: oled transactions list --account thb:expense:food --json",
       ].join("\n"),
     );

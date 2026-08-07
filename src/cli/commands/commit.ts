@@ -237,7 +237,9 @@ export async function commitIngest(opts: CommitIngestOpts, command: Command): Pr
   const db = await openDb(config.dbPath);
 
   // An unknown --file id must fail before insert, else a null file hash breaks id determinism.
-  if (opts.file && !findFileById(db, opts.file)) {
+  // Held for the summary: a commit writes transactions, never `files`, so the status stays current.
+  const fileRow = opts.file ? findFileById(db, opts.file) : null;
+  if (opts.file && !fileRow) {
     fail("NOT_FOUND", `no ingest entry: ${opts.file}`, {
       hint: "run `oled ingest list --json` for the file ids, or drop --file to commit rows with no source file",
     });
@@ -271,6 +273,12 @@ export async function commitIngest(opts: CommitIngestOpts, command: Command): Pr
     }
   }
 
+  // Callers act on the summary, so an unfinished file has to be visible there.
+  const pendingHint =
+    fileRow?.status === "pending"
+      ? `the file stays pending until \`oled ingest done ${fileRow.id}\` closes it`
+      : null;
+
   const mode = currentMode();
   if (mode.json) {
     for (const r of results) emit(r);
@@ -280,12 +288,15 @@ export async function commitIngest(opts: CommitIngestOpts, command: Command): Pr
       duplicates: counters.duplicates,
       failed: counters.failed,
       raised_questions: counters.raisedTotal,
+      ...(fileRow ? { file_id: fileRow.id, file_status: fileRow.status } : {}),
+      ...(pendingHint ? { hint: pendingHint } : {}),
     });
   } else {
     for (const r of results) emitObject(r);
     process.stdout.write(
       `\nbatch ${batchId}: ${counters.posted} posted, ${counters.duplicates} duplicate(s), ${counters.failed} failed, ${counters.raisedTotal} question(s) raised\n`,
     );
+    if (pendingHint) process.stdout.write(`${pendingHint}\n`);
   }
 
   // Exit 7 only for genuine failures: duplicates are a successful no-op.

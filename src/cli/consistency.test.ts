@@ -142,7 +142,8 @@ describe("docs consistency (no subprocesses)", () => {
 
   it("every --flag on an oled span in SKILL.md is a real option on the resolved command", () => {
     const program = buildProgram();
-    const globalFlags = new Set(["--json", "--no-color", "--config"]);
+    // --help is commander's own, present on every command but absent from `options`.
+    const globalFlags = new Set(["--json", "--no-color", "--config", "--help"]);
     const problems: string[] = [];
     const sources: Array<[string, string]> = [["SKILL.md", SKILL]];
 

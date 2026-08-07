@@ -158,6 +158,34 @@ describe("commitTransaction", () => {
     ]);
   });
 
+  it("asks when a row requests uncategorized outright, whether or not that account exists yet", () => {
+    // The first row creates the account, which would otherwise report as a
+    // placeholder and ask nothing; parking a row here is never the quiet path.
+    expect(findAccountById(db, "thb:expense:uncategorized")).toBeNull();
+
+    for (const rowIndex of [40, 41]) {
+      const out = commitTransaction(
+        db,
+        CTX,
+        raw({ debit_account_id: "thb:expense:uncategorized", row_index: rowIndex }),
+      );
+      expect(out.ok, `row ${rowIndex}`).toBe(true);
+      if (!out.ok) return;
+      expect(out.raisedQuestions, `row ${rowIndex}`).toBe(1);
+      // `exact` is the truth about where it landed; the question carries the doubt.
+      expect(out.sides[0]).toEqual({
+        side: "debit",
+        requested: "thb:expense:uncategorized",
+        resolved: "thb:expense:uncategorized",
+        how: "exact",
+      });
+    }
+
+    const asked = listQuestions(db).filter((q) => q.kind === "uncategorized");
+    expect(asked).toHaveLength(2);
+    expect(asked[0].prompt).toContain("asked for");
+  });
+
   it("an unprefixed hint has no currency head, so it falls back into the other side's ledger and raises uncategorized", () => {
     // "expense:food" names no ledger, so the other side (thb:asset:cash) supplies the fallback ledger.
     const out = commitTransaction(

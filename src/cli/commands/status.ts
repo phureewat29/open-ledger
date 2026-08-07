@@ -9,6 +9,7 @@ import { countMerchants } from "../../db/queries/merchants.js";
 import { countNotes } from "../../db/queries/notes.js";
 import { countQuestions } from "../../db/queries/questions.js";
 import { countTransactions } from "../../db/queries/transactions.js";
+import { countNewFiles } from "../../ingest/prepare.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import { existsSync } from "fs";
 import { homedir } from "os";
@@ -47,7 +48,8 @@ export interface StatusReport {
     error: string | null;
   };
   counts: Counts | null;
-  files: { ingested: number; pending: number; failed: number } | null;
+  /** Always present: `new` counts unregistered data-dir files, the "is there work waiting?" answer. */
+  files: { new: number; ingested: number; pending: number; failed: number };
   questions: { open: number; deferred: number } | null;
   // Keys are currencies with an asset/liability account (report's are currencies
   // with legs in range), so an untouched ledger still reports {"THB":0}.
@@ -79,7 +81,7 @@ async function buildReport(cfg: ResolvedConfig): Promise<StatusReport> {
       error: null,
     },
     counts: null,
-    files: null,
+    files: { new: 0, ingested: 0, pending: 0, failed: 0 },
     questions: null,
     net_worth: null,
   };
@@ -87,6 +89,8 @@ async function buildReport(cfg: ResolvedConfig): Promise<StatusReport> {
   // openDb() would migrate a missing file into existence, so check existsSync first.
   if (!existsSync(cfg.dbPath)) {
     report.db.error = NO_LEDGER;
+    // Nothing is registered without a ledger, so every readable file is new.
+    report.files.new = countNewFiles(null, cfg.dataDir);
     return report;
   }
 
@@ -105,7 +109,7 @@ async function buildReport(cfg: ResolvedConfig): Promise<StatusReport> {
     merchants: countMerchants(db),
     notes: countNotes(db),
   };
-  report.files = countFiles(db);
+  report.files = { new: countNewFiles(db, cfg.dataDir), ...countFiles(db) };
   const open = countQuestions(db);
   const total = countQuestions(db, { includeDeferred: true });
   report.questions = { open, deferred: Math.max(0, total - open) };
@@ -166,13 +170,12 @@ function renderPlain(r: StatusReport): void {
       ["notes", r.counts.notes],
     );
   }
-  if (r.files) {
-    lines.push(
-      ["files_ingested", r.files.ingested],
-      ["files_pending", r.files.pending],
-      ["files_failed", r.files.failed],
-    );
-  }
+  lines.push(
+    ["files_new", r.files.new],
+    ["files_ingested", r.files.ingested],
+    ["files_pending", r.files.pending],
+    ["files_failed", r.files.failed],
+  );
   if (r.questions) {
     lines.push(
       ["questions_open", r.questions.open],
@@ -238,25 +241,24 @@ export function renderTty(r: StatusReport, color: boolean, ledgerMissing = false
     ]);
   }
 
-  if (r.files || r.questions) {
-    const rows: [string, string][] = [];
-    if (r.files) {
-      const extras: string[] = [];
-      if (r.files.pending > 0) extras.push(`${r.files.pending} pending`);
-      if (r.files.failed > 0) extras.push(`${r.files.failed} failed`);
-      rows.push([
-        "Files",
-        `${formatInt(r.files.ingested)}${extras.length ? "  " + dim(`(${extras.join(", ")})`) : ""}`,
-      ]);
-    }
-    if (r.questions) {
-      rows.push([
-        "Questions",
-        `${formatInt(r.questions.open)} open${r.questions.deferred ? "  " + dim(`(${r.questions.deferred} deferred)`) : ""}`,
-      ]);
-    }
-    section("Pipeline", rows);
+  const fileExtras: string[] = [];
+  if (r.files.new > 0) fileExtras.push(`${r.files.new} new`);
+  if (r.files.pending > 0) fileExtras.push(`${r.files.pending} pending`);
+  if (r.files.failed > 0) fileExtras.push(`${r.files.failed} failed`);
+
+  const pipeline: [string, string][] = [
+    [
+      "Files",
+      `${formatInt(r.files.ingested)}${fileExtras.length ? "  " + dim(`(${fileExtras.join(", ")})`) : ""}`,
+    ],
+  ];
+  if (r.questions) {
+    pipeline.push([
+      "Questions",
+      `${formatInt(r.questions.open)} open${r.questions.deferred ? "  " + dim(`(${r.questions.deferred} deferred)`) : ""}`,
+    ]);
   }
+  section("Pipeline", pipeline);
 
   const financial = r.net_worth ? financialRows(r.net_worth, dim, r.locale) : [];
   if (financial.length) section("Financial", financial);

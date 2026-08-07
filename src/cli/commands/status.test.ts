@@ -12,7 +12,7 @@ function report(over: Partial<StatusReport> = {}): StatusReport {
     user_name: "User",
     db: { path: "/tmp/none/db.sqlite", reachable: true, error: null },
     counts: { accounts: 1, transactions: 1, merchants: 0, notes: 0 },
-    files: null,
+    files: { new: 0, ingested: 0, pending: 0, failed: 0 },
     questions: null,
     net_worth: { assets: {}, liabilities: { JPY: 1500 }, net_worth: { JPY: -1500 } },
     ...over,
@@ -67,6 +67,13 @@ describe("renderTty (the only surface that formats money for humans)", () => {
     // Ledgers sort by ISO code, and neither total is folded into the other.
     expect(out.indexOf("JPY net worth")).toBeLessThan(out.indexOf("THB net worth"));
     expect(out).not.toContain("1,520");
+  });
+
+  it("badges waiting statements beside the ingested count", () => {
+    const out = capture(() =>
+      renderTty(report({ files: { new: 2, ingested: 1, pending: 0, failed: 0 } }), false),
+    );
+    expect(out).toMatch(/Files\s+1\s+\(2 new\)/);
   });
 
   it("points a missing ledger at config --init, and an unopenable one at doctor", () => {

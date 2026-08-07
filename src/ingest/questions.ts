@@ -81,21 +81,36 @@ export function raiseUnknownMerchant(
   });
 }
 
-export function raiseUncategorizedFallback(
+export type UncategorizedCause = "fallback" | "requested";
+
+/** Telling a caller that parked the row here on purpose that it "couldn't be
+ *  matched" would be false, and would name a fix it already applied. */
+const UNCATEGORIZED_PROMPT: Record<
+  UncategorizedCause,
+  (side: TransactionSide, accountId: string) => string
+> = {
+  fallback: (side, accountId) =>
+    `The ${side} side couldn't be matched to a well-formed account and was booked to ` +
+    `"${accountId}". Recategorize it onto a real account, or re-run with a full ` +
+    `currency-prefixed colon-path hint (e.g. thb:expense:food:dining).`,
+  requested: (side, accountId) =>
+    `The ${side} side asked for "${accountId}" outright, which categorizes nothing. ` +
+    `Name the account this row belongs to, or say it belongs here.`,
+};
+
+export function raiseUncategorized(
   db: Database.Database,
   ctx: QuestionContext,
   side: TransactionSide,
   accountId: string,
   transactionId: string,
+  cause: UncategorizedCause,
 ): 0 | 1 {
   return raiseQuestion(db, ctx, {
     transaction_id: transactionId,
     account_id: accountId,
     kind: "uncategorized",
-    prompt:
-      `The ${side} side couldn't be matched to a well-formed account and was booked to ` +
-      `"${accountId}". Recategorize it onto a real account, or re-run with a full ` +
-      `currency-prefixed colon-path hint (e.g. thb:expense:food:dining).`,
+    prompt: UNCATEGORIZED_PROMPT[cause](side, accountId),
     context: { rule_key: accountIdKey(accountId), placeholder_id: accountId, side },
   });
 }

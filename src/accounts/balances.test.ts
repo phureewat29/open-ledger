@@ -5,6 +5,7 @@ import { createAccount } from "./accounts.js";
 import {
   getAccountBalances,
   getBalanceTree,
+  getAccountBalanceMinor,
   getNetWorth,
   getPeriodTotals,
   getRollupBalance,
@@ -15,6 +16,7 @@ import {
 import {
   findTransactionById,
   insertTransaction,
+  voidTransactionAsMirror,
   type TransactionInput,
 } from "../db/queries/transactions.js";
 import { todayIso } from "../lib/date.js";
@@ -158,6 +160,63 @@ describe("getNetWorth", () => {
     }
     // 0.1 + 0.2 + 0.3 is 0.6000000000000001; the satang add is exact.
     expect(getNetWorth(db).assets).toEqual({ THB: 60 });
+  });
+});
+
+describe("getAccountBalanceMinor", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = freshDb();
+    seedThb(db);
+  });
+
+  it("reads the liability's own side: charges raise it, a payment lowers it", () => {
+    ins(db, { debit_account_id: "thb:expense:food", credit_account_id: "thb:liability:card", amount: 10000 });
+    ins(db, { debit_account_id: "thb:liability:card", credit_account_id: "thb:asset:bank", amount: 4000 });
+    // Credit-normal: 100.00 charged less 40.00 paid.
+    expect(getAccountBalanceMinor(db, "thb:liability:card")).toBe(6000);
+  });
+
+  it("reads a debit-normal asset the other way round", () => {
+    ins(db, { debit_account_id: "thb:asset:bank", credit_account_id: "thb:income:salary", amount: 50000 });
+    ins(db, { debit_account_id: "thb:expense:food", credit_account_id: "thb:asset:bank", amount: 5000 });
+    expect(getAccountBalanceMinor(db, "thb:asset:bank")).toBe(45000);
+  });
+
+  it("excludes children, so a parent never borrows their balances", () => {
+    ins(db, {
+      debit_account_id: "thb:expense:food:dining",
+      credit_account_id: "thb:liability:card",
+      amount: 10000,
+    });
+    expect(getAccountBalanceMinor(db, "thb:expense:food:dining")).toBe(10000);
+    expect(getAccountBalanceMinor(db, "thb:expense:food")).toBe(0);
+  });
+
+  it("excludes a voided mirror, like every other balance read", () => {
+    ins(db, {
+      id: "tx:keep",
+      debit_account_id: "thb:expense:food",
+      credit_account_id: "thb:liability:card",
+      amount: 10000,
+    });
+    ins(db, {
+      id: "tx:mirror",
+      debit_account_id: "thb:expense:food",
+      credit_account_id: "thb:liability:card",
+      amount: 10000,
+    });
+    voidTransactionAsMirror(db, "tx:mirror", "tx:keep");
+    expect(getAccountBalanceMinor(db, "thb:liability:card")).toBe(10000);
+  });
+
+  it("is null for an account that does not exist, so the caller can say so", () => {
+    expect(getAccountBalanceMinor(db, "thb:liability:nope")).toBeNull();
+  });
+
+  it("is zero for an account nothing posted to", () => {
+    expect(getAccountBalanceMinor(db, "thb:liability:card")).toBe(0);
   });
 });
 

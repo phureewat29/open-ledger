@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import type Database from "libsql";
 import {
   EXIT,
   type Column,
@@ -14,7 +15,14 @@ import {
 import { openDb } from "../db.js";
 import { requireConfig } from "./config.js";
 import { commitIngest } from "./commit.js";
-import { markFileFailed, markFileIngested } from "../../db/queries/files.js";
+import { findFileById, markFileFailed, markFileIngested } from "../../db/queries/files.js";
+import { getAccountBalanceMinor } from "../../accounts/balances.js";
+import { DIRECTION_RULES } from "../../ingest/commit.js";
+import { formatFixed } from "../currency.js";
+import { currencyOf } from "../../lib/ids.js";
+import { fromMinorUnits, toMinorUnits } from "../../lib/money.js";
+import { parseInput, num, str } from "../../lib/validate.js";
+import * as z from "zod";
 // source.ts avoids mupdf/libsql, so this import is safe on the startup path.
 import { MAX_SOURCE_BYTES, SUPPORTED_EXTS } from "../../extract/source.js";
 // prepare.ts keeps mupdf/libsql lazy internally (getMupdf() in extract/pdf.ts), so this import is safe on the startup path.
@@ -174,22 +182,89 @@ async function prepareIngest(
   if (result.kind === "text" && result.failedPages.length > 0) process.exitCode = EXIT.PARTIAL;
 }
 
-interface CompleteIngestOpts {
-  agent?: string;
+const DONE_FLAGS_SPEC = z.object({
+  agent: str().optional(),
+  account: str().optional(),
+  closing_balance: num().optional(),
+});
+
+type DoneFlags = z.infer<typeof DONE_FLAGS_SPEC>;
+
+interface ReconcileTarget {
+  account: string;
+  closing: number;
+}
+
+interface Reconciliation extends ReconcileTarget {
+  balance: number;
+}
+
+/** Flag arity only, so a half-given pair is refused before any ledger opens. */
+function reconcileTarget(flags: DoneFlags): ReconcileTarget | null {
+  const { account, closing_balance: closing } = flags;
+  if (account === undefined && closing === undefined) return null;
+  if (account === undefined || closing === undefined) {
+    fail("USAGE", "reconciling needs --account and --closing-balance together");
+  }
+  return { account, closing };
+}
+
+/**
+ * The statement's closing balance against the ledger's own, in minor units:
+ * comparing decimals would fail on a rounding artifact rather than a real gap.
+ */
+function reconcileStatement(db: Database.Database, target: ReconcileTarget): Reconciliation {
+  const { account, closing } = target;
+  const balanceMinor = getAccountBalanceMinor(db, account);
+  if (balanceMinor === null) {
+    fail("NOT_FOUND", `no account ${account}`, {
+      hint: "run `oled accounts tree --json` for the ids this ledger has",
+    });
+  }
+
+  const currency = currencyOf(account);
+  const closingMinor = toMinorUnits(closing, currency);
+  const show = (minor: number): string => formatFixed(fromMinorUnits(minor, currency), currency);
+
+  if (balanceMinor !== closingMinor) {
+    fail(
+      "INVALID",
+      `${account} holds ${show(balanceMinor)}, but the statement closes at ${show(closingMinor)} (off by ${show(closingMinor - balanceMinor)})`,
+      {
+        hint: `compare \`oled transactions list --account ${account} --json\` against the statement: a row may be misread, missing, or invented; a first statement also needs its opening balance posted against ${currency.toLowerCase()}:equity:opening; and a balance lives on the account the rows post to, never on a parent`,
+      },
+    );
+  }
+
+  return {
+    account,
+    closing: fromMinorUnits(closingMinor, currency),
+    balance: fromMinorUnits(balanceMinor, currency),
+  };
 }
 
 async function completeIngest(
   id: string,
-  opts: CompleteIngestOpts,
+  opts: Record<string, unknown>,
   command: Command,
 ): Promise<void> {
+  const flags = parseInput(DONE_FLAGS_SPEC, opts);
+  const target = reconcileTarget(flags);
   const config = requireConfig(command);
   const db = await openDb(config.dbPath);
-  const changes = markFileIngested(db, id, { source: opts.agent ?? "external" });
-  if (changes === 0) fail("NOT_FOUND", `no ingest entry: ${id}`);
+  if (!findFileById(db, id)) fail("NOT_FOUND", `no ingest entry: ${id}`);
 
+  // Before the status flips, so a file that was pending stays pending.
+  const reconciliation = target ? reconcileStatement(db, target) : null;
+
+  markFileIngested(db, id, { source: flags.agent ?? "external" });
   const { removed } = cleanCache(config.cacheDir, id);
-  emitObject({ file_id: id, status: "ingested", cache_removed: removed });
+  emitObject({
+    file_id: id,
+    status: "ingested",
+    cache_removed: removed,
+    ...(reconciliation ? { reconciliation } : {}),
+  });
 }
 
 interface FailIngestOpts {
@@ -263,16 +338,28 @@ export function registerIngest(program: Command): void {
         "Behavior: posts one batch of statement rows; each item resolves account hints, links merchants, and raises questions instead of failing.",
         'Item: {"date":"YYYY-MM-DD","description":"...","debit_account":"thb:expense:food","credit_account":"thb:asset:bank:kbank","amount":135.00,"source_page":2,"row_index":0,"raw_descriptor":"<verbatim bank text>","merchant":{"canonical_name":"..."}}',
         "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are currency-prefixed (<currency>:<type>:<path>) and both sides must share the prefix; ids are taken literally (an exact match posts there, a well-formed path inside an existing ledger is created, a lookalike only raises a question); commit never opens a new ledger — an id whose currency prefix names no existing ledger is refused, naming the ledger and the accounts create command that opens it, and only ids with no usable prefix fall back to the other side's <currency>:expense:uncategorized with a question; set row_index + source_page and pass --file <sf:id> so a re-run is an idempotent duplicate:true no-op.",
+        DIRECTION_RULES,
         "Compound rows (payslip, FX): replace debit/credit/amount with linked:[{debit_account,credit_account,amount},...] sharing one account; legs commit atomically under one group_id. Cross-currency rows become two linked legs through <currency>:equity:conversion, one per ledger, sharing the group.",
-        "Output: one result per item, then a summary with batch_id/posted/duplicates/failed. Exit 7 = some rows failed; duplicate:true is a success.",
+        "Output: one result per item, then a summary with batch_id/posted/duplicates/failed, plus file_status and a done hint while the file stays pending. Exit 7 = some rows failed; duplicate:true is a success.",
       ].join("\n"),
     )
     .action(runAction(commitIngest));
 
   ingest
     .command("done <id>")
-    .description("Mark an ingest item as done")
+    .description("Mark an ingest item as done, reconciling the statement's own math when given")
     .option("--agent <name>", "name of the completing agent")
+    .option("--account <id>", "the statement's own account (the card liability or bank asset)")
+    .option("--closing-balance <amount>", "statement closing balance; done refuses when the ledger disagrees")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Behavior: closes the file. With --account and --closing-balance it first verifies the ledger against the statement: that account's balance must equal the statement's closing figure, and a file that was pending stays pending when it does not.",
+        "A mismatch means a misread, missing, or invented row, or a first statement whose opening balance was never posted. The check reads one account, so a row booked to the wrong counter-account still ties — the questions queue covers that.",
+        "Example: oled ingest done sf:abc --account thb:liability:card --closing-balance 1234.56 --json",
+      ].join("\n"),
+    )
     .action(runAction(completeIngest));
 
   ingest
