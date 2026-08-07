@@ -21,7 +21,7 @@ import { registerOpen } from "./commands/open.js";
 const GLOBAL_OPTIONS = [
   { name: "--json", desc: "Emit NDJSON (machine-readable) instead of human output" },
   { name: "--no-color", desc: "Disable ANSI color output" },
-  { name: "--conf <path>", desc: "Config file to use (default ~/.oled/config.json)" },
+  { name: "--config <path>", desc: "Config file to use (default ~/.oled/config.json)" },
 ];
 
 // Navigation hints the overview screen adds; they would only be noise inside the command's own help.
@@ -93,12 +93,16 @@ export function buildProgram(): Command {
   registerDatasets(program);
   registerOpen(program);
 
-  // Global flags repeated on every command so they work before or after the subcommand name.
+  // Repeated per command for each --help screen; value resolution happens at the root, which scans all of argv.
   function configureEveryLevel(cmd: Command): void {
     cmd
       .option("--json", "Emit NDJSON (machine-readable) instead of human output")
-      .option("--no-color", "Disable ANSI color output")
-      .option("--conf <path>", "Config file to use (default ~/.oled/config.json)")
+      .option("--no-color", "Disable ANSI color output");
+    // Kept off the config command's help screen, which teaches the positional; parsing resolves at the root either way.
+    if (cmd.name() !== "config") {
+      cmd.option("--config <path>", "Config file to use (default ~/.oled/config.json)");
+    }
+    cmd
       .exitOverride(parseFailureHandler(cmd))
       // Under --json, the CLIError contract is the only thing allowed on stderr.
       .configureOutput({

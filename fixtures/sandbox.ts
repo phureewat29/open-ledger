@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 export interface Sandbox {
   root: string;
   home: string;
-  /** `<home>/.oled` — where the default conf path and every default location resolve. */
+  /** `<home>/.oled` — where the default config path and every default location resolve. */
   oledDir: string;
-  confPath: string;
+  configPath: string;
   dbPath: string;
   dataDir: string;
   cacheDir: string;
@@ -43,7 +43,7 @@ export function createSandbox(prefix: string): Sandbox {
     root,
     home,
     oledDir,
-    confPath: join(oledDir, "config.json"),
+    configPath: join(oledDir, "config.json"),
     dbPath: join(oledDir, "db.sqlite"),
     dataDir,
     cacheDir: join(oledDir, "cache"),
@@ -53,9 +53,9 @@ export function createSandbox(prefix: string): Sandbox {
 }
 
 /** Seeds the sandbox's config.json so gated commands run without a prior `config --init`. */
-export function writeConf(sandbox: Sandbox, values: Record<string, unknown>): void {
+export function writeConfig(sandbox: Sandbox, values: Record<string, unknown>): void {
   mkdirSync(sandbox.oledDir, { recursive: true });
-  writeFileSync(sandbox.confPath, JSON.stringify(values, null, 2) + "\n");
+  writeFileSync(sandbox.configPath, JSON.stringify(values, null, 2) + "\n");
 }
 
 /** This file lives in fixtures/, so the repo root is one level up. */

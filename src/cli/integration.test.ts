@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Database from "libsql";
-import { createSandbox, makeRunCLI, writeConf, type CLIRunner, type Sandbox } from "../../fixtures/sandbox.js";
+import { createSandbox, makeRunCLI, writeConfig, type CLIRunner, type Sandbox } from "../../fixtures/sandbox.js";
 import { buildProgram } from "./program.js";
 import { migrate } from "../db/schema.js";
 import { ensureLedgerRoot } from "../accounts/accounts.js";
@@ -12,7 +12,7 @@ let runCLI: CLIRunner;
 beforeAll(() => {
   sandbox = createSandbox("oled-it-");
   runCLI = makeRunCLI(sandbox);
-  writeConf(sandbox, {});
+  writeConfig(sandbox, {});
 });
 
 afterAll(() => {
@@ -45,6 +45,16 @@ describe("cli integration (subprocess)", () => {
     const { stdout, code } = await runCLI(["--help"]);
     expect(code).toBe(0);
     for (const command of buildProgram().commands) expect(stdout).toContain(command.name());
+  }, 30000);
+
+  it("--config sits on every help screen except the config command's, which is positional-only", async () => {
+    const status = await runCLI(["status", "--help"]);
+    expect(status.stdout).toContain("Config file to use");
+
+    // The afterword mentions the flag in prose, so assert on the option row's description.
+    const config = await runCLI(["config", "--help"]);
+    expect(config.stdout).not.toContain("Config file to use");
+    expect(config.stdout).toContain("[path]");
   }, 30000);
 });
 

@@ -20,11 +20,11 @@ export interface OpenLedgerConfig {
 
 /** What one invocation resolved: the config values plus where they came from. */
 export interface ResolvedConfig extends OpenLedgerConfig {
-  /** Absolute path of the file this invocation resolves to (`--conf` or the default). */
-  confPath: string;
-  /** Freeform agent context lives beside the conf file, so each profile carries its own. */
+  /** Absolute path of the file this invocation resolves to (`--config` or the default). */
+  configPath: string;
+  /** Freeform agent context lives beside the config file, so each profile carries its own. */
   contextPath: string;
-  /** Whether the conf file was present at load; data commands refuse to run without it. */
+  /** Whether the config file was present at load; data commands refuse to run without it. */
   exists: boolean;
 }
 
@@ -40,8 +40,14 @@ function defaultOledDir(): string {
   return resolve(homedir(), ".oled");
 }
 
-function defaultConfPath(): string {
+function defaultConfigPath(): string {
   return resolve(defaultOledDir(), "config.json");
+}
+
+/** `~` is the shell's expansion, not Node's, so a quoted `~/x` would otherwise
+ *  resolve under the working directory. Keeps `status`'s home-relative paths usable as input. */
+function expandHome(path: string): string {
+  return path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
 }
 
 /** Also the persisted-key list: unknown keys on disk are tolerated on read, dropped on next write (`saveConfig` writes only these fields). */
@@ -85,15 +91,15 @@ function pickConfigFields(obj: Record<string, unknown>): Partial<OpenLedgerConfi
   return out;
 }
 
-function readFileValues(confPath: string): {
+function readFileValues(configPath: string): {
   fileValues: Partial<OpenLedgerConfig>;
   problem: string | null;
   exists: boolean;
 } {
-  if (!existsSync(confPath)) return { fileValues: {}, problem: null, exists: false };
+  if (!existsSync(configPath)) return { fileValues: {}, problem: null, exists: false };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(confPath, "utf-8"));
+    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { fileValues: {}, problem: message, exists: true };
@@ -113,14 +119,14 @@ function withDefaults(fileValues: Partial<OpenLedgerConfig>): OpenLedgerConfig {
   return out;
 }
 
-/** Reads the conf file (default: `~/.oled/config.json`). A broken file degrades
+/** Reads the config file (default: `~/.oled/config.json`). A broken file degrades
  *  to defaults with `problem` set; the caller decides whether that is fatal. */
-export function loadConfig(confPath?: string): LoadedConfig {
-  const resolved = resolve(confPath ?? defaultConfPath());
+export function loadConfig(configPath?: string): LoadedConfig {
+  const resolved = resolve(expandHome(configPath ?? defaultConfigPath()));
   const { fileValues, problem, exists } = readFileValues(resolved);
   const config: ResolvedConfig = {
     ...withDefaults(fileValues),
-    confPath: resolved,
+    configPath: resolved,
     contextPath: resolve(dirname(resolved), "context.md"),
     exists,
   };
@@ -129,16 +135,16 @@ export function loadConfig(confPath?: string): LoadedConfig {
 
 /** Merges the file's values with the DEFINED entries of `patch`, writes 0600,
  *  and returns the merged values with defaults folded in. No module state. */
-export function saveConfig(confPath: string, patch: Partial<OpenLedgerConfig>): OpenLedgerConfig {
-  const dir = dirname(confPath);
+export function saveConfig(configPath: string, patch: Partial<OpenLedgerConfig>): OpenLedgerConfig {
+  const dir = dirname(configPath);
   // 0700 like the cache dir: this tree holds financial data.
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   // A broken file degrades to {} here; the write below repairs it.
-  const { fileValues } = readFileValues(confPath);
+  const { fileValues } = readFileValues(configPath);
   const merged = { ...fileValues, ...pickConfigFields(patch) };
-  writeFileSync(confPath, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
-  chmod600(confPath);
+  writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
+  chmod600(configPath);
 
   return withDefaults(merged);
 }

@@ -66,7 +66,9 @@ async function buildReport(cfg: ResolvedConfig): Promise<StatusReport> {
     type: "status",
     // `configured` means a converge has run (`oled config --init`); a db file alone doesn't imply that.
     configured: cfg.exists,
-    config_path: homeRelative(cfg.confPath),
+    // Home-relative so no output carries the OS account name; `--config` expands
+    // `~` back, so what status prints is still usable as input.
+    config_path: homeRelative(cfg.configPath),
     data_dir: homeRelative(cfg.dataDir),
     locale: cfg.displayLocale,
     currency: cfg.displayCurrency,

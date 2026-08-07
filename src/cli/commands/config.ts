@@ -19,26 +19,26 @@ import { currentMode, emit, fail, runAction, type OutputMode } from "../output.j
 import * as z from "zod";
 import { parseInput, str, bool } from "../../lib/validate.js";
 
-/** Nearest `--conf` wins: commander leaves a global flag on whichever command consumed it (same walk as resolveMode). */
-function resolveConfPath(cmd: Command): string | undefined {
+/** The root's argv scan consumes the flag wherever it appears; the ancestor walk reads it from any command node (same walk as resolveMode). */
+function resolveConfigPath(cmd: Command): string | undefined {
   for (let c: Command | undefined = cmd; c; c = c.parent ?? undefined) {
-    const conf = c.opts().conf;
-    if (typeof conf === "string") return conf;
+    const flag = c.opts().config;
+    if (typeof flag === "string") return flag;
   }
   return undefined;
 }
 
 /** For commands that operate on the ledger: no config file, no ledger. */
 export function requireConfig(cmd: Command): ResolvedConfig {
-  const { config, problem } = loadConfig(resolveConfPath(cmd));
+  const { config, problem } = loadConfig(resolveConfigPath(cmd));
   if (problem) {
-    fail("NOT_READY", `config file ${config.confPath} is unusable: ${problem}`, {
+    fail("NOT_READY", `config file ${config.configPath} is unusable: ${problem}`, {
       hint: "fix or remove it, then run `oled config --init`",
     });
   }
   if (!config.exists) {
-    fail("NOT_READY", `no config file at ${config.confPath}`, {
-      hint: "run `oled config --init`, or pass --conf <path>",
+    fail("NOT_READY", `no config file at ${config.configPath}`, {
+      hint: "run `oled config --init`, or pass --config <path>",
     });
   }
   return config;
@@ -46,7 +46,7 @@ export function requireConfig(cmd: Command): ResolvedConfig {
 
 /** For status, doctor, and config itself, which must run on virgin or broken setups. */
 export function lenientConfig(cmd: Command): LoadedConfig {
-  return loadConfig(resolveConfPath(cmd));
+  return loadConfig(resolveConfigPath(cmd));
 }
 
 type SecretKey = (typeof CONFIG_SECRETS)[number];
@@ -66,7 +66,7 @@ function redactConfig(cfg: OpenLedgerConfig): RedactedConfig {
 
 /** The 10 value keys without the resolution fields; those render as their own snake_case rows. */
 function configValues(cfg: ResolvedConfig): OpenLedgerConfig {
-  const { confPath, contextPath, exists, ...values } = cfg;
+  const { configPath, contextPath, exists, ...values } = cfg;
   return values;
 }
 
@@ -74,7 +74,7 @@ function showPayload(loaded: LoadedConfig): Record<string, unknown> {
   const cfg = loaded.config;
   return {
     ...redactConfig(configValues(cfg)),
-    conf_path: cfg.confPath,
+    config_path: cfg.configPath,
     context_path: cfg.contextPath,
     // A broken file degrades to defaults; the payload must say so, not imply them.
     ...(loaded.problem ? { problem: loaded.problem } : {}),
@@ -170,8 +170,8 @@ async function convergeConfig(flags: SettingFlags, loaded: LoadedConfig): Promis
   // 0700: the data dir holds the raw statements, the most sensitive files here.
   mkdirSync(converged.dataDir, { recursive: true, mode: 0o700 });
 
-  const confPath = loaded.config.confPath;
-  const merged = saveConfig(confPath, converged);
+  const configPath = loaded.config.configPath;
+  const merged = saveConfig(configPath, converged);
 
   // After saveConfig, and from the returned values, so the migration lands on the new db path.
   const db = await openDb(merged.dbPath);
@@ -186,9 +186,9 @@ async function convergeConfig(flags: SettingFlags, loaded: LoadedConfig): Promis
 
   printConfig(currentMode(), {
     ...redactConfig(merged),
-    conf_path: confPath,
+    config_path: configPath,
     context_path: loaded.config.contextPath,
-    created: { config: confPath, db: merged.dbPath, data_dir: merged.dataDir },
+    created: { config: configPath, db: merged.dbPath, data_dir: merged.dataDir },
   });
 }
 
@@ -200,21 +200,26 @@ function fullyInitialized(cfg: ResolvedConfig): boolean {
 // One verb, three moods: bare shows, setting flags write (creating the file on
 // first touch), --init asserts the setup is being created fresh.
 async function configureHarness(
-  conf: string | undefined,
+  path: string | undefined,
   opts: Record<string, unknown>,
   command: Command,
 ): Promise<void> {
+  // One spelling only: a root-consumed --config would be silently ignored here otherwise.
+  if (resolveConfigPath(command) !== undefined) {
+    fail("USAGE", "config names its file as a positional", {
+      hint: "oled config <path> …",
+    });
+  }
   const flags = parseInput(CONVERGE_FLAGS_SPEC, opts);
-  const explicit = conf ?? resolveConfPath(command);
-  const loaded = loadConfig(explicit);
+  const loaded = loadConfig(path);
   const { init, ...settings } = flags;
   const writing = init || Object.keys(settings).length > 0;
 
   if (!writing) {
     // Naming a file that does not exist is a mistake, not a defaults view:
     // `config show` muscle memory would otherwise read a file named "show".
-    if (explicit && !loaded.config.exists) {
-      fail("NOT_FOUND", `no config file at ${loaded.config.confPath}`, {
+    if (path && !loaded.config.exists) {
+      fail("NOT_FOUND", `no config file at ${loaded.config.configPath}`, {
         hint: "create it with `oled config <path> --init`",
       });
     }
@@ -225,12 +230,12 @@ async function configureHarness(
   // A file that exists but does not parse never converges: writing would
   // silently discard whatever the user hand-edited into it.
   if (loaded.problem) {
-    fail("NOT_READY", `config file ${loaded.config.confPath} is unusable: ${loaded.problem}`, {
+    fail("NOT_READY", `config file ${loaded.config.configPath} is unusable: ${loaded.problem}`, {
       hint: "fix or remove it, then try again",
     });
   }
   if (init && fullyInitialized(loaded.config)) {
-    fail("INVALID", `already initialized: ${loaded.config.confPath}`, {
+    fail("INVALID", `already initialized: ${loaded.config.configPath}`, {
       hint: "drop --init to change settings",
     });
   }
@@ -240,8 +245,8 @@ async function configureHarness(
 export function registerConfig(program: Command): void {
   program
     .command("config")
-    .description("Configuration")
-    .argument("[conf]", "config file to read or write (default ~/.oled/config.json)")
+    .description("OpenLedger configuration")
+    .argument("[path]", "config file to read or write (default ~/.oled/config.json)")
     .option("--data-dir <dir>", "drop statement files here; oled open opens it")
     .option("--db <path>", "database path")
     .option("--cache-dir <dir>", "extracted text and page images land here")
@@ -260,7 +265,7 @@ export function registerConfig(program: Command): void {
         "Bare `oled config` shows the current settings; any setting flag writes",
         "them, creating the file on first touch. The positional argument names the",
         "config file (default ~/.oled/config.json); every other oled command",
-        "reaches the same config file with --conf <path>."
+        "reaches the same config file with --config <path>."
       ].join("\n"),
     )
     .action(runAction(configureHarness));

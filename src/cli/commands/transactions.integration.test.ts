@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSandbox,
-  writeConf,
+  writeConfig,
   makeRunCLI,
   parseNdjson,
   parseOne,
@@ -18,7 +18,7 @@ let runCLI: CLIRunner;
 beforeAll(() => {
   sandbox = createSandbox("oled-ledger-it-");
   runCLI = makeRunCLI(sandbox);
-  writeConf(sandbox, {});
+  writeConfig(sandbox, {});
 });
 
 afterAll(() => {
@@ -886,8 +886,8 @@ describe("transactions CLI integration (subprocess)", () => {
     "transactions list --json masks PII by default (card number + configured user name); --no-redact returns verbatim",
     async () => {
       const userName = "Nutcha Wong";
-      // The redactor sources userName from the conf file this invocation resolves.
-      writeConf(sandbox, { userName });
+      // The redactor sources userName from the config file this invocation resolves.
+      writeConfig(sandbox, { userName });
 
       await runCLI([
         "accounts", "create", "--id", "thb:expense:travel", "--name", "Travel",

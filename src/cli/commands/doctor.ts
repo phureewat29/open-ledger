@@ -40,7 +40,7 @@ function configReadableCheck(loaded: LoadedConfig): Check {
   return {
     name,
     ok: false,
-    detail: `${loaded.config.confPath} is unusable, so defaults are in use: ${loaded.problem}`,
+    detail: `${loaded.config.configPath} is unusable, so defaults are in use: ${loaded.problem}`,
   };
 }
 

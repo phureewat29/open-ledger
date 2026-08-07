@@ -142,7 +142,7 @@ describe("docs consistency (no subprocesses)", () => {
 
   it("every --flag on an oled span in SKILL.md is a real option on the resolved command", () => {
     const program = buildProgram();
-    const globalFlags = new Set(["--json", "--no-color", "--conf"]);
+    const globalFlags = new Set(["--json", "--no-color", "--config"]);
     const problems: string[] = [];
     const sources: Array<[string, string]> = [["SKILL.md", SKILL]];
 
@@ -157,7 +157,8 @@ describe("docs consistency (no subprocesses)", () => {
         }
         const realFlags = new Set(target.options.map((o) => o.long).filter((f): f is string => !!f));
         for (const flag of extractFlagTokens(span)) {
-          if (globalFlags.has(flag)) continue;
+          // --config is global everywhere EXCEPT the config command, which is positional-only.
+          if (globalFlags.has(flag) && !(target.name() === "config" && flag === "--config")) continue;
           if (!realFlags.has(flag)) {
             problems.push(`${label}: \`${span}\`: ${flag} is not an option on \`${target.name()}\``);
           }

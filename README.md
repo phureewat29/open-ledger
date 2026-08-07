@@ -114,7 +114,7 @@ oled open           # Open the data folder in file explorer
 
 ## Configuration
 
-OpenLedger reads one JSON config file per run and nothing else: no environment variables, no hidden state. The default file is `~/.oled/config.json`; `oled config [path]` reads and writes a named file directly, and every command accepts `--conf <path>` to run against it, so two conf files are two independent ledgers. Commands that touch the ledger refuse to run until the file exists; `oled config --init` creates it, along with the database and data directory:
+OpenLedger reads one JSON config file per run and nothing else: no environment variables, no hidden state. The default file is `~/.oled/config.json`; `oled config [path]` reads and writes a named file directly, and every other command accepts `--config <path>` to run against it, so two conf files are two independent ledgers. Commands that touch the ledger refuse to run until the file exists; `oled config --init` creates it, along with the database and data directory:
 
 ```
 ~/.oled/

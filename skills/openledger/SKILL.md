@@ -12,7 +12,7 @@ Always pass `--json`. List output ends with a `{"type":"summary"}` row — page 
 
 ## Setup
 
-`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @aquartier/openledger`. First run: `oled config --init --json` unless `oled status --json` shows `"configured":true`; commands that touch the ledger exit 3 until then, and `--init` refuses a setup that already exists (exit 6) — change settings with plain flags, e.g. `oled config --ocr-base-url <url> --json`. Every command accepts `--conf <path>` to run against a different config file, a separate ledger; `oled config <path> --json` reads or writes that file directly. Statements go in the `dataDir` from `oled config --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
+`oled --version` prints a version when installed. To install: check `node --version` >= 18, then `npm install -g @aquartier/openledger`. First run: `oled config --init --json` unless `oled status --json` shows `"configured":true`; commands that touch the ledger exit 3 until then, and `--init` refuses a setup that already exists (exit 6) — change settings with plain flags, e.g. `oled config --ocr-base-url <url> --json`. Every command accepts `--config <path>` to run against a different config file, a separate ledger; `oled config <path> --json` reads or writes that file directly. Statements go in the `dataDir` from `oled config --json`, as PDFs or as photos/scans (PNG/JPEG/WebP); `oled open` opens it.
 
 ## Commands
 

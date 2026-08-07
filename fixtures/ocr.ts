@@ -27,7 +27,7 @@ export function requireLiveOcr(): OCRSettings {
   return liveOcr;
 }
 
-/** Live subprocess suites merge this into the sandbox's config.json (writeConf); there is no env to inject. */
+/** Live subprocess suites merge this into the sandbox's config.json (writeConfig); there is no env to inject. */
 export function requireLiveOcrSource(): OCRConfigSource {
   requireLiveOcr();
   return liveOcrSource;

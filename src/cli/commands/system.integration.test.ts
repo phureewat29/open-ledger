@@ -7,7 +7,7 @@ import { insertTransaction } from "../../db/queries/transactions.js";
 import { recordQuestion } from "../../db/queries/questions.js";
 import {
   createSandbox,
-  writeConf,
+  writeConfig,
   makeRunCLI,
   parseNdjson,
   parseOne,
@@ -25,7 +25,7 @@ beforeAll(() => {
   dbPath = sandbox.dbPath;
 
   // Minimal config.json so `doctor`'s config_exists check is true and bare `config` resolves.
-  writeConf(sandbox, { displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" });
+  writeConfig(sandbox, { displayCurrency: "THB", displayLocale: "th-TH", userName: "Test User" });
 
   // Shared db: every test below seeds rows against this one file.
   const raw = new Database(dbPath);
@@ -117,7 +117,7 @@ describe("system CLI integration (subprocess)", () => {
         expect(blank.db.error).toBe("no ledger yet");
         // Orienting must not bring a ledger into existence.
         expect(existsSync(isolated.dbPath)).toBe(false);
-        expect(existsSync(isolated.confPath)).toBe(false);
+        expect(existsSync(isolated.configPath)).toBe(false);
 
         // Doctor diagnoses the same state without provisioning it either.
         const virginDoctor = await runCLI(["doctor", "--json"], { env: isolated.env, cwd: isolated.root });
@@ -141,8 +141,14 @@ describe("system CLI integration (subprocess)", () => {
         const report = parseOne(after.stdout);
         expect(report.configured).toBe(true);
         expect(report.db.reachable).toBe(true);
-        // Paths are home-relativized facts, never redaction fodder; only config_path sits under HOME here.
+        // Home-relative so no output carries the OS account name, and still usable as input.
         expect(report.config_path.startsWith("~/")).toBe(true);
+        const roundTrip = await runCLI(["config", report.config_path, "--json"], {
+          env: isolated.env,
+          cwd: isolated.root,
+        });
+        expect(roundTrip.code).toBe(0);
+        expect(parseOne(roundTrip.stdout).config_path).toBe(isolated.configPath);
         expect(JSON.stringify(report)).not.toContain("[USER");
         expect(JSON.stringify(report)).not.toContain("[PARTNER");
       } finally {
@@ -431,7 +437,7 @@ describe("system CLI integration (subprocess)", () => {
     async () => {
       const isolated = createSandbox("oled-system-account-notfound-it-");
       try {
-        writeConf(isolated, {});
+        writeConfig(isolated, {});
         const raw = new Database(isolated.dbPath);
         raw.pragma("foreign_keys = ON");
         migrate(raw);

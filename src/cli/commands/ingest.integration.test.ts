@@ -18,7 +18,7 @@ import {
   createSandbox,
   makeRunCLI,
   parseNdjson,
-  writeConf,
+  writeConfig,
   type CLIRunner,
   type Sandbox,
 } from "../../../fixtures/sandbox.js";
@@ -40,7 +40,7 @@ beforeAll(() => {
   sandbox = createSandbox("oled-ingest-it-");
   runCLI = makeRunCLI(sandbox);
   dbPath = sandbox.dbPath;
-  writeConf(sandbox, {});
+  writeConfig(sandbox, {});
 
   // Closed before the CLI runs so the subprocess owns the writer.
   const db = new Database(dbPath);
@@ -780,7 +780,7 @@ describe("ingest prepare against an OCR server (subprocess)", () => {
       JSON.stringify({ ocrBaseUrl: DEAD_OCR_BASE_URL, ocrModel: "test-ocr-model" }) + "\n",
     );
     const { code, stderr } = await runCLI([
-      "ingest", "prepare", path, "--conf", deadConf, "--json",
+      "ingest", "prepare", path, "--config", deadConf, "--json",
     ]);
     expect(code).toBe(3);
     const { error } = JSON.parse(stderr.trim());
@@ -798,7 +798,7 @@ describe.skipIf(!liveOcr)("ingest prepare against an OCR server (live OCR endpoi
       const liveConf = join(sandbox.root, "live-ocr.json");
       writeFileSync(liveConf, JSON.stringify(requireLiveOcrSource()) + "\n");
       const { stdout, code } = await runCLI([
-        "ingest", "prepare", path, "--conf", liveConf, "--json",
+        "ingest", "prepare", path, "--config", liveConf, "--json",
       ]);
       expect(code).toBe(0);
       const obj = JSON.parse(stdout.trim());

@@ -6,7 +6,7 @@ import { countAccounts, findAccountById, listLedgerCurrencies } from "../../db/q
 import {
   createSandbox,
   makeRunCLI,
-  writeConf,
+  writeConfig,
   parseOne,
   type CLIRunner,
   type Sandbox,
@@ -18,7 +18,7 @@ let dbPath: string;
 
 beforeAll(() => {
   sandbox = createSandbox("oled-accounts-it-");
-  writeConf(sandbox, {});
+  writeConfig(sandbox, {});
   runCLI = makeRunCLI(sandbox);
   dbPath = sandbox.dbPath;
 
