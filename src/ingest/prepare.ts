@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type Database from "libsql";
@@ -15,6 +14,7 @@ import { resolveOcr, type OCRConfigSource } from "../extract/ocr.js";
 import { isEncryptedPdf, unlockPdf, type UnlockFailureReason } from "../extract/pdf.js";
 import type { TextLayer } from "../extract/route.js";
 import { SOURCES, loadSource, type LoadedSource } from "../extract/source.js";
+import { newFileId } from "../lib/ids.js";
 import { tryExecute, type Result } from "../lib/result.js";
 
 type IngestStatus = "new" | "pending" | "ingested" | "failed" | "unreadable";
@@ -117,10 +117,6 @@ export function countNewFiles(db: Database.Database | null, dataDir: string): nu
   }).length;
 }
 
-function newFileId(): string {
-  return `sf:${randomUUID()}`;
-}
-
 function pendingRow(source: LoadedSource, fileId: string): PendingFileInput {
   return { id: fileId, path: source.path, file_hash: source.hash, mime: source.mime };
 }
@@ -139,7 +135,7 @@ export function registerPendingFile(
   return { fileId, alreadyKnown: false };
 }
 
-/** Resolution order: absolute, data-dir-relative, cwd-relative, then `sf:` file id; null if none match. */
+/** Resolution order: absolute, data-dir-relative, cwd-relative, then file id; null if none match. */
 export function resolveEntryPath(
   db: Database.Database,
   dataDir: string,

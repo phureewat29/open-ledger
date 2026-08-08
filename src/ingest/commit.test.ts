@@ -17,7 +17,7 @@ import { failingAccountInsert, freshDb } from "../../fixtures/db.js";
 
 function seedAccountsAndFile(db: Database.Database): void {
   db.prepare(
-    `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','hashABC','application/pdf','ingested')`,
+    `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf-1','/f.pdf','hashABC','application/pdf','ingested')`,
   ).run();
   createAccount(db, { id: "thb:asset", name: "Assets (THB)", type: "asset", parent_id: null });
   createAccount(db, { id: "thb:asset:cash", name: "Cash", type: "asset", parent_id: "thb:asset" });
@@ -43,7 +43,7 @@ function seedAccountsAndFile(db: Database.Database): void {
 
 const CTX: TransactionCommitContext = {
   batchId: "ib:1",
-  fileId: "sf:1",
+  fileId: "sf-1",
   fileHash: "hashABC",
   country: "TH",
 };

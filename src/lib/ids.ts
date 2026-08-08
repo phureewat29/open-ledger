@@ -39,6 +39,12 @@ export function isLedgerScopedId(accountId: string): boolean {
   return /^[a-z]{3}:/.test(accountId);
 }
 
+/** Dash where every sibling uses a colon: the id doubles as a cache directory
+ *  name, and ':' is illegal in an NTFS path component. */
+export function newFileId(): string {
+  return `sf-${randomUUID()}`;
+}
+
 /** Groups a commit run's raised questions. */
 export function newBatchId(): string {
   return `ib:${randomUUID()}`;

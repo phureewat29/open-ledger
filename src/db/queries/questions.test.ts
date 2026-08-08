@@ -50,14 +50,14 @@ describe("questions table", () => {
   });
 
   it("countQuestions already supports kind and file_id scoping (pre-existing)", () => {
-    insertFile(db, "sf:a");
-    insertFile(db, "sf:b");
-    recordQuestion(db, { file_id: "sf:a", account_id: "thb:expense:food", kind: "uncategorized", prompt: "a" });
-    recordQuestion(db, { file_id: "sf:b", account_id: "thb:expense:food", kind: "duplicate", prompt: "b" });
+    insertFile(db, "sf-a");
+    insertFile(db, "sf-b");
+    recordQuestion(db, { file_id: "sf-a", account_id: "thb:expense:food", kind: "uncategorized", prompt: "a" });
+    recordQuestion(db, { file_id: "sf-b", account_id: "thb:expense:food", kind: "duplicate", prompt: "b" });
     expect(countQuestions(db, { kind: "uncategorized" })).toBe(1);
-    expect(countQuestions(db, { file_id: "sf:a" })).toBe(1);
-    expect(countQuestions(db, { kind: "duplicate", file_id: "sf:b" })).toBe(1);
-    expect(countQuestions(db, { kind: "duplicate", file_id: "sf:a" })).toBe(0);
+    expect(countQuestions(db, { file_id: "sf-a" })).toBe(1);
+    expect(countQuestions(db, { kind: "duplicate", file_id: "sf-b" })).toBe(1);
+    expect(countQuestions(db, { kind: "duplicate", file_id: "sf-a" })).toBe(0);
   });
 });
 

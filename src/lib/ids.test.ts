@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { deriveTransactionId, deriveGroupId } from "./ids.js";
+import { win32 } from "node:path";
+import { deriveTransactionId, deriveGroupId, newFileId } from "./ids.js";
+
+describe("newFileId", () => {
+  it("mints ids that survive as single Windows path components", () => {
+    const id = newFileId();
+    expect(id).toMatch(/^sf-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    // The id doubles as a cache directory name; these are the characters NTFS rejects.
+    expect(id).not.toMatch(/[<>:"/\\|?*]/);
+    expect(win32.resolve("C:\\cache", id)).toBe(`C:\\cache\\${id}`);
+  });
+});
 
 describe("deriveTransactionId / deriveGroupId", () => {
   it("is deterministic", () => {

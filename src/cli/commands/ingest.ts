@@ -293,7 +293,7 @@ export function registerIngest(program: Command): void {
       [
         "",
         "Behavior: the statement pipeline, list the files waiting, prepare one for reading, commit its rows, mark it done or failed.",
-        "Typical flow: list, prepare <id>, read what prepare returns, commit --file <sf:id> with the rows on stdin (or --input <batch>), then done <sf:id>.",
+        "Typical flow: list, prepare <id>, read what prepare returns, commit --file <sf-id> with the rows on stdin (or --input <batch>), then done <sf-id>.",
         `Accepts ${ACCEPTED_EXTS}, up to ${SIZE_LIMIT}. Locked PDFs exit 4: pass the password with --password <password>.`,
         "Example: oled ingest prepare statement.pdf --json",
       ].join("\n"),
@@ -337,7 +337,7 @@ export function registerIngest(program: Command): void {
         "",
         "Behavior: posts one batch of statement rows; each item resolves account hints, links merchants, and raises questions instead of failing.",
         'Item: {"date":"YYYY-MM-DD","description":"...","debit_account":"thb:expense:food","credit_account":"thb:asset:bank:kbank","amount":135.00,"source_page":2,"row_index":0,"raw_descriptor":"<verbatim bank text>","merchant":{"canonical_name":"..."}}',
-        "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are currency-prefixed (<currency>:<type>:<path>) and both sides must share the prefix; ids are taken literally (an exact match posts there, a well-formed path inside an existing ledger is created, a lookalike only raises a question); commit never opens a new ledger — an id whose currency prefix names no existing ledger is refused, naming the ledger and the accounts create command that opens it, and only ids with no usable prefix fall back to the other side's <currency>:expense:uncategorized with a question; set row_index + source_page and pass --file <sf:id> so a re-run is an idempotent duplicate:true no-op.",
+        "Rules: amount > 0, direction comes from the two accounts, never a sign; account ids are currency-prefixed (<currency>:<type>:<path>) and both sides must share the prefix; ids are taken literally (an exact match posts there, a well-formed path inside an existing ledger is created, a lookalike only raises a question); commit never opens a new ledger — an id whose currency prefix names no existing ledger is refused, naming the ledger and the accounts create command that opens it, and only ids with no usable prefix fall back to the other side's <currency>:expense:uncategorized with a question; set row_index + source_page and pass --file <sf-id> so a re-run is an idempotent duplicate:true no-op.",
         DIRECTION_RULES,
         "Compound rows (payslip, FX): replace debit/credit/amount with linked:[{debit_account,credit_account,amount},...] sharing one account; legs commit atomically under one group_id. Cross-currency rows become two linked legs through <currency>:equity:conversion, one per ledger, sharing the group.",
         "Output: one result per item, then a summary with batch_id/posted/duplicates/failed, plus file_status and a done hint while the file stays pending. Exit 7 = some rows failed; duplicate:true is a success.",
@@ -357,7 +357,7 @@ export function registerIngest(program: Command): void {
         "",
         "Behavior: closes the file. With --account and --closing-balance it first verifies the ledger against the statement: that account's balance must equal the statement's closing figure, and a file that was pending stays pending when it does not.",
         "A mismatch means a misread, missing, or invented row, or a first statement whose opening balance was never posted. The check reads one account, so a row booked to the wrong counter-account still ties — the questions queue covers that.",
-        "Example: oled ingest done sf:abc --account thb:liability:card --closing-balance 1234.56 --json",
+        "Example: oled ingest done sf-abc --account thb:liability:card --closing-balance 1234.56 --json",
       ].join("\n"),
     )
     .action(runAction(completeIngest));

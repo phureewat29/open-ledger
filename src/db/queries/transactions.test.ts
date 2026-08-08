@@ -367,15 +367,15 @@ describe("counts + updateTransactionMeta", () => {
   beforeEach(() => {
     db = freshDb(seedChartOfAccounts);
     db.prepare(
-      `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','h1','application/pdf','ingested')`,
+      `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf-1','/f.pdf','h1','application/pdf','ingested')`,
     ).run();
   });
 
   it("counts total and by source file", () => {
-    insertTransaction(db, tf({ id: "tx:1", source_file_id: "sf:1" }));
+    insertTransaction(db, tf({ id: "tx:1", source_file_id: "sf-1" }));
     insertTransaction(db, tf({ id: "tx:2", debit_account_id: "thb:expense:transport" }));
     expect(countTransactions(db)).toBe(2);
-    expect(countTransactionsBySourceFile(db, "sf:1")).toBe(1);
+    expect(countTransactionsBySourceFile(db, "sf-1")).toBe(1);
   });
 
   it("edits mutable metadata only", () => {

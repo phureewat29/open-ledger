@@ -189,7 +189,7 @@ describe("registerPendingFile", () => {
 
     const first = registerPendingFile(db, source);
     expect(first.alreadyKnown).toBe(false);
-    expect(first.fileId.startsWith("sf:")).toBe(true);
+    expect(first.fileId.startsWith("sf-")).toBe(true);
     expect(findFileById(db, first.fileId)?.status).toBe("pending");
 
     const second = registerPendingFile(db, source);
@@ -240,7 +240,7 @@ describe("resolveEntryPath", () => {
     }
   });
 
-  it("still resolves a sf: file id", () => {
+  it("still resolves a file id", () => {
     const db = freshDb();
     const path = write("a.pdf", textPdf());
     const { fileId } = registerPendingFile(db, loaded(path));
@@ -249,7 +249,7 @@ describe("resolveEntryPath", () => {
 
   it("returns null for a path or id that matches nothing", () => {
     const db = freshDb();
-    expect(resolveEntryPath(db, dataDir, "sf:does-not-exist")).toBeNull();
+    expect(resolveEntryPath(db, dataDir, "sf-does-not-exist")).toBeNull();
     expect(resolveEntryPath(db, dataDir, "no/such/file.pdf")).toBeNull();
   });
 });

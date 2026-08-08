@@ -343,7 +343,7 @@ describe("ingest commit v2 (subprocess)", () => {
       row({
         date: "2026-04-12",
         description: "Names a file that is not here",
-        source_file_id: "sf:not-here",
+        source_file_id: "sf-not-here",
         amount: 12,
       }),
       row({ date: "2026-04-13", description: "After the throw", amount: 13 }),
@@ -365,7 +365,7 @@ describe("ingest commit v2 (subprocess)", () => {
     const db = readDb();
     db.prepare(
       `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
-    ).run("sf:idem", "/tmp/idem.pdf", "idem-hash", "application/pdf");
+    ).run("sf-idem", "/tmp/idem.pdf", "idem-hash", "application/pdf");
     db.close();
 
     const item = JSON.stringify({
@@ -377,7 +377,7 @@ describe("ingest commit v2 (subprocess)", () => {
       row_index: 0,
     });
 
-    const first = await runCLI(["ingest", "commit", "--file", "sf:idem", "--json"], { stdin: item });
+    const first = await runCLI(["ingest", "commit", "--file", "sf-idem", "--json"], { stdin: item });
     expect(first.code).toBe(0);
     const firstObjs = parseNdjson(first.stdout);
     expect(firstObjs.find((o) => o.type === "result").duplicate).toBe(false);
@@ -385,7 +385,7 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(firstSummary.posted).toBe(1);
     expect(firstSummary.duplicates).toBe(0);
 
-    const second = await runCLI(["ingest", "commit", "--file", "sf:idem", "--json"], { stdin: item });
+    const second = await runCLI(["ingest", "commit", "--file", "sf-idem", "--json"], { stdin: item });
     expect(second.code).toBe(0); // duplicates are a successful no-op
     const secondObjs = parseNdjson(second.stdout);
     const secondResult = secondObjs.find((o) => o.type === "result");
@@ -398,7 +398,7 @@ describe("ingest commit v2 (subprocess)", () => {
 
     const db2 = readDb();
     const n = (
-      db2.prepare("SELECT COUNT(*) AS n FROM transactions WHERE source_file_id = 'sf:idem'").get() as {
+      db2.prepare("SELECT COUNT(*) AS n FROM transactions WHERE source_file_id = 'sf-idem'").get() as {
         n: number;
       }
     ).n;
@@ -412,7 +412,7 @@ describe("ingest commit v2 (subprocess)", () => {
     createAccount(db, { id: "thb:expense:sides-b", name: "Sides B", type: "expense", parent_id: "thb:expense" });
     db.prepare(
       `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
-    ).run("sf:dup-sides", "/tmp/dup-sides.pdf", "dup-sides-hash", "application/pdf");
+    ).run("sf-dup-sides", "/tmp/dup-sides.pdf", "dup-sides-hash", "application/pdf");
     db.close();
 
     const item = JSON.stringify({
@@ -424,7 +424,7 @@ describe("ingest commit v2 (subprocess)", () => {
       row_index: 0,
     });
 
-    const first = await runCLI(["ingest", "commit", "--file", "sf:dup-sides", "--json"], { stdin: item });
+    const first = await runCLI(["ingest", "commit", "--file", "sf-dup-sides", "--json"], { stdin: item });
     expect(first.code).toBe(0);
     expect(parseNdjson(first.stdout).find((o) => o.type === "result").sides[0]).toEqual({
       side: "debit",
@@ -446,7 +446,7 @@ describe("ingest commit v2 (subprocess)", () => {
     expect(moved.code).toBe(0);
     expect(parseNdjson(moved.stdout)[0].affected).toBe(1);
 
-    const second = await runCLI(["ingest", "commit", "--file", "sf:dup-sides", "--json"], { stdin: item });
+    const second = await runCLI(["ingest", "commit", "--file", "sf-dup-sides", "--json"], { stdin: item });
     expect(second.code).toBe(0);
     const result = parseNdjson(second.stdout).find((o) => o.type === "result");
     expect(result.duplicate).toBe(true);
@@ -742,7 +742,7 @@ describe("ingest prepare (subprocess)", () => {
     // password and must fail, leaving the prior row intact.
     const source = loadSource(path);
     if (!source.ok) throw new Error(source.message);
-    const fileId = "sf:force-locked";
+    const fileId = "sf-force-locked";
     const db = readDb();
     db.prepare(
       `INSERT INTO files (id, path, file_hash, mime, status) VALUES (?, ?, ?, ?, 'pending')`,
@@ -876,7 +876,7 @@ describe("the pipeline tells an agent what is unfinished (subprocess)", () => {
   }, 30000);
 
   it("the commit summary names the file it left pending and the command that closes it", async () => {
-    const fileId = "sf:pending-hint";
+    const fileId = "sf-pending-hint";
     const db = readDb();
     try {
       db.prepare(
@@ -953,10 +953,10 @@ describe("ingest done reconciliation (subprocess)", () => {
     try {
       writeConfig(box, {});
       const run = makeRunCLI(box);
-      await seedStatement(box, run, "sf:card", "thb", cardRows);
+      await seedStatement(box, run, "sf-card", "thb", cardRows);
 
       const { stdout, code } = await run([
-        "ingest", "done", "sf:card",
+        "ingest", "done", "sf-card",
         "--account", "thb:liability:card", "--closing-balance", "200", "--json",
       ]);
       expect(code).toBe(0);
@@ -974,13 +974,13 @@ describe("ingest done reconciliation (subprocess)", () => {
     try {
       writeConfig(box, {});
       const run = makeRunCLI(box);
-      await seedStatement(box, run, "sf:bank", "thb", [
+      await seedStatement(box, run, "sf-bank", "thb", [
         { debit_account: "thb:asset:bank", credit_account: "thb:income:salary", amount: 5000 },
         { debit_account: "thb:expense:food", credit_account: "thb:asset:bank", amount: 1200 },
       ]);
 
       const { stdout, code } = await run([
-        "ingest", "done", "sf:bank",
+        "ingest", "done", "sf-bank",
         "--account", "thb:asset:bank", "--closing-balance", "3800", "--json",
       ]);
       expect(code).toBe(0);
@@ -996,13 +996,13 @@ describe("ingest done reconciliation (subprocess)", () => {
       writeConfig(box, {});
       const run = makeRunCLI(box);
       // 0.1 + 0.2 !== 0.3 as doubles; as satang, 10 + 20 === 30.
-      await seedStatement(box, run, "sf:exact", "thb", [
+      await seedStatement(box, run, "sf-exact", "thb", [
         { debit_account: "thb:expense:food", credit_account: "thb:liability:card", amount: 0.1 },
         { debit_account: "thb:expense:food", credit_account: "thb:liability:card", amount: 0.2 },
       ]);
 
       const { stdout, code } = await run([
-        "ingest", "done", "sf:exact",
+        "ingest", "done", "sf-exact",
         "--account", "thb:liability:card", "--closing-balance", "0.3", "--json",
       ]);
       expect(code).toBe(0);
@@ -1017,11 +1017,11 @@ describe("ingest done reconciliation (subprocess)", () => {
     try {
       writeConfig(box, {});
       const run = makeRunCLI(box);
-      await seedStatement(box, run, "sf:bad", "thb", cardRows);
+      await seedStatement(box, run, "sf-bad", "thb", cardRows);
 
       // One satang out: a misread amount is exactly this shape.
       const { stderr, code } = await run([
-        "ingest", "done", "sf:bad",
+        "ingest", "done", "sf-bad",
         "--account", "thb:liability:card", "--closing-balance", "200.01", "--json",
       ]);
       expect(code).toBe(6);
@@ -1031,7 +1031,7 @@ describe("ingest done reconciliation (subprocess)", () => {
       expect(error.hint).toContain("opening balance");
 
       const listed = await run(["files", "list", "--json"]);
-      expect(parseNdjson(listed.stdout).find((o) => o.id === "sf:bad").status).toBe("pending");
+      expect(parseNdjson(listed.stdout).find((o) => o.id === "sf-bad").status).toBe("pending");
     } finally {
       box.cleanup();
     }
@@ -1042,12 +1042,12 @@ describe("ingest done reconciliation (subprocess)", () => {
     try {
       writeConfig(box, { displayCurrency: "JPY", displayLocale: "ja-JP" });
       const run = makeRunCLI(box);
-      await seedStatement(box, run, "sf:jpy", "jpy", [
+      await seedStatement(box, run, "sf-jpy", "jpy", [
         { debit_account: "jpy:expense:food", credit_account: "jpy:liability:card", amount: 1500 },
       ]);
 
       const { stderr, code } = await run([
-        "ingest", "done", "sf:jpy",
+        "ingest", "done", "sf-jpy",
         "--account", "jpy:liability:card", "--closing-balance", "1501", "--json",
       ]);
       expect(code).toBe(6);
@@ -1066,14 +1066,14 @@ describe("ingest done reconciliation (subprocess)", () => {
     try {
       writeConfig(box, {});
       const run = makeRunCLI(box);
-      await seedStatement(box, run, "sf:flags", "thb", cardRows);
+      await seedStatement(box, run, "sf-flags", "thb", cardRows);
 
       // Arity is checked before the ledger opens, so a bogus id is not what fails.
-      const partial = await run(["ingest", "done", "sf:nope", "--closing-balance", "200", "--json"]);
+      const partial = await run(["ingest", "done", "sf-nope", "--closing-balance", "200", "--json"]);
       expect(partial.code).toBe(2);
       expect(JSON.parse(partial.stderr.trim()).error.code).toBe("E_USAGE");
 
-      const plain = await run(["ingest", "done", "sf:flags", "--json"]);
+      const plain = await run(["ingest", "done", "sf-flags", "--json"]);
       expect(plain.code).toBe(0);
       const out = parseOne(plain.stdout);
       expect(out.status).toBe("ingested");
@@ -1086,7 +1086,7 @@ describe("ingest done reconciliation (subprocess)", () => {
 
 describe("ingest fail (subprocess)", () => {
   it("purges the file's raster cache and reports cache_removed", async () => {
-    const fileId = "sf:cache-test";
+    const fileId = "sf-cache-test";
     const db = readDb();
     try {
       db.prepare(

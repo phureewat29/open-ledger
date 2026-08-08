@@ -26,7 +26,7 @@ function seedAccountsAndFile(db: Database.Database): void {
     parent_id: "thb:equity",
   });
   db.prepare(
-    `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf:1','/f.pdf','h1','application/pdf','ingested')`,
+    `INSERT INTO files (id, path, file_hash, mime, status) VALUES ('sf-1','/f.pdf','h1','application/pdf','ingested')`,
   ).run();
 }
 
@@ -37,7 +37,7 @@ function tf(over: Partial<TransactionInput>): TransactionInput {
     debit_account_id: "thb:expense:food",
     credit_account_id: "thb:asset:cash",
     amount: 15000,
-    source_file_id: "sf:1",
+    source_file_id: "sf-1",
     ...over,
   };
 }

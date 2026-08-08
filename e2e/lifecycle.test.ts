@@ -183,7 +183,7 @@ describe("lifecycle against a local ledger (dist subprocess)", () => {
       const result = parseOne(res.stdout);
       // page_count is pinned to the generated fixture, not to prepare's paging.
       expect(result).toMatchObject({ page_count: FIXTURE_PAGES, kind: "text" });
-      expect(result.file_id).toMatch(/^sf:/);
+      expect(result.file_id).toMatch(/^sf-/);
       expect(result.document).toBe(join(sandbox.cacheDir, result.file_id, "document.txt"));
       expect(existsSync(result.document)).toBe(true);
       fileId = result.file_id;
