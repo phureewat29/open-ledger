@@ -11,6 +11,7 @@ import {
   type OpenLedgerConfig,
   type ResolvedConfig,
 } from "../../config.js";
+import { expandHome } from "../../lib/path.js";
 import { findCountryDefaults, availableCountries } from "../../datasets/defaults.js";
 import { createContextTemplate } from "../../context.js";
 import { typhoonModelCard } from "../../extract/cards/typhoon-ocr1.5.js";
@@ -151,9 +152,10 @@ function resolveConvergedConfig(flags: SettingFlags, loaded: LoadedConfig): Conv
 
   return {
     country: defaults.country,
-    dataDir: flags.data_dir ?? current.dataDir,
-    dbPath: flags.db ?? current.dbPath,
-    cacheDir: flags.cache_dir ?? current.cacheDir,
+    // Windows shells pass `~` through literally; unexpanded it would mkdir and persist a `~` dir under the cwd.
+    dataDir: expandHome(flags.data_dir ?? current.dataDir),
+    dbPath: expandHome(flags.db ?? current.dbPath),
+    cacheDir: expandHome(flags.cache_dir ?? current.cacheDir),
     displayLocale: flags.locale || persisted.displayLocale || defaults.locale,
     displayCurrency: flags.currency || persisted.displayCurrency || defaults.currency,
     userName: flags.user_name ?? current.userName,
@@ -256,7 +258,7 @@ export function registerConfig(program: Command): void {
     .option("--country <code>", "country whose reference data applies; also seeds locale/currency (default: TH)")
     .option("--user-name <name>", "your name; config shows it and redaction masks it")
     .option("--ocr-base-url <url>", "OCR endpoint base URL, e.g. http://127.0.0.1:1234/v1; OCR is off until this is set")
-    .option("--ocr-model <id>", `model id sent to the OCR endpoint (default ${typhoonModelCard.model}); does nothing until --ocr-base-url is set`)
+    .option("--ocr-model <id>", `model id, or a varaint of it (default ${typhoonModelCard.model}); does nothing until --ocr-base-url is set`)
     .option("--ocr-api-key <key>", 'API key for the OCR endpoint; saved to the config file (0600), shown only as a fingerprint; "" clears it')
     .addHelpText(
       "after",

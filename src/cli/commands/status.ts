@@ -12,20 +12,13 @@ import { countTransactions } from "../../db/queries/transactions.js";
 import { countNewFiles } from "../../ingest/prepare.js";
 import { applyRedaction } from "../../privacy/redactor.js";
 import { existsSync } from "fs";
-import { homedir } from "os";
-import { sep } from "path";
+import { homeRelative } from "../../lib/path.js";
 import { formatAmount, toDecimalTotals } from "../currency.js";
 import { banner, visibleLength, ANSI_RE, formatInt } from "../format.js";
 import { currentMode, emit, redactionEnabled, runAction } from "../output.js";
 import { tryExecute } from "../../lib/result.js";
 import { lenientConfig } from "./config.js";
 import { openDb } from "../db.js";
-
-// Error prose passes through unchanged, so this is safe on any field.
-function homeRelative(p: string): string {
-  const prefix = homedir() + sep;
-  return p.startsWith(prefix) ? "~" + sep + p.slice(prefix.length) : p;
-}
 
 interface Counts {
   accounts: number;

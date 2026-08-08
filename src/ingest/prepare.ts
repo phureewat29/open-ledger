@@ -287,9 +287,12 @@ interface WriteTarget {
   sourcePath: string;
 }
 
+/** Retries absorb the transient EBUSY/EPERM thrown while a Windows scanner briefly holds a fresh artifact. */
+const RM_OPTS = { recursive: true, force: true, maxRetries: 3 } as const;
+
 /** Rebuilt per prepare, so a prior run's artifacts can never be mistaken for this one's. */
 function freshDir(dir: string): void {
-  rmSync(dir, { recursive: true, force: true });
+  rmSync(dir, RM_OPTS);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
@@ -330,7 +333,7 @@ function writePages(
 
   // An untouched image is read where it lies; only a prior run's artifacts could be there to mislead.
   if (extraction.source === "original") {
-    rmSync(target.dir, { recursive: true, force: true });
+    rmSync(target.dir, RM_OPTS);
     const pages = extraction.pages.map((page) => ({ page: page.page, path: target.sourcePath }));
     return { ...head, pages };
   }
@@ -401,12 +404,12 @@ export function cleanCache(cacheDir: string, fileId?: string): { removed: string
   if (fileId) {
     const dir = resolve(cacheDir, fileId);
     if (!existsSync(dir)) return { removed: [] };
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, RM_OPTS);
     return { removed: [dir] };
   }
 
   if (!existsSync(cacheDir)) return { removed: [] };
   const removed = readdirSync(cacheDir).map((name) => resolve(cacheDir, name));
-  rmSync(cacheDir, { recursive: true, force: true });
+  rmSync(cacheDir, RM_OPTS);
   return { removed };
 }

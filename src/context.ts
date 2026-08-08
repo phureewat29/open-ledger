@@ -1,12 +1,14 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { tryExecute } from "./lib/result.js";
+import { decodeUserText } from "./lib/text.js";
 import { chmod600 } from "./perms.js";
 
 export function readContext(contextPath: string): string {
   if (!existsSync(contextPath)) return "";
-  const result = tryExecute(() => readFileSync(contextPath, "utf-8"));
-  return result.ok ? result.value : "";
+  const result = tryExecute(() => decodeUserText(readFileSync(contextPath)));
+  // A Windows editor's CRLF would break the redactor's `\n`-anchored sections and silently skip PII.
+  return result.ok ? result.value.replace(/\r\n/g, "\n") : "";
 }
 
 function writeContext(contextPath: string, content: string): void {

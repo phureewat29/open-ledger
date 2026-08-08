@@ -3,6 +3,7 @@ import { omit } from "es-toolkit";
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { visibleLength, ANSI_RE } from "./format.js";
+import { decodeUserText } from "../lib/text.js";
 import { ValidationError } from "../lib/validate.js";
 import { errorMessage } from "../lib/result.js";
 import { DBNotReadyError } from "../db/errors.js";
@@ -196,7 +197,7 @@ async function readStdinToEnd(): Promise<string> {
   for await (const chunk of process.stdin) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return decodeUserText(Buffer.concat(chunks));
 }
 
 // Auto-detects a JSON array (leading `[`) vs NDJSON; row validation is the caller's job.
@@ -205,7 +206,7 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   let source: string;
   if (inputPath) {
     try {
-      source = readFileSync(inputPath, "utf8");
+      source = decodeUserText(readFileSync(inputPath));
     } catch (err) {
       fail("NOT_FOUND", `cannot read --input file: ${(err as Error).message}`, {
         hint: "pass a readable NDJSON (or JSON array) file path",
@@ -214,8 +215,7 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
   } else {
     source = await readStdinToEnd();
   }
-  const raw = source.replace(/^\uFEFF/, "");
-  const firstNonWs = raw.match(/\S/);
+  const firstNonWs = source.match(/\S/);
   if (!firstNonWs)
     fail("USAGE", `${from}: no rows`, {
       hint: "pass NDJSON rows via --input <file> or pipe them on stdin",
@@ -223,14 +223,14 @@ export async function readStdinBatch(inputPath?: string): Promise<unknown[]> {
 
   if (firstNonWs[0] === "[") {
     try {
-      return JSON.parse(raw) as unknown[];
+      return JSON.parse(source) as unknown[];
     } catch (err) {
       fail("USAGE", `${from}: invalid JSON array: ${(err as Error).message}`);
     }
   }
 
   const out: unknown[] = [];
-  const lines = raw.split(/\r?\n/);
+  const lines = source.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;

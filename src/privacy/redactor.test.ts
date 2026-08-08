@@ -129,4 +129,15 @@ describe("applyRedaction (field allowlisting)", () => {
     expect(row.memo).toBe("0812345678");
     expect(out.memo).toBe("[PHONE]");
   });
+
+  it("reads sections from a CRLF context.md (Windows line endings)", () => {
+    const contextPath = resolve(dir, "context-crlf.md");
+    writeFileSync(
+      contextPath,
+      "## Family\r\n- Partner: Corgi\r\n\r\n## Income\r\n- 80,000 THB/month from Zentry Thailand Co.\r\n",
+    );
+    const source = { userName: "Alpaca Beagle", contextPath };
+    const out = applyRedaction({ text: "Corgi paid Zentry Thailand Co." }, true, ["text"], source);
+    expect(out.text).toBe("[PARTNER] paid [EMPLOYER]");
+  });
 });

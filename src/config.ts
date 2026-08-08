@@ -3,6 +3,8 @@ import { createHash } from "crypto";
 import { dirname, resolve } from "path";
 import { homedir } from "os";
 import { typhoonModelCard } from "./extract/cards/typhoon-ocr1.5.js";
+import { expandHome } from "./lib/path.js";
+import { decodeUserText } from "./lib/text.js";
 import { chmod600 } from "./perms.js";
 
 export interface OpenLedgerConfig {
@@ -42,12 +44,6 @@ function defaultOledDir(): string {
 
 function defaultConfigPath(): string {
   return resolve(defaultOledDir(), "config.json");
-}
-
-/** `~` is the shell's expansion, not Node's, so a quoted `~/x` would otherwise
- *  resolve under the working directory. Keeps `status`'s home-relative paths usable as input. */
-function expandHome(path: string): string {
-  return path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
 }
 
 /** Also the persisted-key list: unknown keys on disk are tolerated on read, dropped on next write (`saveConfig` writes only these fields). */
@@ -99,7 +95,7 @@ function readFileValues(configPath: string): {
   if (!existsSync(configPath)) return { fileValues: {}, problem: null, exists: false };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+    parsed = JSON.parse(decodeUserText(readFileSync(configPath)));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { fileValues: {}, problem: message, exists: true };
@@ -110,12 +106,16 @@ function readFileValues(configPath: string): {
   return { fileValues: pickConfigFields(parsed), problem: null, exists: true };
 }
 
+/** Fields naming filesystem locations: `~/x` in any of them must expand, not resolve under the cwd. */
+const PATH_FIELDS = ["dbPath", "dataDir", "cacheDir"] as const;
+
 /** Precedence: file > default. `||`, not `??`, so an empty-string value means unset. */
 function withDefaults(fileValues: Partial<OpenLedgerConfig>): OpenLedgerConfig {
   const out = {} as OpenLedgerConfig;
   for (const key of CONFIG_KEYS) {
     out[key] = fileValues[key] || CONFIG_FIELDS[key].default();
   }
+  for (const key of PATH_FIELDS) out[key] = expandHome(out[key]);
   return out;
 }
 
