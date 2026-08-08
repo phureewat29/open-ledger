@@ -18,7 +18,7 @@ const ERROR_BODY_CHARS = 200;
 export interface OCRSettings {
   /** Includes the version segment, no trailing slash: `http://127.0.0.1:1234/v1`. */
   baseUrl: string;
-  /** `ocrModel` when set, otherwise the default model card's own model. */
+  /** `ocrModel` when set, otherwise the default model card's own model; `resolveServedModel` re-spells it to the served id. */
   model: string;
   /** `""` when the endpoint needs no auth (the local case). */
   apiKey: string;
@@ -175,7 +175,7 @@ export async function ocrPages(
   return outcomes;
 }
 
-/** Diagnostic only: the model ids the endpoint serves. */
+/** The model ids the endpoint serves. */
 export async function probeOcrEndpoint(settings: OCRSettings): Promise<Result<string[]>> {
   const response = await tryExecute(async () => {
     const res = await fetch(`${settings.baseUrl}/models`, {
@@ -192,4 +192,29 @@ export async function probeOcrEndpoint(settings: OCRSettings): Promise<Result<st
     return { ok: false, error: `unexpected /models response: ${z.prettifyError(parsed.error)}` };
   }
   return { ok: true, value: parsed.data.data.map((model) => model.id) };
+}
+
+/** The served id the configured id selects: exact spelling first, else the first id containing it, case-insensitive. */
+export function pickServedModel(configured: string, served: readonly string[]): string | null {
+  if (!configured) return null;
+  if (served.includes(configured)) return configured;
+  const wanted = configured.toLowerCase();
+  return served.find((id) => id.toLowerCase().includes(wanted)) ?? null;
+}
+
+/** Re-spells `model` to the id the endpoint serves and re-reads the card from it; unreachable or unmatched keeps the configured settings, the server stays the authority. */
+export async function resolveServedModel(settings: OCRSettings): Promise<OCRSettings> {
+  const served = await probeOcrEndpoint(settings);
+  if (!served.ok) return settings;
+  const match = pickServedModel(settings.model, served.value);
+  if (!match || match === settings.model) return settings;
+  const { name, card } = modelCardFor(match);
+  return {
+    ...settings,
+    model: match,
+    modelCard: name,
+    prompt: card.prompt,
+    params: card.params,
+    render: card.render,
+  };
 }

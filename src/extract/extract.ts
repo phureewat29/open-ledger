@@ -2,6 +2,7 @@ import type { Result } from "../lib/result.js";
 import {
   isServerFailure,
   ocrPages,
+  resolveServedModel,
   type OCRPageOutcome,
   type OCRSettings,
   type ServerFailure,
@@ -158,9 +159,11 @@ export async function extractFile(
     };
   }
 
-  const images = await pageImages(input, ocr ? ocr.render : PAGE_RENDER);
+  // Resolved before rendering: the served id picks the card, and the card carries the render spec.
+  const resolved = ocr ? await resolveServedModel(ocr) : null;
+  const images = await pageImages(input, resolved ? resolved.render : PAGE_RENDER);
   if (!images.ok) return { ok: false, reason: "pdf_unreadable", message: images.error };
   // The "agent" arm: `readerFor` only returns it with no endpoint configured.
-  if (!ocr) return { ok: true, value: { kind: "images", textLayer, ...images.value } };
-  return ocrExtraction(await ocrPages(images.value.pages, ocr), ocr, textLayer);
+  if (!resolved) return { ok: true, value: { kind: "images", textLayer, ...images.value } };
+  return ocrExtraction(await ocrPages(images.value.pages, resolved), resolved, textLayer);
 }

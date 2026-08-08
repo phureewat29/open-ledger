@@ -50,7 +50,7 @@ This repo supports [Agent Plugins](https://agent-plugins.org) package, so compli
    Configure OpenLedger to use my local OCR at http://localhost:1234/v1 (model typhoon-ocr1.5), then run `oled doctor` to confirm.
    ```
 
-   Name the model as the server spells it. Only scans and photos need OCR; PDFs with a text layer are read directly.
+   Any variant works, 2B or 3B, GGUF or not: the CLI matches `typhoon-ocr1.5` to the id the server serves. Only scans and photos need OCR; PDFs with a text layer are read directly.
 
 3. Add the skill:
 
@@ -140,7 +140,7 @@ Each property is set with an `oled config` flag and read back with bare `oled co
 | `cacheDir` | `--cache-dir` | Extracted text and page image cache | `~/.oled/cache` |
 | `userName` | `--user-name` | Your name; redaction masks it | `User` |
 | `ocrBaseUrl` | `--ocr-base-url` | Base URL of an OpenAI-compatible OCR endpoint, version segment included; OCR is off until this is set | unset (OCR off) |
-| `ocrModel` | `--ocr-model` | Model id, spelled as the endpoint serves it. A typhoon-family id selects the tuned prompt and page rendering; any other id is sent with the generic settings | `typhoon-ocr1.5` |
+| `ocrModel` | `--ocr-model` | Model id, or any fragment of it; matched case-insensitively against the ids the endpoint serves, so `typhoon-ocr1.5` covers all 2b, 3b variant. | `typhoon-ocr1.5` |
 | `ocrApiKey` | `--ocr-api-key` | OCR endpoint API key; shown only as a fingerprint | unset |
 
 [`.env.example`](./.env.example) documents build-and-test variables only; the CLI reads no environment configuration.

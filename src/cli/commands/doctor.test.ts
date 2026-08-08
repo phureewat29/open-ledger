@@ -60,4 +60,21 @@ describe.skipIf(!liveOcr)("ocrEndpointCheck (live OCR endpoint)", () => {
     },
     30_000,
   );
+
+  it(
+    "resolves a family-level id to the served spelling and shows the re-spelling",
+    async () => {
+      const served = await probeOcrEndpoint(requireLiveOcr());
+      expect(served.ok).toBe(true);
+      if (!served.ok) return;
+      const servedId = served.value[0];
+
+      const check = await ocrEndpointCheck(
+        ocrSource({ ...requireLiveOcrSource(), ocrModel: servedId.slice(0, -1) }),
+      );
+      expect(check.ok).toBe(true);
+      expect(check.detail).toContain(`→ ${servedId}`);
+    },
+    30_000,
+  );
 });

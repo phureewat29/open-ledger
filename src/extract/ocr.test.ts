@@ -4,11 +4,13 @@ import {
   isServerFailure,
   ocrPage,
   ocrPages,
+  pickServedModel,
   probeOcrEndpoint,
   resolveOcr,
+  resolveServedModel,
   type OCRConfigSource,
 } from "./ocr.js";
-import { MODEL_CARDS, MODEL_CARD_NAMES } from "./cards/index.js";
+import { MODEL_CARDS, MODEL_CARD_NAMES, modelCardFor } from "./cards/index.js";
 import type { PageImage } from "./pdf.js";
 import { samplePng } from "../../fixtures/images.js";
 import {
@@ -129,6 +131,45 @@ describe("probeOcrEndpoint", () => {
   });
 });
 
+describe("pickServedModel", () => {
+  const model = TYPHOON.model;
+
+  it("prefers the exact spelling over a variant listed first", () => {
+    expect(pickServedModel(model, [`${model}-2b`, model])).toBe(model);
+  });
+
+  // Suffix shapes come from real servers; the base id comes from the registry.
+  it.each([
+    ["a size suffix", `${model}-2b`],
+    ["a size and format suffix", `${model}-3b-gguf`],
+    ["a quantization tag", `${model}-2b@q4_k_m`],
+    ["an org prefix", `org/${model}-2b`],
+    ["the server's own casing", model.toUpperCase()],
+  ])("matches a served id carrying %s", (_variant, served) => {
+    expect(pickServedModel(model, ["other-model", served])).toBe(served);
+  });
+
+  it("takes the first served variant when several match", () => {
+    expect(pickServedModel(model, [`${model}-2b`, `${model}-3b`])).toBe(`${model}-2b`);
+  });
+
+  it("matches nothing when no served id contains the configured one", () => {
+    expect(pickServedModel(model, ["other-model"])).toBeNull();
+    expect(pickServedModel(model, [])).toBeNull();
+  });
+
+  it("matches nothing from an empty id instead of everything", () => {
+    expect(pickServedModel("", [model])).toBeNull();
+  });
+});
+
+describe("resolveServedModel", () => {
+  it("keeps the configured id when the endpoint is unreachable", async () => {
+    const settings = deadOcrSettings();
+    expect(await resolveServedModel(settings)).toEqual(settings);
+  });
+});
+
 describe.skipIf(!liveOcr)("ocrPages and probeOcrEndpoint (live OCR endpoint)", () => {
   it(
     "reads every page in order and returns one outcome per page",
@@ -150,6 +191,28 @@ describe.skipIf(!liveOcr)("ocrPages and probeOcrEndpoint (live OCR endpoint)", (
       if (!result.ok) return;
       expect(result.value.length).toBeGreaterThan(0);
       expect(result.value.every((id) => typeof id === "string")).toBe(true);
+    },
+    30_000,
+  );
+
+  it(
+    "re-spells a family-level id to the served spelling and re-reads the card from it",
+    async () => {
+      const live = requireLiveOcr();
+      const served = await probeOcrEndpoint(live);
+      expect(served.ok).toBe(true);
+      if (!served.ok) return;
+      const servedId = served.value[0];
+
+      const resolved = await resolveServedModel({ ...live, model: servedId.slice(0, -1) });
+      const { name, card } = modelCardFor(servedId);
+      expect(resolved).toMatchObject({
+        model: servedId,
+        modelCard: name,
+        prompt: card.prompt,
+        params: card.params,
+        render: card.render,
+      });
     },
     30_000,
   );

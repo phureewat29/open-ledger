@@ -13,7 +13,12 @@ import { getVersion } from "../../setup/install.js";
 import { SKILL_DIRS, SKILL_PACK_DIR } from "../../setup/locations.js";
 import { EXIT, currentMode, emit, emitList, runAction, type Column } from "../output.js";
 import { errorMessage } from "../../lib/result.js";
-import { probeOcrEndpoint, resolveOcr, type OCRConfigSource } from "../../extract/ocr.js";
+import {
+  pickServedModel,
+  probeOcrEndpoint,
+  resolveOcr,
+  type OCRConfigSource,
+} from "../../extract/ocr.js";
 
 interface Check {
   name: string;
@@ -104,14 +109,16 @@ export async function ocrEndpointCheck(source: OCRConfigSource): Promise<Check> 
   const { baseUrl, model } = settings;
   const served = await probeOcrEndpoint(settings);
   if (!served.ok) return { name, ok: false, detail: `${baseUrl}: ${served.error}` };
-  if (!served.value.includes(model)) {
+  const match = pickServedModel(model, served.value);
+  if (!match) {
     return {
       name,
       ok: false,
       detail: `${baseUrl} does not serve ${model} (serving: ${served.value.join(", ") || "nothing"})`,
     };
   }
-  return { name, ok: true, detail: `${model} at ${baseUrl}` };
+  const shown = match === model ? model : `${model} → ${match}`;
+  return { name, ok: true, detail: `${shown} at ${baseUrl}` };
 }
 
 async function runChecks(loaded: LoadedConfig): Promise<Check[]> {
