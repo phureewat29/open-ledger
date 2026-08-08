@@ -30,7 +30,7 @@ OpenLedger is a secure bookkeeping harness for your AI. The source is what you a
 
 Everything stays on your machine, and what the harness returns to your AI has PII redacted by default before it reaches your AI provider. No bank logins, no bank API keys, no cloud aggregator needed, just the bank documents you already have as the source of truth. It is your own private Plaid: scattered statements go in, a reliable ledger comes out, a data feed you own end to end.
 
-The harness carries the bookkeeping, so the model doesn't have to be huge: the smallest model benchmarked, at 26B, runs a full statement through cleanly.
+The harness carries the bookkeeping, so the model doesn't have to be huge: flash-tier models for everyday-use, can run a full loop through cleanly.
 
 By using this harness, your AI can build the app you never found: a budget tracker that fits your lifestyle, a subscription auditor, a retirement planner, a personal money coach. Your finance app is now yours to reimagine.
 
